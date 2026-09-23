@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     linkedin_client_secret: str | None = None
     linkedin_api_base_url: str | None = None
     api_base_url: str | None = None
+    linkedin_redirect_uri: str | None = None
 
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.8-flash"
