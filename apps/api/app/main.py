@@ -3,7 +3,8 @@ import os
 import sqlite3
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request\nfrom fastapi.responses import RedirectResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict
@@ -21,7 +22,8 @@ from app.integrations.linkedin import MockLinkedInAdapter, OfficialLinkedInAdapt
 from app.models.base import Base
 from app.models.models import ContentItem, ContentVersion, LinkedInConnection, UserProfile, VoiceMemory
 from app.services.approval import ApprovalService
-from app.services.auth_service import AuthService\nfrom app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback
+from app.services.auth_service import AuthService
+from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback
 
 
 def _resolve_sqlite_path() -> str | None:
