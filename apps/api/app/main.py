@@ -460,13 +460,14 @@ async def regenerate_approval(
 @app.post("/api/approvals/{approval_id}/execute")
 async def execute(
     approval_id: int,
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     session: AsyncSession = Depends(get_session),
     _: str = Depends(require_roles("admin", "owner")),
 ):
     try:
         user = await AuthService.get_user_from_token(
             session,
-            _.split(":", 1)[1] if isinstance(_, str) and ":" in _ else _,
+            credentials.credentials if credentials else None,
         )
         if user is None:
             raise ValueError("Authentication required.")
