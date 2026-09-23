@@ -53,6 +53,7 @@ export default function Home() {
   const [brandTone, setBrandTone] = useState('');
   const [brandGoals, setBrandGoals] = useState('');
   const [historicalPosts, setHistoricalPosts] = useState('');
+  const [historicalPostEntries, setHistoricalPostEntries] = useState<string[]>(['']);
   const [isBuildingBrand, setIsBuildingBrand] = useState(false);
   const [queue, setQueue] = useState<ApprovalItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -249,9 +250,30 @@ export default function Home() {
     }
   };
 
+  const updateHistoricalPost = (index: number, value: string) => {
+    setHistoricalPostEntries((current) => current.map((post, i) => i === index ? value : post));
+  };
+
+  const addHistoricalPost = () => {
+    setHistoricalPostEntries((current) => current.length >= 20 ? current : [...current, '']);
+  };
+
+  const removeHistoricalPost = (index: number) => {
+    setHistoricalPostEntries((current) => current.length <= 1 ? current : current.filter((_, i) => i !== index));
+  };
+
   const buildBrand = async () => {
     if (!token) return;
-    const blocks = historicalPosts.split(/\n---POST---\n|\n---POST---\r?\n/).map((body) => body.trim()).filter(Boolean);
+    const blocks = historicalPostEntries.map((body) => body.trim()).filter(Boolean);
+    if (blocks.length < 3) {
+      setError('Please add at least 3 previous LinkedIn posts before building Brand Intelligence.');
+      return;
+    }
+    if (blocks.length > 20) {
+      setError('You can add a maximum of 20 previous LinkedIn posts.');
+      return;
+    }
+
     setIsBuildingBrand(true); setError(null); setNotice(null);
     try {
       const res = await fetch(API_BASE + '/api/brand/onboard', {
@@ -272,9 +294,8 @@ export default function Home() {
       if (!res.ok) throw new Error(getApiError(data, 'Brand Intelligence setup failed'));
       setBrand({ ...data.brand_memory, ready: data.brand_memory?.status === 'READY' });
       setHistoricalPosts('');
-      setNotice(blocks.length
-        ? 'Brand Intelligence initialized using your profile plus ' + blocks.length + ' imported post' + (blocks.length === 1 ? '' : 's') + '. It will continue learning from new Brand OS activity.'
-        : 'Brand Intelligence initialized from your professional profile. Historical posts remain optional and can be added later.');
+      setHistoricalPostEntries(['']);
+      setNotice('Brand Intelligence initialized using your profile plus ' + blocks.length + ' imported posts. New Brand OS content will continue enriching the memory.');
       await fetchData();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Brand Intelligence setup failed');
@@ -498,16 +519,57 @@ export default function Home() {
           </div>
 
           <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>
-            <details>
-              <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Optional: improve initial voice learning with previous posts</summary>
-              <p style={{ color: '#667085', fontSize: 13, lineHeight: 1.55, marginBottom: 12 }}>
-                This is optional. Paste a few previous posts if you want a stronger initial writing signal. They are stored as private brand evidence. Brand OS does not scrape LinkedIn.
-              </p>
-              <textarea value={historicalPosts} onChange={(e) => setHistoricalPosts(e.target.value)} placeholder={'Post 1...\n\n---POST---\n\nPost 2...'} style={{ width: '100%', minHeight: 240, padding: 14, border: '1px solid #d0d5dd', borderRadius: 10, boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.5 }} />
-              <div style={{ marginTop: 10, color: '#667085', fontSize: 13 }}>
-                {historicalPosts.split(/\n---POST---\n|\n---POST---\r?\n/).filter((x) => x.trim()).length} posts ready to import
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+              <div>
+                <h3 style={{ marginTop: 0, marginBottom: 6 }}>2. Import your previous LinkedIn posts</h3>
+                <p style={{ color: '#667085', fontSize: 13, lineHeight: 1.55, marginTop: 0, marginBottom: 0 }}>
+                  Add at least <b>3 posts</b> so Brand OS can learn your real writing style and recurring themes. You can add up to <b>20 posts</b>.
+                </p>
               </div>
-            </details>
+              <span style={{ padding: '6px 10px', borderRadius: 999, background: historicalPostEntries.filter((x) => x.trim()).length >= 3 ? '#ecfdf3' : '#fff4e5', color: historicalPostEntries.filter((x) => x.trim()).length >= 3 ? '#067647' : '#b54708', fontSize: 12, fontWeight: 700 }}>
+                {historicalPostEntries.filter((x) => x.trim()).length}/20 posts
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gap: 14, marginTop: 18 }}>
+              {historicalPostEntries.map((post, index) => (
+                <div key={index} style={{ border: '1px solid #d0d5dd', borderRadius: 10, padding: 14, background: '#fcfcfd' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <label style={{ fontWeight: 700, fontSize: 14 }}>Post {index + 1}</label>
+                    {historicalPostEntries.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeHistoricalPost(index)}
+                        style={{ border: 0, background: 'transparent', color: '#b42318', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  <textarea
+                    value={post}
+                    onChange={(e) => updateHistoricalPost(index, e.target.value)}
+                    placeholder={'Paste the complete text of LinkedIn post ' + (index + 1) + ' here…'}
+                    style={{ width: '100%', minHeight: 150, padding: 12, border: '1px solid #d0d5dd', borderRadius: 8, boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.5, resize: 'vertical' }}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={addHistoricalPost}
+              disabled={historicalPostEntries.length >= 20}
+              style={{ marginTop: 14, padding: '10px 14px', border: '1px solid #98a2b3', borderRadius: 8, background: '#fff', color: '#344054', cursor: historicalPostEntries.length >= 20 ? 'not-allowed' : 'pointer', fontWeight: 700 }}
+            >
+              {historicalPostEntries.length >= 20 ? 'Maximum of 20 posts reached' : '+ Add Post ' + (historicalPostEntries.length + 1)}
+            </button>
+
+            <div style={{ marginTop: 12, color: historicalPostEntries.filter((x) => x.trim()).length >= 3 ? '#067647' : '#b54708', fontSize: 13, fontWeight: 600 }}>
+              {historicalPostEntries.filter((x) => x.trim()).length >= 3
+                ? 'Minimum requirement met. You can add more posts or build Brand Intelligence now.'
+                : 'Add ' + (3 - historicalPostEntries.filter((x) => x.trim()).length) + ' more post' + (3 - historicalPostEntries.filter((x) => x.trim()).length === 1 ? '' : 's') + ' to continue.'}
+            </div>
           </div>
 
           <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>
