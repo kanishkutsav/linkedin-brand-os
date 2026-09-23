@@ -518,7 +518,7 @@ export default function Home() {
                 </p>
               </div>
               <span style={{ padding: '6px 10px', borderRadius: 999, background: historicalPostEntries.filter((x) => x.trim()).length >= 3 ? '#ecfdf3' : '#fff4e5', color: historicalPostEntries.filter((x) => x.trim()).length >= 3 ? '#067647' : '#b54708', fontSize: 12, fontWeight: 700 }}>
-                {historicalPostEntries.filter((x) => x.trim()).length}/20 posts
+                {historicalPostEntries.filter((x) => x.trim()).length}/5 posts
               </span>
             </div>
 
