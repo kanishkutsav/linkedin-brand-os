@@ -3,7 +3,7 @@ import os
 import sqlite3
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request\nfrom fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict
@@ -17,11 +17,11 @@ from app.auth import require_roles
 from app.core.config import settings
 from app.db.database import engine, get_session
 from app.guards.guardrails import run_content_guards
-from app.integrations.linkedin import MockLinkedInAdapter
+from app.integrations.linkedin import MockLinkedInAdapter, OfficialLinkedInAdapter
 from app.models.base import Base
-from app.models.models import ContentItem, ContentVersion, UserProfile, VoiceMemory
+from app.models.models import ContentItem, ContentVersion, LinkedInConnection, UserProfile, VoiceMemory
 from app.services.approval import ApprovalService
-from app.services.auth_service import AuthService
+from app.services.auth_service import AuthService\nfrom app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback
 
 
 def _resolve_sqlite_path() -> str | None:
@@ -162,6 +162,58 @@ class LinkedInLoginRequest(BaseModel):
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "external_actions": "mock_only"}
+
+
+@app.get("/api/auth/linkedin/start")
+async def linkedin_oauth_start(session: AsyncSession = Depends(get_session)):
+    url = await build_authorization_url(session)
+    return RedirectResponse(url=url, status_code=302)
+
+
+@app.get("/api/auth/linkedin/callback")
+async def linkedin_oauth_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    if error:
+        raise HTTPException(status_code=400, detail=f"LinkedIn authorization was not completed: {error}")
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing LinkedIn OAuth code or state.")
+
+    exchange = await handle_callback(session, code, state)
+    frontend = (settings.frontend_url or "http://localhost:3000").rstrip("/")
+    return RedirectResponse(url=f"{frontend}/?linkedin_code={exchange}", status_code=302)
+
+
+@app.post("/api/auth/linkedin/exchange")
+async def linkedin_oauth_exchange(
+    code: str,
+    session: AsyncSession = Depends(get_session),
+):
+    return await exchange_code(session, code)
+
+
+@app.get("/api/linkedin/status")
+async def linkedin_status(
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+    session: AsyncSession = Depends(get_session),
+):
+    user = await AuthService.get_user_from_token(session, credentials.credentials if credentials else None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    result = await session.execute(
+        select(LinkedInConnection).where(LinkedInConnection.user_id == int(user.id))
+    )
+    connection = result.scalar_one_or_none()
+    return {
+        "connected": connection is not None,
+        "name": connection.linkedin_name if connection else None,
+        "email": connection.linkedin_email if connection else None,
+        "expires_at": connection.token_expires_at if connection else None,
+    }
 
 
 @app.post("/api/auth/linkedin/login")
@@ -412,7 +464,23 @@ async def execute(
     _: str = Depends(require_roles("admin", "owner")),
 ):
     try:
-        result = await ApprovalService(session).execute(approval_id, adapter)
+        user = await AuthService.get_user_from_token(
+            session,
+            _.split(":", 1)[1] if isinstance(_, str) and ":" in _ else _,
+        )
+        if user is None:
+            raise ValueError("Authentication required.")
+
+        connection_result = await session.execute(
+            select(LinkedInConnection).where(LinkedInConnection.user_id == int(user.id))
+        )
+        connection = connection_result.scalar_one_or_none()
+        publish_adapter = (
+            OfficialLinkedInAdapter(connection.access_token, connection.member_sub)
+            if connection is not None
+            else adapter
+        )
+        result = await ApprovalService(session).execute(approval_id, publish_adapter)
         return {
             "success": result.success,
             "external_id": result.external_id,
