@@ -210,6 +210,10 @@ Generate 6-8 genuinely different opportunities. Avoid near-duplicates.
                         "rationale": opportunity.rationale,
                         "evidence": json.loads(opportunity.evidence_json or "{}"),
                         "source_ids": [source.id for source in source_records],
+                        "sources": [
+                            {"title": source.title, "url": source.url, "domain": source.domain}
+                            for source in source_records
+                        ],
                     }
                 )
             except (TypeError, ValueError):
