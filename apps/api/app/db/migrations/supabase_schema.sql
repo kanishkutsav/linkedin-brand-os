@@ -150,3 +150,56 @@ CREATE INDEX IF NOT EXISTS idx_historical_posts_profile_published
 
 CREATE INDEX IF NOT EXISTS idx_brand_memory_status
     ON brand_memory(status);
+
+
+CREATE TABLE IF NOT EXISTS research_sources (
+    id SERIAL PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    topic VARCHAR(300) NOT NULL,
+    title VARCHAR(500),
+    url TEXT,
+    domain VARCHAR(255),
+    published_at TIMESTAMPTZ,
+    source_type VARCHAR(50) NOT NULL DEFAULT 'web_search',
+    evidence_json TEXT,
+    search_queries_json TEXT,
+    confidence VARCHAR(30) NOT NULL DEFAULT 'medium',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_sources_profile_topic
+    ON research_sources(profile_id, topic);
+
+CREATE INDEX IF NOT EXISTS idx_research_sources_created
+    ON research_sources(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS content_opportunities (
+    id SERIAL PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    title VARCHAR(300) NOT NULL,
+    topic VARCHAR(500) NOT NULL,
+    angle TEXT NOT NULL,
+    pillar VARCHAR(100) NOT NULL,
+    format VARCHAR(100),
+    objective VARCHAR(300),
+    status VARCHAR(40) NOT NULL DEFAULT 'DISCOVERED',
+    brand_fit DOUBLE PRECISION NOT NULL DEFAULT 0,
+    audience_relevance DOUBLE PRECISION NOT NULL DEFAULT 0,
+    timeliness DOUBLE PRECISION NOT NULL DEFAULT 0,
+    evidence_strength DOUBLE PRECISION NOT NULL DEFAULT 0,
+    novelty DOUBLE PRECISION NOT NULL DEFAULT 0,
+    conversation_potential DOUBLE PRECISION NOT NULL DEFAULT 0,
+    authenticity DOUBLE PRECISION NOT NULL DEFAULT 0,
+    risk DOUBLE PRECISION NOT NULL DEFAULT 0,
+    total_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+    rationale TEXT,
+    research_source_ids_json TEXT,
+    evidence_json TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_opportunities_profile_status
+    ON content_opportunities(profile_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_content_opportunities_score
+    ON content_opportunities(total_score DESC);
