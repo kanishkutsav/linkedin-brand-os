@@ -3,7 +3,7 @@ import os
 import sqlite3
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -154,6 +154,12 @@ class ApprovalDecisionRequest(BaseModel):
     reason: str | None = None
 
 
+class LinkedInExchangeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+
+
 class LinkedInLoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -191,10 +197,10 @@ async def linkedin_oauth_callback(
 
 @app.post("/api/auth/linkedin/exchange")
 async def linkedin_oauth_exchange(
-    code: str,
+    req: LinkedInExchangeRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    return await exchange_code(session, code)
+    return await exchange_code(session, req.code)
 
 
 @app.get("/api/linkedin/status")
