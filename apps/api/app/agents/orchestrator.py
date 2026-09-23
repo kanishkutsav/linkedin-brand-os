@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.strategy import ContentStrategyService
 from app.agents.voice import VoiceProfileBuilder
+from app.agents.research import ResearchService
 from app.core.config import settings
 from app.guards.guardrails import run_content_guards
 from app.models.models import (
@@ -90,6 +91,7 @@ class AgentOrchestrator:
         topic: str,
         pillar: str,
         objective: str,
+        evidence: list[dict] | None = None,
     ) -> dict:
         service = GeminiService()
         brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id)
@@ -107,7 +109,7 @@ class AgentOrchestrator:
             topic=topic,
             pillar=pillar,
             objective=objective,
-            evidence=[],
+            evidence=evidence or [],
             voice=await self._voice(),
         )
 
@@ -119,6 +121,7 @@ class AgentOrchestrator:
         pillar: str,
         objective: str,
         trigger: str,
+        evidence: list[dict] | None = None,
     ) -> int | None:
         if await self._is_duplicate_topic(topic):
             return None
@@ -136,6 +139,7 @@ class AgentOrchestrator:
                 topic=topic,
                 pillar=pillar,
                 objective=objective,
+                evidence=evidence or [],
             )
 
         if generated:
@@ -237,16 +241,23 @@ class AgentOrchestrator:
         profile = await self._profile()
         goal = profile.goals or "professional authority"
         audience = profile.audience or "technology and business leaders"
-        strategy = ContentStrategyService().recommend(goal, audience)
+        opportunities = await ResearchService(self.session).research_and_rank(profile_id=profile.id, candidate_limit=8)
 
         created: list[int] = []
-        for idea in strategy["content_calendar"][:3]:
+        selected = opportunities[:3]
+        for opportunity in selected:
+            evidence = [{
+                "claim": opportunity.get("evidence", {}).get("summary", ""),
+                "why_now": opportunity.get("evidence", {}).get("why_now", ""),
+                "sources": opportunity.get("sources", []),
+            }]
             item_id = await self._create_candidate(
-                title=idea["topic"],
-                topic=idea["topic"],
-                pillar=idea["pillar"],
-                objective=idea["objective"],
+                title=opportunity["title"],
+                topic=opportunity["topic"],
+                pillar=opportunity["pillar"],
+                objective=opportunity["objective"],
                 trigger=trigger,
+                evidence=evidence,
             )
             if item_id is not None:
                 created.append(item_id)
@@ -254,6 +265,8 @@ class AgentOrchestrator:
         return {
             "mode": "discovery",
             "trigger": trigger,
+            "opportunities_found": len(opportunities),
+            "selected_opportunities": selected,
             "created_content_ids": created,
             "created_count": len(created),
         }
@@ -262,16 +275,22 @@ class AgentOrchestrator:
         profile = await self._profile()
         goal = profile.goals or "professional authority"
         audience = profile.audience or "technology and business leaders"
-        strategy = ContentStrategyService().recommend(goal, audience)
+        opportunities = await ResearchService(self.session).research_and_rank(profile_id=profile.id, candidate_limit=6)
 
         created: list[int] = []
-        for idea in strategy["content_calendar"]:
+        for opportunity in opportunities[:2]:
+            evidence = [{
+                "claim": opportunity.get("evidence", {}).get("summary", ""),
+                "why_now": opportunity.get("evidence", {}).get("why_now", ""),
+                "sources": opportunity.get("sources", []),
+            }]
             item_id = await self._create_candidate(
-                title=f"Calendar: {idea['topic']} ({idea['date']})",
-                topic=f'{idea["topic"]} — scheduled {idea["date"]}',
-                pillar=idea["pillar"],
-                objective=idea["objective"],
+                title=opportunity["title"],
+                topic=opportunity["topic"],
+                pillar=opportunity["pillar"],
+                objective=opportunity["objective"],
                 trigger=trigger,
+                evidence=evidence,
             )
             if item_id is not None:
                 created.append(item_id)
@@ -279,6 +298,7 @@ class AgentOrchestrator:
         return {
             "mode": "calendar",
             "trigger": trigger,
+            "opportunities_found": len(opportunities),
             "created_content_ids": created,
             "created_count": len(created),
         }
@@ -287,22 +307,35 @@ class AgentOrchestrator:
         payload = payload or {}
         profile = await self._profile()
         audience = profile.audience or "technology and business leaders"
-        topic = payload.get("topic") or f"Practical lessons from {event_type.replace('_', ' ')}"
-        title = payload.get("title") or topic
-        pillar = payload.get("pillar") or "Industry insights"
-        objective = payload.get("objective") or "Respond to a relevant event"
+        requested_topic = str(payload.get("topic") or "").strip() or None
 
+        opportunities = await ResearchService(self.session).research_and_rank(
+            profile_id=profile.id,
+            requested_topic=requested_topic,
+            candidate_limit=5,
+        )
+        selected = opportunities[0] if opportunities else None
+        if selected is None:
+            raise ValueError("Research did not find a sufficiently relevant, evidence-backed opportunity.")
+
+        evidence = [{
+            "claim": selected.get("evidence", {}).get("summary", ""),
+            "why_now": selected.get("evidence", {}).get("why_now", ""),
+            "sources": selected.get("sources", []),
+        }]
         item_id = await self._create_candidate(
-            title=str(title),
-            topic=str(topic),
-            pillar=str(pillar),
-            objective=str(objective),
+            title=selected["title"],
+            topic=selected["topic"],
+            pillar=selected["pillar"],
+            objective=selected["objective"],
             trigger=f"event:{event_type}",
+            evidence=evidence,
         )
         return {
             "mode": "event",
             "event_type": event_type,
             "audience": audience,
+            "selected_opportunity": selected,
             "created_content_ids": [item_id] if item_id else [],
             "created_count": 1 if item_id else 0,
         }
