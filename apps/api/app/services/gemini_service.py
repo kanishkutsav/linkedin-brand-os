@@ -21,14 +21,20 @@ class GeminiService:
         self.client = genai.Client(api_key=settings.gemini_api_key)
         self.model = settings.gemini_model
 
-    async def generate_json(self, system_instruction: str, prompt: str) -> dict:
+    async def generate_json(
+        self,
+        system_instruction: str,
+        prompt: str,
+        *,
+        max_output_tokens: int = 1800,
+    ) -> dict:
         response = await self.client.aio.models.generate_content(
             model=self.model,
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 response_mime_type="application/json",
-                max_output_tokens=1800,
+                max_output_tokens=max_output_tokens,
             ),
         )
         text = getattr(response, "text", None)
