@@ -128,6 +128,41 @@ class AgentRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class BrandMemory(Base):
+    __tablename__ = "brand_memory"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id"), unique=True, index=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="NOT_INITIALIZED")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    identity_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expertise_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    audience_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    themes_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    opinions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    experiences_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    formats_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    patterns_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    voice_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_post_count: Mapped[int] = mapped_column(Integer, default=0)
+    initialized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class HistoricalPost(Base):
+    __tablename__ = "historical_posts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id"), index=True, nullable=False)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source: Mapped[str] = mapped_column(String(50), default="user_import")
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class LinkedInConnection(Base):
     __tablename__ = "linkedin_connections"
     id: Mapped[int] = mapped_column(primary_key=True)

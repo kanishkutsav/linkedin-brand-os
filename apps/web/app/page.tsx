@@ -21,6 +21,7 @@ type ApprovalStatus = 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'REJEC
 type ApprovalItem = { id: number; status: ApprovalStatus; action_type: string; reason: string | null; content: string };
 type Profile = { display_name: string; role?: string };
 type LinkedInStatus = { connected: boolean; name?: string | null; email?: string | null; expires_at?: string | null };
+type BrandStatus = { ready: boolean; status: string; source_post_count: number; summary?: string | null; profile?: { display_name?: string; professional_title?: string | null; industry?: string | null; audience?: string | null; brand_positioning?: string | null; tone?: string | null } };
 type Tab = 'Dashboard' | 'Content' | 'Engagement' | 'Analytics' | 'Settings';
 
 const statusTone: Record<string, { bg: string; color: string }> = {
@@ -33,6 +34,15 @@ export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile>({ display_name: 'User', role: 'owner' });
   const [linkedin, setLinkedin] = useState<LinkedInStatus>({ connected: false });
+  const [brand, setBrand] = useState<BrandStatus>({ ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 });
+  const [brandTitle, setBrandTitle] = useState('');
+  const [brandIndustry, setBrandIndustry] = useState('');
+  const [brandAudience, setBrandAudience] = useState('');
+  const [brandPositioning, setBrandPositioning] = useState('');
+  const [brandTone, setBrandTone] = useState('');
+  const [brandGoals, setBrandGoals] = useState('');
+  const [historicalPosts, setHistoricalPosts] = useState('');
+  const [isBuildingBrand, setIsBuildingBrand] = useState(false);
   const [queue, setQueue] = useState<ApprovalItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | 'PENDING' | 'EDITED' | 'REGENERATED'>('all');
@@ -78,10 +88,11 @@ export default function Home() {
   const fetchData = async (authToken: string | null = token) => {
     if (!authToken) return;
     try {
-      const [profileRes, approvalsRes, linkedinRes] = await Promise.all([
+      const [profileRes, approvalsRes, linkedinRes, brandRes] = await Promise.all([
         fetch(`${API_BASE}/api/auth/me`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/dashboard/approvals`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/linkedin/status`, { headers: headers(authToken) }),
+        fetch(`${API_BASE}/api/brand/status`, { headers: headers(authToken) }),
       ]);
       if (profileRes.status === 401 || approvalsRes.status === 401) {
         window.localStorage.removeItem(STORAGE_KEY);
@@ -95,6 +106,14 @@ export default function Home() {
       const approvalsJson = await approvalsRes.json();
       setProfile({ display_name: profileJson.display_name || 'User', role: profileJson.role || 'owner' });
       setLinkedInSafe(linkedinRes.ok ? await linkedinRes.json() : { connected: false });
+      const brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
+      setBrand(brandJson);
+      const brandProfile = brandJson.profile || {};
+      setBrandTitle(brandProfile.professional_title || '');
+      setBrandIndustry(brandProfile.industry || '');
+      setBrandAudience(brandProfile.audience || '');
+      setBrandPositioning(brandProfile.brand_positioning || '');
+      setBrandTone(brandProfile.tone || '');
       const nextQueue: ApprovalItem[] = (approvalsJson.pending_approvals || []).map((item: any) => ({
         id: item.id, status: item.status, action_type: item.action_type, reason: item.reason, content: item.content || '',
       }));
@@ -162,6 +181,11 @@ export default function Home() {
 
   const generateContent = async () => {
     if (!token) return;
+    if (!brand.ready) {
+      setTab('Settings');
+      setError('Build your Brand DNA first. The agent will not generate generic content before onboarding.');
+      return;
+    }
     setIsGenerating(true); setError(null); setNotice(null);
     try {
       const res = await fetch(API_BASE + '/api/agent/events', {
@@ -181,6 +205,41 @@ export default function Home() {
       setError(e instanceof Error ? e.message : 'Content generation failed');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const buildBrand = async () => {
+    if (!token) return;
+    const blocks = historicalPosts.split(/\n---POST---\n|\n---POST---\r?\n/).map((body) => body.trim()).filter(Boolean);
+    if (blocks.length < 3) {
+      setError('Add at least 3 historical posts, separated by a line containing ---POST---.');
+      return;
+    }
+    setIsBuildingBrand(true); setError(null); setNotice(null);
+    try {
+      const res = await fetch(API_BASE + '/api/brand/onboard', {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          display_name: profile.display_name,
+          professional_title: brandTitle || null,
+          industry: brandIndustry || null,
+          audience: brandAudience || null,
+          goals: brandGoals.split(',').map((x) => x.trim()).filter(Boolean),
+          brand_positioning: brandPositioning || null,
+          tone: brandTone || null,
+          posts: blocks.map((body) => ({ body })),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(getApiError(data, 'Brand onboarding failed'));
+      setBrand({ ...data.brand_memory, ready: data.brand_memory?.status === 'READY' });
+      setNotice('Brand DNA built and stored. Future content generation will use your profile and historical posts.');
+      await fetchData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Brand onboarding failed');
+    } finally {
+      setIsBuildingBrand(false);
     }
   };
 
@@ -323,7 +382,62 @@ export default function Home() {
 
         {tab === 'Engagement' && <Panel title="Engagement" text="This area is now wired as a real navigation surface. LinkedIn reading, comments and reactions should only be added through officially supported permissions and explicit approval."/>}
         {tab === 'Analytics' && <Panel title="Analytics" text="Performance analytics surface is ready. It will show published-post metrics once LinkedIn read/analytics permissions are provisioned for this application."/>}
-        {tab === 'Settings' && <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}><h2 style={{ marginTop: 0 }}>Settings</h2><p style={{ color: '#667085' }}>Signed in as <b>{profile.display_name}</b>.</p><div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 18 }}><LinkedInMark size={20} color="#0a66c2"/><div><b>{linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}</b><div style={{ color: '#667085', fontSize: 13 }}>{linkedin.email || 'Connect your account to enable official API actions.'}</div></div><button type="button" onClick={connectLinkedIn} style={{ marginLeft: 'auto', padding: '9px 12px', borderRadius: 8, border: '1px solid #d0d5dd', background: '#fff', cursor: 'pointer' }}>{linkedin.connected ? 'Reconnect' : 'Connect'}</button></div><a href="https://www.linkedin.com/" target="_blank" rel="noreferrer" style={{ display: 'inline-flex', gap: 7, alignItems: 'center', marginTop: 24, color: '#0a66c2' }}>Open LinkedIn <ExternalLink size={14}/></a></div>}
+        {tab === 'Settings' && <div style={{ display: 'grid', gap: 18 }}>
+          <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <div>
+                <h2 style={{ marginTop: 0, marginBottom: 6 }}>Brand Intelligence</h2>
+                <p style={{ color: '#667085', marginTop: 0 }}>Build the persistent Brand DNA the agent will use before every draft.</p>
+              </div>
+              <span style={{ padding: '7px 11px', borderRadius: 999, background: brand.ready ? '#ecfdf3' : '#fff4e5', color: brand.ready ? '#067647' : '#b54708', fontWeight: 700, fontSize: 12 }}>
+                {brand.ready ? `READY · ${brand.source_post_count} posts learned` : 'NOT INITIALIZED'}
+              </span>
+            </div>
+            {brand.ready && brand.summary && <div style={{ marginTop: 14, padding: 14, background: '#f8fafc', borderRadius: 10, color: '#344054', lineHeight: 1.55 }}><b>Current Brand DNA:</b> {brand.summary}</div>}
+          </div>
+
+          <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>
+            <h3 style={{ marginTop: 0 }}>1. Your professional profile</h3>
+            <p style={{ color: '#667085', fontSize: 13 }}>These fields tell the model who you are. Keep them factual; Brand OS will not invent missing credentials or experience.</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+              <input value={brandTitle} onChange={(e) => setBrandTitle(e.target.value)} placeholder="Professional title" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
+              <input value={brandIndustry} onChange={(e) => setBrandIndustry(e.target.value)} placeholder="Industry" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
+              <input value={brandAudience} onChange={(e) => setBrandAudience(e.target.value)} placeholder="Who you want to reach" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
+              <input value={brandGoals} onChange={(e) => setBrandGoals(e.target.value)} placeholder="Goals, comma separated" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
+              <input value={brandTone} onChange={(e) => setBrandTone(e.target.value)} placeholder="Desired tone (optional)" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
+              <input value={brandPositioning} onChange={(e) => setBrandPositioning(e.target.value)} placeholder="How you want to be known" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
+            </div>
+          </div>
+
+          <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>
+            <h3 style={{ marginTop: 0 }}>2. Import your existing LinkedIn posts</h3>
+            <p style={{ color: '#667085', fontSize: 13, lineHeight: 1.55 }}>
+              Paste your last 10–20 posts (3 minimum). Separate each post with a line containing <code>---POST---</code>.
+              We store the posts in your database and use them as private writing/brand evidence. This version intentionally does not scrape LinkedIn.
+            </p>
+            <textarea value={historicalPosts} onChange={(e) => setHistoricalPosts(e.target.value)} placeholder={"Post 1...\n\n---POST---\n\nPost 2...\n\n---POST---\n\nPost 3..."} style={{ width: '100%', minHeight: 360, padding: 14, border: '1px solid #d0d5dd', borderRadius: 10, boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.5 }} />
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+              <button type="button" onClick={buildBrand} disabled={isBuildingBrand} style={{ background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: '11px 16px', cursor: isBuildingBrand ? 'wait' : 'pointer', fontWeight: 700 }}>
+                {isBuildingBrand ? 'Analyzing your brand…' : brand.ready ? 'Rebuild Brand DNA' : 'Build Brand DNA'}
+              </button>
+              <span style={{ color: '#667085', fontSize: 13 }}>{historicalPosts.split(/\n---POST---\n|\n---POST---\r?\n/).filter((x) => x.trim()).length} posts detected</span>
+            </div>
+          </div>
+
+          <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>
+            <h3 style={{ marginTop: 0 }}>What gets stored</h3>
+            <div style={{ color: '#475467', lineHeight: 1.65, fontSize: 14 }}>
+              Identity and positioning · expertise signals · target audience · recurring themes · observed opinions · experience signals · post formats · hook/structure patterns · voice profile.
+            </div>
+            <p style={{ color: '#667085', fontSize: 13, marginBottom: 0 }}>After this is initialized, generation uses this memory plus recent historical examples. Approval remains mandatory before any LinkedIn action.</p>
+          </div>
+
+          <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>
+            <h3 style={{ marginTop: 0 }}>LinkedIn connection</h3>
+            <p style={{ color: '#667085' }}>Signed in as <b>{profile.display_name}</b>. {linkedin.connected ? 'Official LinkedIn posting is connected.' : 'Connect LinkedIn to enable official API actions.'}</p>
+            <button type="button" onClick={connectLinkedIn} style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #d0d5dd', background: '#fff', cursor: 'pointer' }}>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
+          </div>
+        </div>}
       </section>
     </main>
   );

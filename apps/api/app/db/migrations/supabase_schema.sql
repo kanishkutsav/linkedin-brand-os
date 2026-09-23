@@ -107,3 +107,46 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type
 INSERT INTO system_flags (emergency_stop)
 SELECT FALSE
 WHERE NOT EXISTS (SELECT 1 FROM system_flags);
+
+
+CREATE TABLE IF NOT EXISTS brand_memory (
+    id SERIAL PRIMARY KEY,
+    profile_id INTEGER NOT NULL UNIQUE REFERENCES user_profiles(id) ON DELETE CASCADE,
+    status VARCHAR(30) NOT NULL DEFAULT 'NOT_INITIALIZED',
+    version INTEGER NOT NULL DEFAULT 1,
+    summary TEXT,
+    identity_json TEXT,
+    expertise_json TEXT,
+    audience_json TEXT,
+    themes_json TEXT,
+    opinions_json TEXT,
+    experiences_json TEXT,
+    formats_json TEXT,
+    patterns_json TEXT,
+    voice_json TEXT,
+    source_post_count INTEGER NOT NULL DEFAULT 0,
+    initialized_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS historical_posts (
+    id SERIAL PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    external_id VARCHAR(255),
+    body TEXT NOT NULL,
+    content_hash VARCHAR(64) NOT NULL,
+    published_at TIMESTAMPTZ,
+    source VARCHAR(50) NOT NULL DEFAULT 'user_import',
+    metadata_json TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_historical_posts_profile_hash
+    ON historical_posts(profile_id, content_hash);
+
+CREATE INDEX IF NOT EXISTS idx_historical_posts_profile_published
+    ON historical_posts(profile_id, published_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_brand_memory_status
+    ON brand_memory(status);

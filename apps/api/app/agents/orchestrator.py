@@ -19,6 +19,7 @@ from app.models.models import (
     VoiceMemory,
 )
 from app.services.approval import ApprovalService
+from app.services.brand_intelligence import BrandIntelligenceService
 from app.services.gemini_service import GeminiService
 
 
@@ -91,6 +92,7 @@ class AgentOrchestrator:
         objective: str,
     ) -> dict:
         service = GeminiService()
+        brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id)
         return await service.create_post(
             profile={
                 "name": profile.display_name,
@@ -100,6 +102,7 @@ class AgentOrchestrator:
                 "goals": profile.goals,
                 "positioning": profile.brand_positioning,
                 "tone": profile.tone,
+                "brand_intelligence": brand_context,
             },
             topic=topic,
             pillar=pillar,
@@ -121,6 +124,9 @@ class AgentOrchestrator:
             return None
 
         profile = await self._profile()
+        # Do not produce generic drafts. Every autonomous draft must be grounded
+        # in the user's initialized Brand DNA and historical content.
+        await BrandIntelligenceService(self.session).generation_context(profile.id)
 
         generated = None
         if settings.gemini_api_key:

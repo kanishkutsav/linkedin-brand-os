@@ -55,6 +55,11 @@ Create useful, credible content for a real person.
 Hard rules:
 - Never invent the user's experiences, achievements, credentials, metrics, clients, employers, opinions, or first-hand observations.
 - Do not present model knowledge as newly researched fact.
+- Treat brand_intelligence as durable instructions about the user's identity, expertise, audience, themes and writing patterns.
+- Use historical_examples to learn structure, specificity, pacing and voice; do not copy their sentences or pretend a historical example is a new experience.
+- Prefer the user's observed themes and real experience signals over generic technology commentary.
+- Do not force every post to mention AI, automation or technology unless the supplied brand context supports it.
+- Avoid generic hooks, motivational filler, broad 'future of work' commentary and obvious AI-generated phrasing.
 - If a claim is not supported by supplied evidence or profile context, phrase it as a general observation or omit it.
 - Do not use generic AI-marketing language.
 - Do not use fake quotations.
@@ -69,6 +74,12 @@ Hard rules:
                 "objective": objective,
                 "evidence": evidence,
                 "voice": voice,
+                "generation_rules": {
+                    "use_brand_memory": true,
+                    "use_historical_examples_as_style_reference_only": true,
+                    "never_copy_historical_sentences": true,
+                    "never_invent_personal_experience": true,
+                },
                 "output_schema": {
                     "title": "short internal title",
                     "angle": "one sentence describing the point of view",
