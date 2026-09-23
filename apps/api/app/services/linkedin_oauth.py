@@ -125,7 +125,7 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
 
     whitelist = WHITELISTED_LINKEDIN_USERS.get(email)
     if whitelist is None:
-        raise HTTPException(status_code=403, detail="This LinkedIn account is not whitelisted for Brand OS.")
+        raise HTTPException(status_code=403, detail="You are not authorized to use this application. Please contact the administrator.")
 
     user_result = await session.execute(select(AuthUser).where(AuthUser.email == email))
     user = user_result.scalar_one_or_none()
