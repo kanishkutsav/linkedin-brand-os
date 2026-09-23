@@ -413,8 +413,8 @@ async def brand_onboard(
 
     if len(req.posts) < 3:
         raise HTTPException(status_code=400, detail="At least 3 previous posts are required to build Brand Intelligence.")
-    if len(req.posts) > 20:
-        raise HTTPException(status_code=400, detail="You can import a maximum of 20 previous posts.")
+    if len(req.posts) > 5:
+        raise HTTPException(status_code=400, detail="You can import a maximum of 5 previous posts.")
     if any(not post.body.strip() for post in req.posts):
         raise HTTPException(status_code=400, detail="Every imported post must contain content.")
 

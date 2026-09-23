@@ -514,11 +514,11 @@ export default function Home() {
               <div>
                 <h3 style={{ marginTop: 0, marginBottom: 6 }}>2. Import your previous LinkedIn posts</h3>
                 <p style={{ color: '#667085', fontSize: 13, lineHeight: 1.55, marginTop: 0, marginBottom: 0 }}>
-                  Add at least <b>3 posts</b> so Brand OS can learn your real writing style and recurring themes. You can add up to <b>20 posts</b>.
+                  Add at least <b>3 posts</b> so Brand OS can learn your real writing style and recurring themes. You can add up to <b>5 posts</b>.
                 </p>
               </div>
               <span style={{ padding: '6px 10px', borderRadius: 999, background: historicalPostEntries.filter((x) => x.trim()).length >= 3 ? '#ecfdf3' : '#fff4e5', color: historicalPostEntries.filter((x) => x.trim()).length >= 3 ? '#067647' : '#b54708', fontSize: 12, fontWeight: 700 }}>
-                {historicalPostEntries.filter((x) => x.trim()).length}/20 posts
+                {historicalPostEntries.filter((x) => x.trim()).length}/5 posts
               </span>
             </div>
 
@@ -550,10 +550,10 @@ export default function Home() {
             <button
               type="button"
               onClick={addHistoricalPost}
-              disabled={historicalPostEntries.length >= 20}
-              style={{ marginTop: 14, padding: '10px 14px', border: '1px solid #98a2b3', borderRadius: 8, background: '#fff', color: '#344054', cursor: historicalPostEntries.length >= 20 ? 'not-allowed' : 'pointer', fontWeight: 700 }}
+              disabled={historicalPostEntries.length >= 5}
+              style={{ marginTop: 14, padding: '10px 14px', border: '1px solid #98a2b3', borderRadius: 8, background: '#fff', color: '#344054', cursor: historicalPostEntries.length >= 5 ? 'not-allowed' : 'pointer', fontWeight: 700 }}
             >
-              {historicalPostEntries.length >= 20 ? 'Maximum of 20 posts reached' : '+ Add Post ' + (historicalPostEntries.length + 1)}
+              {historicalPostEntries.length >= 5 ? 'Maximum of 5 posts reached' : '+ Add Post ' + (historicalPostEntries.length + 1)}
             </button>
 
           </div>
