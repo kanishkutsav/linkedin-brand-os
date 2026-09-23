@@ -313,7 +313,7 @@ export default function Home() {
   }
 
   const nav = [
-    ['Dashboard', Sparkles], ['Content', FileText], ['Engagement', MessageSquare],
+    ['Dashboard', Sparkles], ['Research', Search], ['Content', FileText], ['Engagement', MessageSquare],
     ['Analytics', BarChart3], ['Settings', Settings],
   ] as const;
 
@@ -375,7 +375,7 @@ export default function Home() {
                 <button type="button" onClick={generateContent} disabled={isGenerating} style={{ background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: '9px 14px', cursor: isGenerating ? 'wait' : 'pointer', display: 'flex', gap: 7, alignItems: 'center', fontWeight: 700, opacity: isGenerating ? 0.7 : 1 }}>
                   <Sparkles size={15}/> {isGenerating ? 'Generating…' : 'Generate content'}
                 </button>
-                <button type="button" onClick={() => setTab('Research')} style={navStyle(tab === 'Research')}><Search size={16}/> Research</button>
+                <button type="button" onClick={() => setTab('Research')} style={{ background: '#fff', color: '#344054', border: '1px solid #d0d5dd', borderRadius: 8, padding: '9px 12px', cursor: 'pointer', display: 'flex', gap: 7, alignItems: 'center' }}><Search size={15}/> Research</button>
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
