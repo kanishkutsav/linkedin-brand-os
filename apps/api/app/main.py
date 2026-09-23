@@ -2,6 +2,7 @@ import hashlib
 import os
 import sqlite3
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -12,15 +13,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.research import ResearchService
+from app.agents.orchestrator import AgentOrchestrator
 from app.agents.strategy import ContentStrategyService
 from app.agents.voice import VoiceProfileBuilder
 from app.auth import require_roles
 from app.core.config import settings
-from app.db.database import engine, get_session
+from app.db.database import engine, get_session, SessionLocal
+from app.services.agent_scheduler import AgentScheduler
 from app.guards.guardrails import run_content_guards
 from app.integrations.linkedin import MockLinkedInAdapter, OfficialLinkedInAdapter
 from app.models.base import Base
-from app.models.models import ContentItem, ContentVersion, LinkedInConnection, UserProfile, VoiceMemory
+from app.models.models import ContentItem, ContentVersion, LinkedInConnection, UserProfile, VoiceMemory, AgentRun
 from app.services.approval import ApprovalService
 from app.services.auth_service import AuthService
 from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback
@@ -71,6 +74,9 @@ def _database_needs_reset() -> bool:
         return False
 
 
+agent_scheduler = AgentScheduler(SessionLocal)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     absolute_path = _resolve_sqlite_path()
@@ -79,7 +85,9 @@ async def lifespan(app: FastAPI):
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    agent_scheduler.start()
     yield
+    await agent_scheduler.stop()
     await engine.dispose()
 
 
@@ -168,8 +176,13 @@ class LinkedInLoginRequest(BaseModel):
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "external_actions": "mock_only"}
+async def health() -> dict[str, object]:
+    return {
+        "status": "ok",
+        "external_actions": "approval_required",
+        "agent_enabled": settings.agent_enabled,
+        "agent_modes": ["daily_discovery", "event_driven", "scheduled_calendar"],
+    }
 
 
 @app.get("/api/auth/linkedin/start")
@@ -345,6 +358,70 @@ async def dashboard_approvals(
             }
         )
     return {"pending_approvals": pending}
+
+
+@app.get("/api/agent/status")
+async def agent_status(
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "reviewer", "owner")),
+):
+    result = await session.execute(
+        select(AgentRun).order_by(AgentRun.started_at.desc()).limit(10)
+    )
+    runs = result.scalars().all()
+    return {
+        "enabled": settings.agent_enabled,
+        "modes": {
+            "daily_discovery": settings.agent_daily_discovery_enabled,
+            "event_driven": True,
+            "scheduled_calendar": settings.agent_calendar_enabled,
+        },
+        "recent_runs": [
+            {
+                "id": run.id,
+                "mode": run.mode,
+                "trigger": run.trigger,
+                "status": run.status,
+                "created_count": run.created_count,
+                "started_at": run.started_at,
+                "finished_at": run.finished_at,
+                "details": run.details,
+            }
+            for run in runs
+        ],
+    }
+
+
+class AgentEventRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_type: str
+    payload: dict[str, object] = {}
+
+
+@app.post("/api/agent/events")
+async def trigger_agent_event(
+    req: AgentEventRequest,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner")),
+):
+    run = AgentRun(mode="event", trigger=f"event:{req.event_type}", status="RUNNING")
+    session.add(run)
+    await session.flush()
+    try:
+        result = await AgentOrchestrator(session).run_event(req.event_type, req.payload)
+        run.status = "SUCCEEDED"
+        run.created_count = result["created_count"]
+        run.details = str(result)
+        run.finished_at = datetime.now(timezone.utc)
+        await session.commit()
+        return result | {"run_id": run.id}
+    except Exception as exc:
+        run.status = "FAILED"
+        run.details = str(exc)
+        run.finished_at = datetime.now(timezone.utc)
+        await session.commit()
+        raise HTTPException(status_code=500, detail="Agent event processing failed") from exc
 
 
 @app.post("/api/strategy/recommend")
