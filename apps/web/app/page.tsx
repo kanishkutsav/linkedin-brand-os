@@ -80,6 +80,12 @@ export default function Home() {
   const headers = (authToken = token) => authToken ? { Authorization: `Bearer ${authToken}` } : {};
 
   useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 4500);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('linkedin_code');
     const savedToken = window.localStorage.getItem(STORAGE_KEY);
@@ -162,7 +168,7 @@ export default function Home() {
 
   const initials = (profile.display_name || 'User').split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase();
   const closeSidebar = () => setSidebarOpen(false);
-  const connectLinkedIn = () => { window.location.href = `${API_BASE}/api/auth/linkedin/start`; };
+  const connectLinkedIn = () => { window.location.href = '/api/auth/linkedin/start'; };
   const logout = () => {
     window.localStorage.removeItem(STORAGE_KEY);
     setToken(null); setQueue([]); setLinkedin({ connected: false }); closeSidebar();
