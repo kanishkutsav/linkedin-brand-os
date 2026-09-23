@@ -331,3 +331,17 @@ a { color: inherit; }
   .page-title { font-size: 28px; }
   .topbar-title { font-size: 13px; }
 }
+
+.spin { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.nav-item em { font-style: normal; min-width: 18px; height: 18px; display: grid; place-items: center; border-radius: 999px; background: #6d5dfc; color: #fff; font-size: 9px; font-weight: 800; }
+.login-shell { width: 100%; max-width: 1040px; display: grid; grid-template-columns: 1.05fr .95fr; background: #fff; border: 1px solid #e7eaf0; border-radius: 26px; overflow: hidden; box-shadow: 0 30px 100px rgba(16,24,40,.13); }
+.login-visual { padding: 58px 54px; background: linear-gradient(145deg,#0b1020,#16132f 65%,#0b2430); color: #fff; position: relative; overflow: hidden; }
+.login-form { padding: 58px 48px; display: flex; flex-direction: column; justify-content: center; }
+@media (max-width: 760px) {
+  .login-shell { grid-template-columns: 1fr; max-width: 520px; border-radius: 20px; }
+  .login-visual { padding: 28px 24px; }
+  .login-visual > div:last-child { margin-top: 34px !important; }
+  .login-visual h1 { font-size: 34px !important; }
+  .login-form { padding: 30px 24px; }
+}
