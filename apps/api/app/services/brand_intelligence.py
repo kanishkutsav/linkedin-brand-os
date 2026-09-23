@@ -4,7 +4,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import BrandMemory, HistoricalPost, UserProfile, VoiceMemory
@@ -95,8 +95,14 @@ class BrandIntelligenceService:
             raise ValueError("Complete your profile before building Brand DNA.")
 
         posts = await self.get_posts(profile_id, limit=20)
-        if not posts:
-            raise ValueError("Import at least 3 historical posts before building Brand DNA.")
+        count_result = await self.session.execute(
+            select(func.count(HistoricalPost.id)).where(HistoricalPost.profile_id == profile_id)
+        )
+        total_post_count = int(count_result.scalar_one() or 0)
+        count_result = await self.session.execute(
+            select(func.count(HistoricalPost.id)).where(HistoricalPost.profile_id == profile_id)
+        )
+        total_post_count = int(count_result.scalar_one() or 0)
 
         service = GeminiService()
         examples = [
@@ -117,6 +123,8 @@ Rules:
 - Treat repeated themes as patterns, not proof of expertise.
 - Do not infer sensitive personal traits.
 - Do not copy sentences from the historical posts into the memory summary.
+- Historical posts are optional bootstrap evidence, not a prerequisite.
+- If there are no historical posts, infer only from supplied profile fields and leave post-derived patterns empty or low confidence.
 - The memory will be used to guide future writing, so be concrete and operational.
 - Return JSON only.
 
@@ -146,8 +154,9 @@ Return:
                     "tone": profile.tone,
                 },
                 "historical_posts": examples,
-                "post_count": len(examples),
+                "post_count": total_post_count,
                 "analysis_limit": 20,
+                "historical_posts_are_optional": True,
             },
             ensure_ascii=False,
         )
@@ -170,7 +179,7 @@ Return:
         memory.formats_json = _json(analysis.get("formats"))
         memory.patterns_json = _json(analysis.get("patterns"))
         memory.voice_json = _json(analysis.get("voice"))
-        memory.source_post_count = len(posts)
+        memory.source_post_count = total_post_count
         memory.initialized_at = datetime.now(timezone.utc)
 
         voice_data = analysis.get("voice") or {}
@@ -220,14 +229,30 @@ Return:
         if memory is None or memory.status != "READY":
             raise ValueError("Brand DNA is not initialized. Import your historical posts and build Brand DNA first.")
 
+        count_result = await self.session.execute(
+            select(func.count(HistoricalPost.id)).where(HistoricalPost.profile_id == profile_id)
+        )
+        current_post_count = int(count_result.scalar_one() or 0)
+
+        # Refresh derived memory automatically when new user-controlled content arrives.
+        if memory.source_post_count != current_post_count:
+            await self.analyze(profile_id)
+            memory = await self.get_memory(profile_id)
+
         posts = await self.get_posts(profile_id, limit=8)
         return {
             "brand_memory": self.serialize(memory),
             "historical_examples": [
                 {
                     "published_at": p.published_at.isoformat() if p.published_at else None,
+                    "source": p.source,
                     "body": p.body[:1800],
                 }
                 for p in posts
             ],
+            "memory_state": {
+                "historical_post_count": current_post_count,
+                "last_analyzed_post_count": memory.source_post_count if memory else 0,
+                "continuously_updated": True,
+            },
         }
