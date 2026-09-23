@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 from google import genai
@@ -28,15 +29,29 @@ class GeminiService:
         *,
         max_output_tokens: int = 1800,
     ) -> dict:
-        response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json",
-                max_output_tokens=max_output_tokens,
-            ),
-        )
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json",
+                        max_output_tokens=max_output_tokens,
+                    ),
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+                message = str(exc)
+                if "503" not in message and "UNAVAILABLE" not in message:
+                    raise
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(2 ** (attempt + 1))
+        else:
+            raise last_error or RuntimeError("Gemini request failed.")
         text = getattr(response, "text", None)
         if not text:
             raise RuntimeError("Gemini returned an empty response.")
