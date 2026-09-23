@@ -116,6 +116,18 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    mode: Mapped[str] = mapped_column(String(50), index=True)
+    trigger: Mapped[str] = mapped_column(String(150))
+    status: Mapped[str] = mapped_column(String(30), default="RUNNING")
+    created_count: Mapped[int] = mapped_column(Integer, default=0)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class LinkedInConnection(Base):
     __tablename__ = "linkedin_connections"
     id: Mapped[int] = mapped_column(primary_key=True)
