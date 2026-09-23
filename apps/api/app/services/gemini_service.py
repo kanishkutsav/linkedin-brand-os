@@ -39,6 +39,54 @@ class GeminiService:
         except json.JSONDecodeError as exc:
             raise RuntimeError("Gemini returned invalid JSON.") from exc
 
+
+    async def research_json(self, system_instruction: str, prompt: str) -> tuple[dict, dict]:
+        """Run a web-grounded Gemini request and preserve citation metadata.
+
+        Google Search grounding lets Gemini search current public web content and
+        returns grounding chunks/queries alongside the model response.
+        """
+        response = await self.client.aio.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
+                max_output_tokens=2600,
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+            ),
+        )
+        text = getattr(response, "text", None)
+        if not text:
+            raise RuntimeError("Gemini research returned an empty response.")
+
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Gemini research returned invalid JSON.") from exc
+
+        metadata: dict = {"queries": [], "sources": []}
+        try:
+            candidate = response.candidates[0]
+            grounding = getattr(candidate, "grounding_metadata", None)
+            if grounding:
+                metadata["queries"] = list(getattr(grounding, "web_search_queries", None) or [])
+                for chunk in list(getattr(grounding, "grounding_chunks", None) or []):
+                    web = getattr(chunk, "web", None)
+                    if web:
+                        metadata["sources"].append(
+                            {
+                                "title": getattr(web, "title", None),
+                                "url": getattr(web, "uri", None),
+                            }
+                        )
+        except Exception:
+            # A valid model response should remain usable even if SDK metadata
+            # shape changes; citation metadata is additive, not the sole output.
+            pass
+
+        return parsed, metadata
+
     async def create_post(
         self,
         *,

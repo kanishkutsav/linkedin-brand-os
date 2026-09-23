@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, DateTime, Boolean, Integer, ForeignKey
+from sqlalchemy import String, Text, DateTime, Boolean, Integer, ForeignKey, Float
 from sqlalchemy.orm import Mapped, mapped_column
 from .base import Base
 
@@ -198,3 +198,45 @@ class SystemFlag(Base):
     __tablename__ = "system_flags"
     id: Mapped[int] = mapped_column(primary_key=True)
     emergency_stop: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class ResearchSource(Base):
+    __tablename__ = "research_sources"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id"), index=True, nullable=False)
+    topic: Mapped[str] = mapped_column(String(300), index=True)
+    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_type: Mapped[str] = mapped_column(String(50), default="web_search")
+    evidence_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_queries_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[str] = mapped_column(String(30), default="medium")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ContentOpportunity(Base):
+    __tablename__ = "content_opportunities"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id"), index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(300))
+    topic: Mapped[str] = mapped_column(String(500))
+    angle: Mapped[str] = mapped_column(Text)
+    pillar: Mapped[str] = mapped_column(String(100))
+    format: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    objective: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="DISCOVERED")
+    brand_fit: Mapped[float] = mapped_column(Float, default=0)
+    audience_relevance: Mapped[float] = mapped_column(Float, default=0)
+    timeliness: Mapped[float] = mapped_column(Float, default=0)
+    evidence_strength: Mapped[float] = mapped_column(Float, default=0)
+    novelty: Mapped[float] = mapped_column(Float, default=0)
+    conversation_potential: Mapped[float] = mapped_column(Float, default=0)
+    authenticity: Mapped[float] = mapped_column(Float, default=0)
+    risk: Mapped[float] = mapped_column(Float, default=0)
+    total_score: Mapped[float] = mapped_column(Float, default=0)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    research_source_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
