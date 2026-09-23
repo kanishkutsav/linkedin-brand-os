@@ -52,7 +52,7 @@ export default function Home() {
       fetch(`${API_BASE}/api/auth/linkedin/exchange`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(code),
+        body: JSON.stringify({ code }),
       })
         .then(async (res) => {
           const data = await res.json();
