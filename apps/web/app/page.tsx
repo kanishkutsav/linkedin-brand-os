@@ -46,6 +46,7 @@ export default function Home() {
   const [draftTitle, setDraftTitle] = useState('');
   const [draftTopic, setDraftTopic] = useState('');
   const [draftBody, setDraftBody] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const headers = (authToken = token) => authToken ? { Authorization: `Bearer ${authToken}` } : {};
 
@@ -159,6 +160,30 @@ export default function Home() {
     finally { setIsBusy(false); }
   };
 
+  const generateContent = async () => {
+    if (!token) return;
+    setIsGenerating(true); setError(null); setNotice(null);
+    try {
+      const res = await fetch(API_BASE + '/api/agent/events', {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_type: 'manual_generate_content',
+          payload: { objective: 'Generate a fresh LinkedIn content opportunity for human review.' }
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(getApiError(data, 'Content generation failed'));
+      await fetchData();
+      setTab('Dashboard');
+      setNotice(data.created_count ? 'New content suggestion generated and added to the approval queue.' : 'No new suggestion was created. The agent may have detected a duplicate.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Content generation failed');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const createDraft = async () => {
     if (!token || !draftTitle.trim() || !draftTopic.trim() || !draftBody.trim()) {
       setError('Title, topic and draft body are required.'); return;
@@ -256,7 +281,12 @@ export default function Home() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: '1px solid #e4e7ec' }}><Search size={15}/><input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search queue" style={{ border: 0, outline: 'none', minWidth: 160 }} /></div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: '1px solid #e4e7ec' }}><SlidersHorizontal size={15}/><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} style={{ border: 0, outline: 'none' }}><option value="all">All</option><option value="PENDING">Pending</option><option value="EDITED">Edited</option><option value="REGENERATED">Regenerated</option></select></div>
               </div>
-              <button type="button" onClick={() => setTab('Content')} style={{ background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: '9px 12px', cursor: 'pointer', display: 'flex', gap: 7, alignItems: 'center' }}><Plus size={15}/> New draft</button>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button type="button" onClick={generateContent} disabled={isGenerating} style={{ background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: '9px 14px', cursor: isGenerating ? 'wait' : 'pointer', display: 'flex', gap: 7, alignItems: 'center', fontWeight: 700, opacity: isGenerating ? 0.7 : 1 }}>
+                  <Sparkles size={15}/> {isGenerating ? 'Generating…' : 'Generate content'}
+                </button>
+                <button type="button" onClick={() => setTab('Content')} style={{ background: '#fff', color: '#344054', border: '1px solid #d0d5dd', borderRadius: 8, padding: '9px 12px', cursor: 'pointer', display: 'flex', gap: 7, alignItems: 'center' }}><Plus size={15}/> New draft</button>
+              </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
               {filteredQueue.length === 0 ? <div style={{ padding: 18, border: '1px dashed #d0d5dd', borderRadius: 10, color: '#667085' }}>No approvals match the current filter. Create a draft to populate the HITL queue.</div> :

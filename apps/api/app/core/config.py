@@ -21,6 +21,17 @@ class Settings(BaseSettings):
     linkedin_api_base_url: str | None = None
     api_base_url: str | None = None
 
+    # Agent orchestration. All three modes are enabled by default, but none can
+    # publish externally; publishing still requires a human approval.
+    agent_enabled: bool = True
+    agent_timezone: str = "Asia/Kolkata"
+    agent_daily_discovery_enabled: bool = True
+    agent_daily_discovery_hour: int = 9
+    agent_daily_discovery_minute: int = 0
+    agent_calendar_enabled: bool = True
+    agent_calendar_hour: int = 9
+    agent_calendar_minute: int = 15
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

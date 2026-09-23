@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 
 class ContentStrategyService:
     """Owns content pillars, topic scoring, and recommended publishing mix."""
@@ -26,9 +28,10 @@ class ContentStrategyService:
             {"pillar": "Opinions", "weight": 0.14, "purpose": "Create differentiated viewpoints"},
         ]
 
+        start = date.today()
         content_calendar = [
             {
-                "date": "2026-09-25",
+                "date": (start + timedelta(days=1)).isoformat(),
                 "topic": f"How {goal.lower()} actually works in practice",
                 "pillar": "Expertise",
                 "format": "Long-form insight",
@@ -37,7 +40,7 @@ class ContentStrategyService:
                 "status": "IDEA",
             },
             {
-                "date": "2026-09-27",
+                "date": (start + timedelta(days=3)).isoformat(),
                 "topic": f"Three patterns I see in {audience.lower()}",
                 "pillar": "Industry insights",
                 "format": "Opinion post",
@@ -46,7 +49,7 @@ class ContentStrategyService:
                 "status": "IDEA",
             },
             {
-                "date": "2026-09-30",
+                "date": (start + timedelta(days=6)).isoformat(),
                 "topic": "What I would do differently in a new cycle",
                 "pillar": "Lessons learned",
                 "format": "Reflective post",

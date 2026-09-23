@@ -25,7 +25,10 @@ class ApprovalService:
 
     async def list_pending(self):
         result = await self.session.execute(
-            select(ApprovalRequest).where(ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED"]))
+            select(ApprovalRequest).where(
+                ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED"]),
+                (ApprovalRequest.expires_at.is_(None)) | (ApprovalRequest.expires_at > datetime.now(timezone.utc)),
+            )
         )
         return result.scalars().all()
 
@@ -127,6 +130,10 @@ class ApprovalService:
     async def execute(self, approval_id: int, adapter):
         approval = await self.session.get(ApprovalRequest, approval_id)
         if not approval or approval.status != "APPROVED": raise ValueError("Valid approval required")
+        if approval.expires_at and approval.expires_at < datetime.now(timezone.utc):
+            approval.status = "EXPIRED"
+            await self.session.commit()
+            raise ValueError("Approval has expired")
         if settings.emergency_stop: raise ValueError("Emergency stop is active")
         flags = (await self.session.execute(select(SystemFlag))).scalars().first()
         if flags and flags.emergency_stop: raise ValueError("Emergency stop is active")
