@@ -292,8 +292,7 @@ export default function Home() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, 'Brand Intelligence setup failed'));
       setBrand({ ...data.brand_memory, ready: data.brand_memory?.status === 'READY' });
-      setHistoricalPostEntries(['']);
-      setNotice('Brand Intelligence initialized using your profile plus ' + blocks.length + ' imported posts. New Brand OS content will continue enriching the memory.');
+      setNotice('Brand Intelligence updated using your profile plus ' + blocks.length + ' imported posts. New Brand OS content will continue enriching the memory.');
       await fetchData();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Brand Intelligence setup failed');
