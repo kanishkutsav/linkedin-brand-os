@@ -125,7 +125,7 @@ class AgentOrchestrator:
         for idea in strategy["content_calendar"][:3]:
             item_id = await self._create_candidate(
                 title=idea["topic"],
-                topic=idea["topic"],
+                topic=f'{idea["topic"]} — scheduled {idea["date"]}',
                 pillar=idea["pillar"],
                 objective=idea["objective"],
                 trigger=trigger,
@@ -149,8 +149,8 @@ class AgentOrchestrator:
         created: list[int] = []
         for idea in strategy["content_calendar"]:
             item_id = await self._create_candidate(
-                title=f"Calendar: {idea['topic']}",
-                topic=idea["topic"],
+                title=f"Calendar: {idea['topic']} ({idea['date']})",
+                topic=f'{idea["topic"]} — scheduled {idea["date"]}',
                 pillar=idea["pillar"],
                 objective=idea["objective"],
                 trigger=trigger,
