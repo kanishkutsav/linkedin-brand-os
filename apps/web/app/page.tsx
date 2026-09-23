@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ShieldCheck, Sparkles, FileText, MessageSquare, BarChart3, Settings,
   Check, X, Pencil, RotateCcw, Clock3, Search, SlidersHorizontal,
-  Linkedin, Plus, LogOut, Zap, ExternalLink
+  Plus, LogOut, Zap, ExternalLink
 } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -182,7 +182,7 @@ export default function Home() {
           <p style={{ color: '#667085' }}>Brand OS uses LinkedIn's official OAuth flow. Your LinkedIn password is never entered into Brand OS.</p>
           {error && <div style={{ background: '#fee4e2', color: '#b42318', padding: 12, borderRadius: 8, margin: '14px 0' }}>{error}</div>}
           <button type="button" onClick={connectLinkedIn} style={{ width: '100%', background: '#0a66c2', color: '#fff', border: 0, borderRadius: 10, padding: 14, cursor: 'pointer', fontWeight: 700, display: 'flex', justifyContent: 'center', gap: 8, alignItems: 'center' }}>
-            <Linkedin size={18} /> Continue with LinkedIn
+            <LinkedInMark size={18} /> Continue with LinkedIn
           </button>
           <p style={{ fontSize: 12, color: '#98a2b3', marginTop: 18 }}>Access is restricted to approved Brand OS users. OAuth permissions requested: profile, email and posting on your behalf.</p>
         </div>
@@ -206,7 +206,7 @@ export default function Home() {
           </button>
         ))}
         <button type="button" onClick={connectLinkedIn} style={{ width: '100%', marginTop: 24, border: '1px solid #475467', borderRadius: 8, padding: '10px', background: linkedin.connected ? '#153e2c' : '#1d2939', color: '#fff', cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Linkedin size={16} /> {linkedin.connected ? 'LinkedIn connected' : 'Connect LinkedIn'}
+          <LinkedInMark size={16} /> {linkedin.connected ? 'LinkedIn connected' : 'Connect LinkedIn'}
         </button>
         <div style={{ marginTop: 24, padding: 12, border: '1px solid #374151', borderRadius: 10, fontSize: 13 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><ShieldCheck size={17} /><strong>HITL gate</strong></div>
@@ -228,7 +228,7 @@ export default function Home() {
                 {linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}
               </div>
               <button type="button" onClick={connectLinkedIn} style={{ background: linkedin.connected ? '#153e2c' : '#0a66c2', color: '#fff', border: 0, borderRadius: 8, padding: '10px 14px', cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center', fontWeight: 700 }}>
-                <Linkedin size={16}/>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}
+                <LinkedInMark size={16}/>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}
               </button>
               <button type="button" onClick={logout} style={{ background: '#fff', color: '#344054', border: '1px solid #d0d5dd', borderRadius: 8, padding: '10px 14px', cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center', fontWeight: 600 }}>
                 <LogOut size={16}/> Sign out
@@ -286,9 +286,17 @@ export default function Home() {
 
         {tab === 'Engagement' && <Panel title="Engagement" text="This area is now wired as a real navigation surface. LinkedIn reading, comments and reactions should only be added through officially supported permissions and explicit approval."/>}
         {tab === 'Analytics' && <Panel title="Analytics" text="Performance analytics surface is ready. It will show published-post metrics once LinkedIn read/analytics permissions are provisioned for this application."/>}
-        {tab === 'Settings' && <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}><h2 style={{ marginTop: 0 }}>Settings</h2><p style={{ color: '#667085' }}>Signed in as <b>{profile.display_name}</b>.</p><div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 18 }}><Linkedin size={20} color="#0a66c2"/><div><b>{linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}</b><div style={{ color: '#667085', fontSize: 13 }}>{linkedin.email || 'Connect your account to enable official API actions.'}</div></div><button type="button" onClick={connectLinkedIn} style={{ marginLeft: 'auto', padding: '9px 12px', borderRadius: 8, border: '1px solid #d0d5dd', background: '#fff', cursor: 'pointer' }}>{linkedin.connected ? 'Reconnect' : 'Connect'}</button></div><a href="https://www.linkedin.com/" target="_blank" rel="noreferrer" style={{ display: 'inline-flex', gap: 7, alignItems: 'center', marginTop: 24, color: '#0a66c2' }}>Open LinkedIn <ExternalLink size={14}/></a></div>}
+        {tab === 'Settings' && <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}><h2 style={{ marginTop: 0 }}>Settings</h2><p style={{ color: '#667085' }}>Signed in as <b>{profile.display_name}</b>.</p><div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 18 }}><LinkedInMark size={20} color="#0a66c2"/><div><b>{linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}</b><div style={{ color: '#667085', fontSize: 13 }}>{linkedin.email || 'Connect your account to enable official API actions.'}</div></div><button type="button" onClick={connectLinkedIn} style={{ marginLeft: 'auto', padding: '9px 12px', borderRadius: 8, border: '1px solid #d0d5dd', background: '#fff', cursor: 'pointer' }}>{linkedin.connected ? 'Reconnect' : 'Connect'}</button></div><a href="https://www.linkedin.com/" target="_blank" rel="noreferrer" style={{ display: 'inline-flex', gap: 7, alignItems: 'center', marginTop: 24, color: '#0a66c2' }}>Open LinkedIn <ExternalLink size={14}/></a></div>}
       </section>
     </main>
+  );
+}
+
+function LinkedInMark({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M6.5 8.2H3.2V20h3.3V8.2ZM4.85 3A1.95 1.95 0 1 0 4.85 6.9 1.95 1.95 0 0 0 4.85 3ZM20.8 13.25c0-3.52-1.88-5.16-4.4-5.16-2.02 0-2.92 1.11-3.43 1.89V8.2H9.67V20h3.3v-5.84c0-1.54.29-3.03 2.2-3.03 1.88 0 1.91 1.76 1.91 3.13V20h3.3l.02-6.75Z"/>
+    </svg>
   );
 }
 
