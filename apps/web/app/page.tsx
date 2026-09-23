@@ -52,7 +52,6 @@ export default function Home() {
   const [brandPositioning, setBrandPositioning] = useState('');
   const [brandTone, setBrandTone] = useState('');
   const [brandGoals, setBrandGoals] = useState('');
-  const [historicalPosts, setHistoricalPosts] = useState('');
   const [historicalPostEntries, setHistoricalPostEntries] = useState<string[]>(['']);
   const [isBuildingBrand, setIsBuildingBrand] = useState(false);
   const [queue, setQueue] = useState<ApprovalItem[]>([]);
@@ -293,7 +292,6 @@ export default function Home() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, 'Brand Intelligence setup failed'));
       setBrand({ ...data.brand_memory, ready: data.brand_memory?.status === 'READY' });
-      setHistoricalPosts('');
       setHistoricalPostEntries(['']);
       setNotice('Brand Intelligence initialized using your profile plus ' + blocks.length + ' imported posts. New Brand OS content will continue enriching the memory.');
       await fetchData();
@@ -511,10 +509,10 @@ export default function Home() {
               <input value={brandPositioning} onChange={(e) => setBrandPositioning(e.target.value)} placeholder="How you want to be known" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
             </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 18, flexWrap: 'wrap' }}>
-              <button type="button" onClick={buildBrand} disabled={isBuildingBrand} style={{ background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: '11px 16px', cursor: isBuildingBrand ? 'wait' : 'pointer', fontWeight: 700 }}>
-                {isBuildingBrand ? 'Building Brand Intelligence…' : brand.ready ? 'Refresh Brand Intelligence' : 'Start Brand Intelligence'}
+              <button type="button" onClick={buildBrand} disabled={isBuildingBrand || historicalPostEntries.filter((x) => x.trim()).length < 3} style={{ background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: '11px 16px', cursor: isBuildingBrand ? 'wait' : 'pointer', fontWeight: 700 }}>
+                {isBuildingBrand ? 'Building Brand Intelligence…' : brand.ready ? 'Refresh Brand Intelligence' : 'Build Brand Intelligence'}
               </button>
-              <span style={{ color: '#667085', fontSize: 13 }}>No historical posts required.</span>
+              <span style={{ color: '#667085', fontSize: 13 }}>At least 3 previous posts are required.</span>
             </div>
           </div>
 
@@ -578,7 +576,7 @@ export default function Home() {
               <b>Profile</b> → identity and positioning · <b>Approved/edited content</b> → voice signals · <b>Brand OS published posts</b> → durable content memory · <b>Research</b> → current opportunities.
             </div>
             <p style={{ color: '#667085', fontSize: 13, marginBottom: 0 }}>
-              When new Brand OS posts are published, they are added to the memory store automatically. The next generation refreshes the derived Brand DNA when new content is detected. Historical LinkedIn posts remain optional because LinkedIn restricts broad personal-post retrieval to approved permissions.
+              When new Brand OS posts are published, they are added to the memory store automatically. The next generation refreshes the derived Brand DNA when new content is detected. Previous LinkedIn posts are imported once during onboarding to establish a stronger initial voice signal. New Brand OS content continues enriching the memory automatically.
             </p>
           </div>
 
