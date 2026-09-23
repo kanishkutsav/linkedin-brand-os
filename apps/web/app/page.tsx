@@ -75,6 +75,13 @@ export default function Home() {
         fetch(`${API_BASE}/api/dashboard/approvals`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/linkedin/status`, { headers: headers(authToken) }),
       ]);
+      if (profileRes.status === 401 || approvalsRes.status === 401) {
+        window.localStorage.removeItem(STORAGE_KEY);
+        setToken(null);
+        setQueue([]);
+        setLinkedin({ connected: false });
+        throw new Error('Your session expired. Please sign in with LinkedIn again.');
+      }
       if (!profileRes.ok || !approvalsRes.ok) throw new Error('Unable to load dashboard data.');
       const profileJson = await profileRes.json();
       const approvalsJson = await approvalsRes.json();
@@ -213,11 +220,20 @@ export default function Home() {
         {error && <div style={{ background: '#fee4e2', color: '#b42318', border: '1px solid #fecdca', padding: 12, borderRadius: 8, marginBottom: 16 }}>{error}</div>}
 
         {tab === 'Dashboard' && <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 20, flexWrap: 'wrap' }}>
             <div><h1 style={{ margin: '0 0 6px' }}>Good morning, {profile.display_name}</h1><p style={{ color: '#667085', margin: 0 }}>Your AI-prepared work stays behind the human approval gate.</p></div>
-            <button type="button" onClick={connectLinkedIn} style={{ background: linkedin.connected ? '#153e2c' : '#0a66c2', color: '#fff', border: 0, borderRadius: 8, padding: '10px 14px', cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center' }}>
-              <Linkedin size={16}/>{linkedin.connected ? 'LinkedIn Connected' : 'Connect LinkedIn'}
-            </button>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 999, background: linkedin.connected ? '#ecfdf3' : '#fff4e5', color: linkedin.connected ? '#067647' : '#b54708', border: '1px solid #e4e7ec', fontSize: 13, fontWeight: 700 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: linkedin.connected ? '#12b76a' : '#f79009' }} />
+                {linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}
+              </div>
+              <button type="button" onClick={connectLinkedIn} style={{ background: linkedin.connected ? '#153e2c' : '#0a66c2', color: '#fff', border: 0, borderRadius: 8, padding: '10px 14px', cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center', fontWeight: 700 }}>
+                <Linkedin size={16}/>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}
+              </button>
+              <button type="button" onClick={logout} style={{ background: '#fff', color: '#344054', border: '1px solid #d0d5dd', borderRadius: 8, padding: '10px 14px', cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center', fontWeight: 600 }}>
+                <LogOut size={16}/> Sign out
+              </button>
+            </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 14, marginTop: 24 }}>
