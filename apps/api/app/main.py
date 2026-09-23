@@ -408,6 +408,13 @@ async def brand_onboard(
     _: str = Depends(require_roles("admin", "owner")),
 ):
 
+    if len(req.posts) < 3:
+        raise HTTPException(status_code=400, detail="At least 3 previous posts are required to build Brand Intelligence.")
+    if len(req.posts) > 20:
+        raise HTTPException(status_code=400, detail="You can import a maximum of 20 previous posts.")
+    if any(not post.body.strip() for post in req.posts):
+        raise HTTPException(status_code=400, detail="Every imported post must contain content.")
+
     profile = await session.get(UserProfile, 1)
     if profile is None:
         profile = UserProfile(id=1, role="owner")
