@@ -21,7 +21,17 @@ type ApprovalStatus = 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'REJEC
 type ApprovalItem = { id: number; status: ApprovalStatus; action_type: string; reason: string | null; content: string };
 type Profile = { display_name: string; role?: string };
 type LinkedInStatus = { connected: boolean; name?: string | null; email?: string | null; expires_at?: string | null };
-type BrandStatus = { ready: boolean; status: string; source_post_count: number; summary?: string | null; profile?: { display_name?: string; professional_title?: string | null; industry?: string | null; audience?: string | null; brand_positioning?: string | null; tone?: string | null } };
+type BrandStatus = {
+  ready: boolean;
+  status: string;
+  source_post_count: number;
+  current_post_count?: number;
+  continuous_learning?: boolean;
+  historical_import_optional?: boolean;
+  last_updated?: string | null;
+  summary?: string | null;
+  profile?: { display_name?: string; professional_title?: string | null; industry?: string | null; audience?: string | null; brand_positioning?: string | null; tone?: string | null }
+};
 type Opportunity = { id: number; title: string; topic: string; angle: string; pillar: string; format?: string; objective?: string; total_score: number; scores: Record<string, number>; rationale?: string; evidence?: { summary?: string; why_now?: string; source_hints?: string[]; grounding_queries?: string[] }; source_ids?: number[]; sources?: { title?: string; url?: string; domain?: string }[] };
 type Tab = 'Dashboard' | 'Research' | 'Content' | 'Engagement' | 'Analytics' | 'Settings';
 
@@ -189,7 +199,7 @@ export default function Home() {
     if (!token) return;
     if (!brand.ready) {
       setTab('Settings');
-      setError('Build your Brand DNA first. The agent will not generate generic content before onboarding.');
+      setError('Complete the lightweight Brand Intelligence setup first. Historical posts are optional.');
       return;
     }
     setIsGenerating(true); setError(null); setNotice(null);
@@ -218,7 +228,7 @@ export default function Home() {
     if (!token) return;
     if (!brand.ready) {
       setTab('Settings');
-      setError('Build Brand DNA before running live research.');
+      setError('Complete the lightweight Brand Intelligence setup before running live research.');
       return;
     }
     setIsResearching(true); setError(null); setNotice(null);
@@ -242,10 +252,6 @@ export default function Home() {
   const buildBrand = async () => {
     if (!token) return;
     const blocks = historicalPosts.split(/\n---POST---\n|\n---POST---\r?\n/).map((body) => body.trim()).filter(Boolean);
-    if (blocks.length < 3) {
-      setError('Add at least 3 historical posts, separated by a line containing ---POST---.');
-      return;
-    }
     setIsBuildingBrand(true); setError(null); setNotice(null);
     try {
       const res = await fetch(API_BASE + '/api/brand/onboard', {
@@ -263,12 +269,15 @@ export default function Home() {
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(getApiError(data, 'Brand onboarding failed'));
+      if (!res.ok) throw new Error(getApiError(data, 'Brand Intelligence setup failed'));
       setBrand({ ...data.brand_memory, ready: data.brand_memory?.status === 'READY' });
-      setNotice('Brand DNA built and stored. Future content generation will use your profile and historical posts.');
+      setHistoricalPosts('');
+      setNotice(blocks.length
+        ? 'Brand Intelligence initialized using your profile plus ' + blocks.length + ' imported post' + (blocks.length === 1 ? '' : 's') + '. It will continue learning from new Brand OS activity.'
+        : 'Brand Intelligence initialized from your professional profile. Historical posts remain optional and can be added later.');
       await fetchData();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Brand onboarding failed');
+      setError(e instanceof Error ? e.message : 'Brand Intelligence setup failed');
     } finally {
       setIsBuildingBrand(false);
     }
@@ -442,18 +451,36 @@ export default function Home() {
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
               <div>
                 <h2 style={{ marginTop: 0, marginBottom: 6 }}>Brand Intelligence</h2>
-                <p style={{ color: '#667085', marginTop: 0 }}>Build the persistent Brand DNA the agent will use before every draft.</p>
+                <p style={{ color: '#667085', marginTop: 0, lineHeight: 1.55 }}>
+                  Your Brand DNA is a living memory — not a one-time questionnaire. Brand OS learns from your profile, approved content and posts published through Brand OS.
+                </p>
               </div>
               <span style={{ padding: '7px 11px', borderRadius: 999, background: brand.ready ? '#ecfdf3' : '#fff4e5', color: brand.ready ? '#067647' : '#b54708', fontWeight: 700, fontSize: 12 }}>
-                {brand.ready ? `READY · ${brand.source_post_count} posts learned` : 'NOT INITIALIZED'}
+                {brand.ready ? 'ACTIVE · ' + brand.source_post_count + ' posts learned' : 'SETUP NEEDED'}
               </span>
             </div>
-            {brand.ready && brand.summary && <div style={{ marginTop: 14, padding: 14, background: '#f8fafc', borderRadius: 10, color: '#344054', lineHeight: 1.55 }}><b>Current Brand DNA:</b> {brand.summary}</div>}
+
+            {brand.ready ? (
+              <>
+                {brand.summary && <div style={{ marginTop: 14, padding: 14, background: '#f8fafc', borderRadius: 10, color: '#344054', lineHeight: 1.55 }}><b>Current Brand DNA:</b> {brand.summary}</div>}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginTop: 14 }}>
+                  <div style={{ padding: 12, border: '1px solid #e4e7ec', borderRadius: 10 }}><div style={{ fontSize: 12, color: '#667085' }}>Content memory</div><b>{brand.current_post_count ?? brand.source_post_count} items</b></div>
+                  <div style={{ padding: 12, border: '1px solid #e4e7ec', borderRadius: 10 }}><div style={{ fontSize: 12, color: '#667085' }}>Learning mode</div><b>{brand.continuous_learning ? 'Continuous' : 'Snapshot'}</b></div>
+                  <div style={{ padding: 12, border: '1px solid #e4e7ec', borderRadius: 10 }}><div style={{ fontSize: 12, color: '#667085' }}>Last memory update</div><b>{brand.last_updated ? new Date(brand.last_updated).toLocaleString() : 'Just now'}</b></div>
+                </div>
+              </>
+            ) : (
+              <div style={{ marginTop: 14, padding: 14, background: '#f8fafc', borderRadius: 10, color: '#475467', lineHeight: 1.55 }}>
+                Start with your professional profile. You do <b>not</b> need to paste your old LinkedIn posts.
+              </div>
+            )}
           </div>
 
           <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>
             <h3 style={{ marginTop: 0 }}>1. Your professional profile</h3>
-            <p style={{ color: '#667085', fontSize: 13 }}>These fields tell the model who you are. Keep them factual; Brand OS will not invent missing credentials or experience.</p>
+            <p style={{ color: '#667085', fontSize: 13, lineHeight: 1.55 }}>
+              These fields establish the factual baseline. Brand OS will not invent missing credentials, experience or achievements.
+            </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
               <input value={brandTitle} onChange={(e) => setBrandTitle(e.target.value)} placeholder="Professional title" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
               <input value={brandIndustry} onChange={(e) => setBrandIndustry(e.target.value)} placeholder="Industry" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
@@ -462,29 +489,35 @@ export default function Home() {
               <input value={brandTone} onChange={(e) => setBrandTone(e.target.value)} placeholder="Desired tone (optional)" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
               <input value={brandPositioning} onChange={(e) => setBrandPositioning(e.target.value)} placeholder="How you want to be known" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
             </div>
-          </div>
-
-          <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>
-            <h3 style={{ marginTop: 0 }}>2. Import your existing LinkedIn posts</h3>
-            <p style={{ color: '#667085', fontSize: 13, lineHeight: 1.55 }}>
-              Paste your last 10–20 posts (3 minimum). Separate each post with a line containing <code>---POST---</code>.
-              We store the posts in your database and use them as private writing/brand evidence. This version intentionally does not scrape LinkedIn.
-            </p>
-            <textarea value={historicalPosts} onChange={(e) => setHistoricalPosts(e.target.value)} placeholder={"Post 1...\n\n---POST---\n\nPost 2...\n\n---POST---\n\nPost 3..."} style={{ width: '100%', minHeight: 360, padding: 14, border: '1px solid #d0d5dd', borderRadius: 10, boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.5 }} />
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 18, flexWrap: 'wrap' }}>
               <button type="button" onClick={buildBrand} disabled={isBuildingBrand} style={{ background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: '11px 16px', cursor: isBuildingBrand ? 'wait' : 'pointer', fontWeight: 700 }}>
-                {isBuildingBrand ? 'Analyzing your brand…' : brand.ready ? 'Rebuild Brand DNA' : 'Build Brand DNA'}
+                {isBuildingBrand ? 'Building Brand Intelligence…' : brand.ready ? 'Refresh Brand Intelligence' : 'Start Brand Intelligence'}
               </button>
-              <span style={{ color: '#667085', fontSize: 13 }}>{historicalPosts.split(/\n---POST---\n|\n---POST---\r?\n/).filter((x) => x.trim()).length} posts detected</span>
+              <span style={{ color: '#667085', fontSize: 13 }}>No historical posts required.</span>
             </div>
           </div>
 
           <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>
-            <h3 style={{ marginTop: 0 }}>What gets stored</h3>
+            <details>
+              <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Optional: improve initial voice learning with previous posts</summary>
+              <p style={{ color: '#667085', fontSize: 13, lineHeight: 1.55, marginBottom: 12 }}>
+                This is optional. Paste a few previous posts if you want a stronger initial writing signal. They are stored as private brand evidence. Brand OS does not scrape LinkedIn.
+              </p>
+              <textarea value={historicalPosts} onChange={(e) => setHistoricalPosts(e.target.value)} placeholder={'Post 1...\n\n---POST---\n\nPost 2...'} style={{ width: '100%', minHeight: 240, padding: 14, border: '1px solid #d0d5dd', borderRadius: 10, boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.5 }} />
+              <div style={{ marginTop: 10, color: '#667085', fontSize: 13 }}>
+                {historicalPosts.split(/\n---POST---\n|\n---POST---\r?\n/).filter((x) => x.trim()).length} posts ready to import
+              </div>
+            </details>
+          </div>
+
+          <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>
+            <h3 style={{ marginTop: 0 }}>How the memory evolves</h3>
             <div style={{ color: '#475467', lineHeight: 1.65, fontSize: 14 }}>
-              Identity and positioning · expertise signals · target audience · recurring themes · observed opinions · experience signals · post formats · hook/structure patterns · voice profile.
+              <b>Profile</b> → identity and positioning · <b>Approved/edited content</b> → voice signals · <b>Brand OS published posts</b> → durable content memory · <b>Research</b> → current opportunities.
             </div>
-            <p style={{ color: '#667085', fontSize: 13, marginBottom: 0 }}>After this is initialized, generation uses this memory plus recent historical examples. Approval remains mandatory before any LinkedIn action.</p>
+            <p style={{ color: '#667085', fontSize: 13, marginBottom: 0 }}>
+              When new Brand OS posts are published, they are added to the memory store automatically. The next generation refreshes the derived Brand DNA when new content is detected. Historical LinkedIn posts remain optional because LinkedIn restricts broad personal-post retrieval to approved permissions.
+            </p>
           </div>
 
           <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>

@@ -376,7 +376,11 @@ async def brand_status(
         "status": memory.status if memory else "NOT_INITIALIZED",
         "ready": bool(memory and memory.status == "READY"),
         "source_post_count": memory.source_post_count if memory else len(posts),
+        "current_post_count": len(posts),
         "summary": memory.summary if memory else None,
+        "continuous_learning": True,
+        "historical_import_optional": True,
+        "last_updated": memory.updated_at if memory else None,
         "profile": {
             "display_name": profile.display_name if profile else "User",
             "professional_title": profile.professional_title if profile else None,
@@ -403,8 +407,6 @@ async def brand_onboard(
     session: AsyncSession = Depends(get_session),
     _: str = Depends(require_roles("admin", "owner")),
 ):
-    if len(req.posts) < 3:
-        raise HTTPException(status_code=400, detail="Import at least 3 historical posts to build Brand DNA.")
 
     profile = await session.get(UserProfile, 1)
     if profile is None:
@@ -445,15 +447,41 @@ async def brand_onboard(
     return {"import": import_result, "brand_memory": memory}
 
 
+@app.post("/api/brand/initialize")
+async def brand_initialize(
+    req: ProfileRequest,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner")),
+):
+    profile = await session.get(UserProfile, 1)
+    if profile is None:
+        profile = UserProfile(id=1, role="owner")
+        session.add(profile)
+
+    profile.display_name = req.display_name.strip() or "User"
+    profile.professional_title = req.professional_title
+    profile.industry = req.industry
+    profile.audience = req.audience
+    profile.goals = ",".join(req.goals or [])
+    profile.brand_positioning = req.brand_positioning
+    profile.tone = req.tone
+    profile.role = profile.role or "owner"
+    await session.commit()
+
+    try:
+        memory = await BrandIntelligenceService(session).analyze(1)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Brand Intelligence initialization failed. Check Gemini configuration and try again.") from exc
+
+    return {"brand_memory": memory}
+
+
 @app.post("/api/brand/rebuild")
 async def rebuild_brand(
     session: AsyncSession = Depends(get_session),
     _: str = Depends(require_roles("admin", "owner")),
 ):
     service = BrandIntelligenceService(session)
-    posts = await service.get_posts(1, limit=100)
-    if len(posts) < 3:
-        raise HTTPException(status_code=400, detail="At least 3 historical posts are required.")
     try:
         return await service.analyze(1)
     except ValueError as exc:
