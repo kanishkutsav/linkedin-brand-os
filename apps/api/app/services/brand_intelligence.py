@@ -105,7 +105,7 @@ class BrandIntelligenceService:
             {
                 "id": post.id,
                 "published_at": post.published_at.isoformat() if post.published_at else None,
-                "body": post.body[:5000],
+                "body": post.body[:3500],
             }
             for post in posts
         ]
@@ -156,7 +156,7 @@ Return:
             },
             ensure_ascii=False,
         )
-        analysis = await service.generate_json(system, prompt)
+        analysis = await service.generate_json(system, prompt, max_output_tokens=3600)
 
         memory = await self.get_memory(profile_id)
         if memory is None:

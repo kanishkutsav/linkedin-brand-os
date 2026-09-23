@@ -489,7 +489,7 @@ export default function Home() {
               </>
             ) : (
               <div style={{ marginTop: 14, padding: 14, background: '#f8fafc', borderRadius: 10, color: '#475467', lineHeight: 1.55 }}>
-                Start with your professional profile. You do <b>not</b> need to paste your old LinkedIn posts.
+                Start with your professional profile, then add at least <b>3 previous LinkedIn posts</b> so Brand OS can learn your real writing style and recurring themes.
               </div>
             )}
           </div>
@@ -506,12 +506,6 @@ export default function Home() {
               <input value={brandGoals} onChange={(e) => setBrandGoals(e.target.value)} placeholder="Goals, comma separated" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
               <input value={brandTone} onChange={(e) => setBrandTone(e.target.value)} placeholder="Desired tone (optional)" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
               <input value={brandPositioning} onChange={(e) => setBrandPositioning(e.target.value)} placeholder="How you want to be known" style={{ padding: 12, border: '1px solid #d0d5dd', borderRadius: 8 }} />
-            </div>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 18, flexWrap: 'wrap' }}>
-              <button type="button" onClick={buildBrand} disabled={isBuildingBrand || historicalPostEntries.filter((x) => x.trim()).length < 3} style={{ background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: '11px 16px', cursor: isBuildingBrand ? 'wait' : 'pointer', fontWeight: 700 }}>
-                {isBuildingBrand ? 'Building Brand Intelligence…' : brand.ready ? 'Refresh Brand Intelligence' : 'Build Brand Intelligence'}
-              </button>
-              <span style={{ color: '#667085', fontSize: 13 }}>At least 3 previous posts are required.</span>
             </div>
           </div>
 
@@ -562,6 +556,13 @@ export default function Home() {
               {historicalPostEntries.length >= 20 ? 'Maximum of 20 posts reached' : '+ Add Post ' + (historicalPostEntries.length + 1)}
             </button>
 
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, margin: '4px 0 2px', flexWrap: 'wrap' }}>
+            <span style={{ color: '#667085', fontSize: 13 }}>At least 3 previous posts are required.</span>
+            <button type="button" onClick={buildBrand} disabled={isBuildingBrand || historicalPostEntries.filter((x) => x.trim()).length < 3} style={{ background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: '11px 16px', cursor: isBuildingBrand ? 'wait' : 'pointer', fontWeight: 700 }}>
+              {isBuildingBrand ? 'Building Brand Intelligence…' : brand.ready ? 'Refresh Brand Intelligence' : 'Build Brand Intelligence'}
+            </button>
           </div>
 
           <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>

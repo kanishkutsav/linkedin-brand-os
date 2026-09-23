@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import os
 import sqlite3
 from contextlib import asynccontextmanager
@@ -29,6 +30,8 @@ from app.models.models import ContentItem, ContentVersion, LinkedInConnection, U
 from app.services.approval import ApprovalService
 from app.services.auth_service import AuthService
 from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_sqlite_path() -> str | None:
@@ -449,7 +452,8 @@ async def brand_onboard(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Brand analysis failed. Check the Gemini configuration and try again.") from exc
+        logger.exception("Brand onboarding analysis failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Brand analysis failed. Gemini did not return a usable analysis. Please try again; your imported posts were saved.") from exc
 
     return {"import": import_result, "brand_memory": memory}
 
