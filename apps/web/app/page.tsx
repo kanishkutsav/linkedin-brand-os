@@ -411,8 +411,8 @@ export default function Home() {
 function LoginScreen({ error, onConnect }: { error: string | null; onConnect: () => void }) {
   return (
     <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 22, background: 'radial-gradient(circle at 20% 10%, #e9e5ff, transparent 28%), radial-gradient(circle at 90% 80%, #dff9fb, transparent 30%), #f6f7fb' }}>
-      <div style={{ width: '100%', maxWidth: 1040, display: 'grid', gridTemplateColumns: '1.05fr .95fr', background: '#fff', border: '1px solid #e7eaf0', borderRadius: 26, overflow: 'hidden', boxShadow: '0 30px 100px rgba(16,24,40,.13)' }}>
-        <div style={{ padding: '58px 54px', background: 'linear-gradient(145deg,#0b1020,#16132f 65%,#0b2430)', color: '#fff', position: 'relative', overflow: 'hidden' }}>
+      <div className="login-shell">
+        <div className="login-visual">
           <div className="brand-lockup" style={{ padding: 0 }}><div className="brand-mark"><Sparkles size={18}/></div><div><div className="brand-name">Brand OS</div><div className="brand-sub" style={{ color: '#7f8aa3' }}>Personal Brand Manager</div></div></div>
           <div style={{ position: 'relative', zIndex: 1, marginTop: 74 }}>
             <div className="page-kicker" style={{ color: '#bdb6ff' }}><Sparkles size={13}/> AI + human editorial control</div>
@@ -423,7 +423,7 @@ function LoginScreen({ error, onConnect }: { error: string | null; onConnect: ()
             </div>
           </div>
         </div>
-        <div style={{ padding: '58px 48px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <div className="login-form">
           <div className="page-kicker"><ShieldCheck size={13}/> Secure official connection</div>
           <h2 style={{ fontFamily: 'Space Grotesk', fontSize: 29, letterSpacing: '-.04em', margin: '10px 0 8px' }}>Connect LinkedIn</h2>
           <p style={{ color: '#667085', fontSize: 13, lineHeight: 1.6, margin: 0 }}>Brand OS uses LinkedIn's official OAuth flow. Your LinkedIn password is never entered into Brand OS.</p>
