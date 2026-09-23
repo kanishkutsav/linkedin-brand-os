@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+brand_os.db
+node_modules/
+.next/
+.env
+
+# Python local environment / runtime
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+apps/api/.env
+apps/api/brand_os.db
