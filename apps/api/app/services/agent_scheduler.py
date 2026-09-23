@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.models.models import AgentRun
+
 from app.agents.orchestrator import AgentOrchestrator
 from app.core.config import settings
 
@@ -68,8 +70,25 @@ class AgentScheduler:
 
     async def _run(self, mode: str) -> None:
         async with self.session_factory() as session:
-            orchestrator = AgentOrchestrator(session)
-            if mode == "calendar":
-                await orchestrator.run_calendar()
-            else:
-                await orchestrator.run_discovery()
+            run = AgentRun(
+                mode=mode,
+                trigger=f"scheduled:{mode}",
+                status="RUNNING",
+            )
+            session.add(run)
+            await session.flush()
+            try:
+                orchestrator = AgentOrchestrator(session)
+                if mode == "calendar":
+                    result = await orchestrator.run_calendar()
+                else:
+                    result = await orchestrator.run_discovery()
+                run.status = "SUCCEEDED"
+                run.created_count = result["created_count"]
+                run.details = str(result)
+            except Exception as exc:
+                run.status = "FAILED"
+                run.details = str(exc)
+            finally:
+                run.finished_at = datetime.now(ZoneInfo("UTC"))
+                await session.commit()
