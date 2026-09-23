@@ -22,7 +22,8 @@ type ApprovalItem = { id: number; status: ApprovalStatus; action_type: string; r
 type Profile = { display_name: string; role?: string };
 type LinkedInStatus = { connected: boolean; name?: string | null; email?: string | null; expires_at?: string | null };
 type BrandStatus = { ready: boolean; status: string; source_post_count: number; summary?: string | null; profile?: { display_name?: string; professional_title?: string | null; industry?: string | null; audience?: string | null; brand_positioning?: string | null; tone?: string | null } };
-type Tab = 'Dashboard' | 'Content' | 'Engagement' | 'Analytics' | 'Settings';
+type Opportunity = { id: number; title: string; topic: string; angle: string; pillar: string; format?: string; objective?: string; total_score: number; scores: Record<string, number>; rationale?: string; evidence?: { summary?: string; why_now?: string; source_hints?: string[]; grounding_queries?: string[] }; source_ids?: number[]; sources?: { title?: string; url?: string; domain?: string }[] };
+type Tab = 'Dashboard' | 'Research' | 'Content' | 'Engagement' | 'Analytics' | 'Settings';
 
 const statusTone: Record<string, { bg: string; color: string }> = {
   PENDING: { bg: '#ecfdf5', color: '#067647' }, EDITED: { bg: '#fff4e5', color: '#b54708' },
@@ -57,6 +58,8 @@ export default function Home() {
   const [draftTopic, setDraftTopic] = useState('');
   const [draftBody, setDraftBody] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [isResearching, setIsResearching] = useState(false);
 
   const headers = (authToken = token) => authToken ? { Authorization: `Bearer ${authToken}` } : {};
 
@@ -88,11 +91,12 @@ export default function Home() {
   const fetchData = async (authToken: string | null = token) => {
     if (!authToken) return;
     try {
-      const [profileRes, approvalsRes, linkedinRes, brandRes] = await Promise.all([
+      const [profileRes, approvalsRes, linkedinRes, brandRes, opportunityRes] = await Promise.all([
         fetch(`${API_BASE}/api/auth/me`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/dashboard/approvals`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/linkedin/status`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/brand/status`, { headers: headers(authToken) }),
+        fetch(`${API_BASE}/api/research/opportunities`, { headers: headers(authToken) }),
       ]);
       if (profileRes.status === 401 || approvalsRes.status === 401) {
         window.localStorage.removeItem(STORAGE_KEY);
@@ -114,6 +118,8 @@ export default function Home() {
       setBrandAudience(brandProfile.audience || '');
       setBrandPositioning(brandProfile.brand_positioning || '');
       setBrandTone(brandProfile.tone || '');
+      const opportunityJson = opportunityRes.ok ? await opportunityRes.json() : { opportunities: [] };
+      setOpportunities(opportunityJson.opportunities || []);
       const nextQueue: ApprovalItem[] = (approvalsJson.pending_approvals || []).map((item: any) => ({
         id: item.id, status: item.status, action_type: item.action_type, reason: item.reason, content: item.content || '',
       }));
@@ -205,6 +211,31 @@ export default function Home() {
       setError(e instanceof Error ? e.message : 'Content generation failed');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const discoverResearch = async () => {
+    if (!token) return;
+    if (!brand.ready) {
+      setTab('Settings');
+      setError('Build Brand DNA before running live research.');
+      return;
+    }
+    setIsResearching(true); setError(null); setNotice(null);
+    try {
+      const res = await fetch(API_BASE + '/api/research/discover', {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(getApiError(data, 'Live research failed'));
+      setOpportunities(data.opportunities || []);
+      setNotice('Fresh research completed. Opportunities were ranked using Brand Fit, relevance, timeliness, evidence, novelty and risk.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Live research failed');
+    } finally {
+      setIsResearching(false);
     }
   };
 
@@ -344,7 +375,7 @@ export default function Home() {
                 <button type="button" onClick={generateContent} disabled={isGenerating} style={{ background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: '9px 14px', cursor: isGenerating ? 'wait' : 'pointer', display: 'flex', gap: 7, alignItems: 'center', fontWeight: 700, opacity: isGenerating ? 0.7 : 1 }}>
                   <Sparkles size={15}/> {isGenerating ? 'Generating…' : 'Generate content'}
                 </button>
-                <button type="button" onClick={() => setTab('Content')} style={{ background: '#fff', color: '#344054', border: '1px solid #d0d5dd', borderRadius: 8, padding: '9px 12px', cursor: 'pointer', display: 'flex', gap: 7, alignItems: 'center' }}><Plus size={15}/> New draft</button>
+                <button type="button" onClick={() => setTab('Research')} style={navStyle(tab === 'Research')}><Search size={16}/> Research</button>
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
@@ -369,6 +400,30 @@ export default function Home() {
             </> : <div style={{ color: '#667085' }}>Select a queue item to review it.</div>}
           </div>
         </>}
+
+        {tab === 'Research' && <div style={{ display: 'grid', gap: 18 }}>
+          <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div><h2 style={{ margin: 0 }}>Research & Content Opportunities</h2><p style={{ color: '#667085', marginBottom: 0 }}>Current web evidence is combined with your Brand DNA before an idea reaches the drafting engine.</p></div>
+              <button type="button" onClick={discoverResearch} disabled={isResearching} style={{ background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: '10px 14px', fontWeight: 700, cursor: isResearching ? 'wait' : 'pointer' }}><Search size={15}/> {isResearching ? 'Researching…' : 'Research now'}</button>
+            </div>
+          </div>
+          {opportunities.length === 0 ? <div style={{ background: '#fff', border: '1px dashed #d0d5dd', borderRadius: 14, padding: 28, color: '#667085' }}>No researched opportunities yet. Click <b>Research now</b>.</div> :
+            opportunities.map((item) => <div key={item.id} style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 22 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 260 }}><div style={{ fontSize: 12, color: '#667085', marginBottom: 6 }}>{item.pillar} · {item.format || 'Insight post'}</div><h3 style={{ margin: 0 }}>{item.title}</h3><p style={{ color: '#475467', lineHeight: 1.55 }}>{item.angle}</p></div>
+                <div style={{ minWidth: 130, textAlign: 'center', padding: 14, background: '#f8fafc', borderRadius: 12 }}><div style={{ fontSize: 30, fontWeight: 800 }}>{Math.round(item.total_score)}</div><div style={{ color: '#667085', fontSize: 12 }}>Opportunity score</div></div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 8, marginTop: 10 }}>
+                {Object.entries(item.scores || {}).filter(([k]) => k !== 'risk').slice(0, 7).map(([key, value]) => <div key={key} style={{ padding: 9, background: '#f8fafc', borderRadius: 8 }}><div style={{ fontSize: 11, color: '#667085' }}>{key.replaceAll('_',' ')}</div><b>{Math.round(value)}</b></div>)}
+              </div>
+              {item.evidence?.summary && <div style={{ marginTop: 16, padding: 14, borderLeft: '3px solid #98a2b3', background: '#f8fafc', lineHeight: 1.55 }}><b>Evidence:</b> {item.evidence.summary}</div>}
+              {item.evidence?.why_now && <p style={{ color: '#475467' }}><b>Why now:</b> {item.evidence.why_now}</p>}
+              {item.rationale && <p style={{ color: '#667085', fontSize: 13 }}><b>Why it survived:</b> {item.rationale}</p>}
+              {item.sources?.length ? <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>{item.sources.slice(0, 5).map((source, idx) => source.url ? <a key={idx} href={source.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: '#175cd3', display: 'inline-flex', gap: 5, alignItems: 'center' }}>{source.title || source.domain || 'Source'} <ExternalLink size={12}/></a> : null)}</div> : null}
+            </div>)
+          }
+        </div>}
 
         {tab === 'Content' && <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>
           <h2 style={{ marginTop: 0 }}>Content Studio</h2><p style={{ color: '#667085' }}>Create a draft. Guardrails decide whether it enters the approval queue.</p>
