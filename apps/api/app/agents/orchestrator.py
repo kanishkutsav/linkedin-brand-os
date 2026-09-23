@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.strategy import ContentStrategyService
 from app.guards.guardrails import run_content_guards
-from app.models.models import AuditLog, ContentItem, ContentVersion, UserProfile, VoiceMemory
+from app.models.models import AuditLog, ContentItem, ContentVersion, UserProfile
 from app.services.approval import ApprovalService
 
 
@@ -125,7 +124,7 @@ class AgentOrchestrator:
         for idea in strategy["content_calendar"][:3]:
             item_id = await self._create_candidate(
                 title=idea["topic"],
-                topic=f'{idea["topic"]} — scheduled {idea["date"]}',
+                topic=idea["topic"],
                 pillar=idea["pillar"],
                 objective=idea["objective"],
                 trigger=trigger,
