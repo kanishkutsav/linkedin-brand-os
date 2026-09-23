@@ -28,7 +28,6 @@ class GeminiService:
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 response_mime_type="application/json",
-                temperature=0.7,
                 max_output_tokens=1800,
             ),
         )
