@@ -8,6 +8,13 @@ import {
 } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+function getApiError(data: any, fallback: string) {
+  if (typeof data?.detail === 'string') return data.detail;
+  if (Array.isArray(data?.detail)) return data.detail.map((item: any) => item?.msg || String(item)).join('; ');
+  if (typeof data?.message === 'string') return data.message;
+  return fallback;
+}
 const STORAGE_KEY = 'brand-os-token';
 
 type ApprovalStatus = 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'REJECTED' | 'EXECUTED';
@@ -56,7 +63,7 @@ export default function Home() {
       })
         .then(async (res) => {
           const data = await res.json();
-          if (!res.ok) throw new Error(data.detail || 'LinkedIn connection failed');
+          if (!res.ok) throw new Error(getApiError(data, 'LinkedIn connection failed'));
           window.localStorage.setItem(STORAGE_KEY, data.token);
           setToken(data.token);
           setNotice('LinkedIn account connected successfully.');
