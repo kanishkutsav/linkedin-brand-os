@@ -21,6 +21,7 @@ type ApprovalStatus = 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'REJEC
 type ApprovalItem = { id: number; status: ApprovalStatus; action_type: string; reason: string | null; content: string };
 type Profile = { display_name: string; role?: string };
 type LinkedInStatus = { connected: boolean; name?: string | null; email?: string | null; expires_at?: string | null };
+type BrandStatus = { ready: boolean; status: string; source_post_count: number; summary?: string | null; profile?: { display_name?: string; professional_title?: string | null; industry?: string | null; audience?: string | null; brand_positioning?: string | null; tone?: string | null } };
 type Tab = 'Dashboard' | 'Content' | 'Engagement' | 'Analytics' | 'Settings';
 
 const statusTone: Record<string, { bg: string; color: string }> = {
@@ -33,6 +34,15 @@ export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile>({ display_name: 'User', role: 'owner' });
   const [linkedin, setLinkedin] = useState<LinkedInStatus>({ connected: false });
+  const [brand, setBrand] = useState<BrandStatus>({ ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 });
+  const [brandTitle, setBrandTitle] = useState('');
+  const [brandIndustry, setBrandIndustry] = useState('');
+  const [brandAudience, setBrandAudience] = useState('');
+  const [brandPositioning, setBrandPositioning] = useState('');
+  const [brandTone, setBrandTone] = useState('');
+  const [brandGoals, setBrandGoals] = useState('');
+  const [historicalPosts, setHistoricalPosts] = useState('');
+  const [isBuildingBrand, setIsBuildingBrand] = useState(false);
   const [queue, setQueue] = useState<ApprovalItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | 'PENDING' | 'EDITED' | 'REGENERATED'>('all');
@@ -78,10 +88,11 @@ export default function Home() {
   const fetchData = async (authToken: string | null = token) => {
     if (!authToken) return;
     try {
-      const [profileRes, approvalsRes, linkedinRes] = await Promise.all([
+      const [profileRes, approvalsRes, linkedinRes, brandRes] = await Promise.all([
         fetch(`${API_BASE}/api/auth/me`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/dashboard/approvals`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/linkedin/status`, { headers: headers(authToken) }),
+        fetch(`${API_BASE}/api/brand/status`, { headers: headers(authToken) }),
       ]);
       if (profileRes.status === 401 || approvalsRes.status === 401) {
         window.localStorage.removeItem(STORAGE_KEY);
@@ -95,6 +106,14 @@ export default function Home() {
       const approvalsJson = await approvalsRes.json();
       setProfile({ display_name: profileJson.display_name || 'User', role: profileJson.role || 'owner' });
       setLinkedInSafe(linkedinRes.ok ? await linkedinRes.json() : { connected: false });
+      const brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
+      setBrand(brandJson);
+      const brandProfile = brandJson.profile || {};
+      setBrandTitle(brandProfile.professional_title || '');
+      setBrandIndustry(brandProfile.industry || '');
+      setBrandAudience(brandProfile.audience || '');
+      setBrandPositioning(brandProfile.brand_positioning || '');
+      setBrandTone(brandProfile.tone || '');
       const nextQueue: ApprovalItem[] = (approvalsJson.pending_approvals || []).map((item: any) => ({
         id: item.id, status: item.status, action_type: item.action_type, reason: item.reason, content: item.content || '',
       }));
@@ -162,6 +181,11 @@ export default function Home() {
 
   const generateContent = async () => {
     if (!token) return;
+    if (!brand.ready) {
+      setTab('Settings');
+      setError('Build your Brand DNA first. The agent will not generate generic content before onboarding.');
+      return;
+    }
     setIsGenerating(true); setError(null); setNotice(null);
     try {
       const res = await fetch(API_BASE + '/api/agent/events', {
@@ -181,6 +205,41 @@ export default function Home() {
       setError(e instanceof Error ? e.message : 'Content generation failed');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const buildBrand = async () => {
+    if (!token) return;
+    const blocks = historicalPosts.split(/\n---POST---\n|\n---POST---\r?\n/).map((body) => body.trim()).filter(Boolean);
+    if (blocks.length < 3) {
+      setError('Add at least 3 historical posts, separated by a line containing ---POST---.');
+      return;
+    }
+    setIsBuildingBrand(true); setError(null); setNotice(null);
+    try {
+      const res = await fetch(API_BASE + '/api/brand/onboard', {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          display_name: profile.display_name,
+          professional_title: brandTitle || null,
+          industry: brandIndustry || null,
+          audience: brandAudience || null,
+          goals: brandGoals.split(',').map((x) => x.trim()).filter(Boolean),
+          brand_positioning: brandPositioning || null,
+          tone: brandTone || null,
+          posts: blocks.map((body) => ({ body })),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(getApiError(data, 'Brand onboarding failed'));
+      setBrand({ ...data.brand_memory, ready: data.brand_memory?.status === 'READY' });
+      setNotice('Brand DNA built and stored. Future content generation will use your profile and historical posts.');
+      await fetchData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Brand onboarding failed');
+    } finally {
+      setIsBuildingBrand(false);
     }
   };
 
