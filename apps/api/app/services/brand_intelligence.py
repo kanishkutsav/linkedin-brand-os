@@ -99,10 +99,6 @@ class BrandIntelligenceService:
             select(func.count(HistoricalPost.id)).where(HistoricalPost.profile_id == profile_id)
         )
         total_post_count = int(count_result.scalar_one() or 0)
-        count_result = await self.session.execute(
-            select(func.count(HistoricalPost.id)).where(HistoricalPost.profile_id == profile_id)
-        )
-        total_post_count = int(count_result.scalar_one() or 0)
 
         service = GeminiService()
         examples = [
@@ -227,7 +223,7 @@ Return:
     async def generation_context(self, profile_id: int = 1) -> dict:
         memory = await self.get_memory(profile_id)
         if memory is None or memory.status != "READY":
-            raise ValueError("Brand DNA is not initialized. Import your historical posts and build Brand DNA first.")
+            raise ValueError("Brand Intelligence is not initialized. Complete the lightweight profile setup first.")
 
         count_result = await self.session.execute(
             select(func.count(HistoricalPost.id)).where(HistoricalPost.profile_id == profile_id)
