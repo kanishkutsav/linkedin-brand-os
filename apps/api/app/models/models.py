@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, DateTime, Boolean, Integer, ForeignKey
+from sqlalchemy import String, Text, DateTime, Boolean, Integer, ForeignKey, Float
 from sqlalchemy.orm import Mapped, mapped_column
 from .base import Base
 
@@ -227,15 +227,15 @@ class ContentOpportunity(Base):
     format: Mapped[str | None] = mapped_column(String(100), nullable=True)
     objective: Mapped[str | None] = mapped_column(String(300), nullable=True)
     status: Mapped[str] = mapped_column(String(40), default="DISCOVERED")
-    brand_fit: Mapped[float] = mapped_column(Integer, default=0)
-    audience_relevance: Mapped[float] = mapped_column(Integer, default=0)
-    timeliness: Mapped[float] = mapped_column(Integer, default=0)
-    evidence_strength: Mapped[float] = mapped_column(Integer, default=0)
-    novelty: Mapped[float] = mapped_column(Integer, default=0)
-    conversation_potential: Mapped[float] = mapped_column(Integer, default=0)
-    authenticity: Mapped[float] = mapped_column(Integer, default=0)
-    risk: Mapped[float] = mapped_column(Integer, default=0)
-    total_score: Mapped[float] = mapped_column(Integer, default=0)
+    brand_fit: Mapped[float] = mapped_column(Float, default=0)
+    audience_relevance: Mapped[float] = mapped_column(Float, default=0)
+    timeliness: Mapped[float] = mapped_column(Float, default=0)
+    evidence_strength: Mapped[float] = mapped_column(Float, default=0)
+    novelty: Mapped[float] = mapped_column(Float, default=0)
+    conversation_potential: Mapped[float] = mapped_column(Float, default=0)
+    authenticity: Mapped[float] = mapped_column(Float, default=0)
+    risk: Mapped[float] = mapped_column(Float, default=0)
+    total_score: Mapped[float] = mapped_column(Float, default=0)
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     research_source_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     evidence_json: Mapped[str | None] = mapped_column(Text, nullable=True)
