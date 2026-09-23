@@ -29,6 +29,8 @@ def _utc_now() -> datetime:
 
 
 def redirect_uri() -> str:
+    if settings.linkedin_redirect_uri:
+        return settings.linkedin_redirect_uri.rstrip("/")
     base = (settings.api_base_url or settings.render_external_url or "").rstrip("/")
     if not base:
         raise HTTPException(status_code=500, detail="API_BASE_URL is not configured")
