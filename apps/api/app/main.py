@@ -20,6 +20,7 @@ from app.auth import require_roles
 from app.core.config import settings
 from app.db.database import engine, get_session, SessionLocal
 from app.services.agent_scheduler import AgentScheduler
+from app.services.brand_intelligence import BrandIntelligenceService
 from app.guards.guardrails import run_content_guards
 from app.integrations.linkedin import MockLinkedInAdapter, OfficialLinkedInAdapter
 from app.models.base import Base
@@ -147,6 +148,28 @@ class ProfileRequest(BaseModel):
     goals: list[str] | None = None
     brand_positioning: str | None = None
     tone: str | None = None
+
+
+class BrandOnboardingPost(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    body: str
+    published_at: str | None = None
+    external_id: str | None = None
+    metadata: dict[str, object] = {}
+
+
+class BrandOnboardingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str = "User"
+    professional_title: str | None = None
+    industry: str | None = None
+    audience: str | None = None
+    goals: list[str] = []
+    brand_positioning: str | None = None
+    tone: str | None = None
+    posts: list[BrandOnboardingPost] = []
 
 
 class ApprovalEditRequest(BaseModel):
@@ -337,6 +360,105 @@ async def upsert_profile(req: ProfileRequest, session: AsyncSession = Depends(ge
     await session.commit()
     await session.refresh(profile)
     return {"id": profile.id, "display_name": profile.display_name, "tone": profile.tone, "role": profile.role or "owner"}
+
+
+@app.get("/api/brand/status")
+async def brand_status(
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+):
+    service = BrandIntelligenceService(session)
+    memory = await service.get_memory(1)
+    posts = await service.get_posts(1, limit=100)
+    profile = await session.get(UserProfile, 1)
+    return {
+        "status": memory.status if memory else "NOT_INITIALIZED",
+        "ready": bool(memory and memory.status == "READY"),
+        "source_post_count": memory.source_post_count if memory else len(posts),
+        "summary": memory.summary if memory else None,
+        "profile": {
+            "display_name": profile.display_name if profile else "User",
+            "professional_title": profile.professional_title if profile else None,
+            "industry": profile.industry if profile else None,
+            "audience": profile.audience if profile else None,
+            "brand_positioning": profile.brand_positioning if profile else None,
+            "tone": profile.tone if profile else None,
+        },
+    }
+
+
+@app.get("/api/brand/memory")
+async def brand_memory(
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+):
+    service = BrandIntelligenceService(session)
+    return service.serialize(await service.get_memory(1))
+
+
+@app.post("/api/brand/onboard")
+async def brand_onboard(
+    req: BrandOnboardingRequest,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner")),
+):
+    if len(req.posts) < 3:
+        raise HTTPException(status_code=400, detail="Import at least 3 historical posts to build Brand DNA.")
+
+    profile = await session.get(UserProfile, 1)
+    if profile is None:
+        profile = UserProfile(id=1, role="owner")
+        session.add(profile)
+
+    profile.display_name = req.display_name.strip() or "User"
+    profile.professional_title = req.professional_title
+    profile.industry = req.industry
+    profile.audience = req.audience
+    profile.goals = ",".join(req.goals or [])
+    profile.brand_positioning = req.brand_positioning
+    profile.tone = req.tone
+    profile.role = profile.role or "owner"
+    await session.commit()
+
+    service = BrandIntelligenceService(session)
+    import_result = await service.import_posts(
+        [
+            {
+                "body": post.body,
+                "published_at": post.published_at,
+                "external_id": post.external_id,
+                "metadata": post.metadata,
+                "source": "user_import",
+            }
+            for post in req.posts
+        ],
+        profile_id=1,
+    )
+    try:
+        memory = await service.analyze(1)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Brand analysis failed. Check the Gemini configuration and try again.") from exc
+
+    return {"import": import_result, "brand_memory": memory}
+
+
+@app.post("/api/brand/rebuild")
+async def rebuild_brand(
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner")),
+):
+    service = BrandIntelligenceService(session)
+    posts = await service.get_posts(1, limit=100)
+    if len(posts) < 3:
+        raise HTTPException(status_code=400, detail="At least 3 historical posts are required.")
+    try:
+        return await service.analyze(1)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Brand analysis failed. Check the Gemini configuration and try again.") from exc
 
 
 @app.get("/api/dashboard/approvals")
