@@ -2,7 +2,7 @@ from datetime import datetime, timezone, timedelta
 import hashlib
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.models import ApprovalRequest, ContentVersion, AuditLog, SystemFlag, FeedbackEntry
+from app.models.models import ApprovalRequest, ContentVersion, AuditLog, SystemFlag, FeedbackEntry, HistoricalPost
 from app.core.config import settings
 
 
@@ -142,6 +142,31 @@ class ApprovalService:
         if approval.approval_hash != expected: raise ValueError("Approval token/content hash mismatch")
         result = adapter.publish_post(version.body)
         approval.status = "EXECUTED" if result.success else "FAILED"
+
+        # A successfully published Brand OS post becomes durable first-party
+        # brand evidence. This is the automatic learning path for content created
+        # and published through the product; arbitrary LinkedIn scraping is never used.
+        if result.success:
+            digest = hashlib.sha256(version.body.encode("utf-8")).hexdigest()
+            existing = await self.session.execute(
+                select(HistoricalPost).where(
+                    HistoricalPost.profile_id == 1,
+                    HistoricalPost.content_hash == digest,
+                )
+            )
+            if existing.scalar_one_or_none() is None:
+                self.session.add(
+                    HistoricalPost(
+                        profile_id=1,
+                        external_id=result.external_id,
+                        body=version.body,
+                        content_hash=digest,
+                        published_at=datetime.now(timezone.utc),
+                        source="brand_os_publish",
+                        metadata_json=f'{{"approval_id": {approval.id}, "content_version_id": {version.id}}}',
+                    )
+                )
+
         self.session.add(AuditLog(event_type="ACTION_EXECUTED", actor="action-executor", payload=f"approval={approval.id};result={result.message}"))
         await self.session.commit()
         return result
