@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.research import ResearchService
 from app.agents.orchestrator import AgentOrchestrator
 from app.agents.strategy import ContentStrategyService
+from app.agents.research import ResearchService
 from app.agents.voice import VoiceProfileBuilder
 from app.auth import require_roles
 from app.core.config import settings
@@ -127,8 +128,8 @@ class StrategyRequest(BaseModel):
 class ResearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    topic: str
-    audience: str
+    topic: str | None = None
+    audience: str | None = None
     sources: list[dict[str, str]] = []
 
 
@@ -551,9 +552,44 @@ async def recommend_strategy(req: StrategyRequest):
     return ContentStrategyService().recommend(req.goal, req.audience)
 
 
+@app.post("/api/research/discover")
+async def research_discover(
+    req: ResearchRequest,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+):
+    try:
+        opportunities = await ResearchService(session).research_and_rank(
+            profile_id=1,
+            requested_topic=req.topic,
+            candidate_limit=8,
+        )
+        return {"opportunities": opportunities}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Live research failed. Check the Gemini configuration and try again.") from exc
+
+
+@app.get("/api/research/opportunities")
+async def research_opportunities(
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+):
+    return {"opportunities": await ResearchService(session).list_opportunities(1, 20)}
+
+
 @app.post("/api/research/evidence")
-async def build_research_evidence(req: ResearchRequest):
-    return ResearchService().build_evidence_pack(req.topic, req.audience, req.sources)
+async def build_research_evidence(
+    req: ResearchRequest,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+):
+    return ResearchService(session).build_evidence_pack(
+        req.topic or "",
+        req.audience or "",
+        req.sources,
+    )
 
 
 @app.post("/api/voice/profile")
