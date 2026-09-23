@@ -437,7 +437,7 @@ export default function Home() {
             <p style={{ color: '#667085' }}>Signed in as <b>{profile.display_name}</b>. {linkedin.connected ? 'Official LinkedIn posting is connected.' : 'Connect LinkedIn to enable official API actions.'}</p>
             <button type="button" onClick={connectLinkedIn} style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #d0d5dd', background: '#fff', cursor: 'pointer' }}>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
           </div>
-        </div>}}
+        </div>}
       </section>
     </main>
   );
