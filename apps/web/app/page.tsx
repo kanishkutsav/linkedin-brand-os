@@ -562,11 +562,6 @@ export default function Home() {
               {historicalPostEntries.length >= 20 ? 'Maximum of 20 posts reached' : '+ Add Post ' + (historicalPostEntries.length + 1)}
             </button>
 
-            <div style={{ marginTop: 12, color: historicalPostEntries.filter((x) => x.trim()).length >= 3 ? '#067647' : '#b54708', fontSize: 13, fontWeight: 600 }}>
-              {historicalPostEntries.filter((x) => x.trim()).length >= 3
-                ? 'Minimum requirement met. You can add more posts or build Brand Intelligence now.'
-                : 'Add ' + (3 - historicalPostEntries.filter((x) => x.trim()).length) + ' more post' + (3 - historicalPostEntries.filter((x) => x.trim()).length === 1 ? '' : 's') + ' to continue.'}
-            </div>
           </div>
 
           <div style={{ background: '#fff', border: '1px solid #e4e7ec', borderRadius: 14, padding: 28 }}>
