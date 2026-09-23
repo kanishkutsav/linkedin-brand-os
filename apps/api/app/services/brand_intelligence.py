@@ -94,7 +94,7 @@ class BrandIntelligenceService:
         if profile is None:
             raise ValueError("Complete your profile before building Brand DNA.")
 
-        posts = await self.get_posts(profile_id, limit=50)
+        posts = await self.get_posts(profile_id, limit=20)
         if not posts:
             raise ValueError("Import at least 3 historical posts before building Brand DNA.")
 
@@ -147,6 +147,7 @@ Return:
                 },
                 "historical_posts": examples,
                 "post_count": len(examples),
+                "analysis_limit": 20,
             },
             ensure_ascii=False,
         )
