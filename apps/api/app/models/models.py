@@ -116,6 +116,37 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class LinkedInConnection(Base):
+    __tablename__ = "linkedin_connections"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("auth_users.id"), unique=True, index=True, nullable=False)
+    member_sub: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    access_token: Mapped[str] = mapped_column(Text, nullable=False)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    linkedin_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    linkedin_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class LinkedInOAuthState(Base):
+    __tablename__ = "linkedin_oauth_states"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    state_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class LinkedInOAuthExchange(Base):
+    __tablename__ = "linkedin_oauth_exchanges"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("auth_users.id"), index=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class SystemFlag(Base):
     __tablename__ = "system_flags"
     id: Mapped[int] = mapped_column(primary_key=True)
