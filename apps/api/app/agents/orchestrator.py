@@ -1,21 +1,32 @@
 from __future__ import annotations
 
 import hashlib
+import json
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.strategy import ContentStrategyService
+from app.agents.voice import VoiceProfileBuilder
+from app.core.config import settings
 from app.guards.guardrails import run_content_guards
-from app.models.models import AuditLog, ContentItem, ContentVersion, UserProfile
+from app.models.models import (
+    AuditLog,
+    ContentItem,
+    ContentVersion,
+    FeedbackEntry,
+    UserProfile,
+    VoiceMemory,
+)
 from app.services.approval import ApprovalService
+from app.services.gemini_service import GeminiService
 
 
 class AgentOrchestrator:
-    """Coordinates safe, approval-first content discovery and drafting.
+    """Approval-first content pipeline.
 
-    External LinkedIn actions are intentionally out of scope here. The orchestrator
-    may create ideas/drafts and approval requests, but only a human-approved
-    approval request can reach the LinkedIn action executor.
+    Gemini may research at a high level, select an angle and draft content.
+    It cannot publish, comment, like, DM, connect or otherwise act externally.
     """
 
     def __init__(self, session: AsyncSession):
@@ -39,11 +50,63 @@ class AgentOrchestrator:
             await self.session.flush()
         return profile
 
+    async def _voice(self) -> dict:
+        memory = (await self.session.execute(select(VoiceMemory).limit(1))).scalar_one_or_none()
+        if memory is not None:
+            return {
+                "tone": memory.tone,
+                "sentence_style": memory.sentence_style,
+                "vocabulary": memory.vocabulary,
+                "preferred_phrases": memory.preferred_phrases,
+                "avoid_phrases": memory.avoid_phrases,
+                "emoji_usage": memory.emoji_usage,
+                "humor_style": memory.humor_style,
+                "technical_depth": memory.technical_depth,
+                "opinion_style": memory.opinion_style,
+                "storytelling_style": memory.storytelling_style,
+            }
+
+        result = await self.session.execute(
+            select(ContentVersion.body)
+            .join(FeedbackEntry, FeedbackEntry.content_version_id == ContentVersion.id)
+            .where(FeedbackEntry.action == "APPROVED")
+            .limit(10)
+        )
+        examples = [row[0] for row in result.all()]
+        return VoiceProfileBuilder().learn(examples)
+
     async def _is_duplicate_topic(self, topic: str) -> bool:
         result = await self.session.execute(
             select(ContentItem).where(ContentItem.topic == topic).limit(1)
         )
         return result.scalar_one_or_none() is not None
+
+    async def _generate_with_gemini(
+        self,
+        *,
+        profile: UserProfile,
+        title: str,
+        topic: str,
+        pillar: str,
+        objective: str,
+    ) -> dict:
+        service = GeminiService()
+        return await service.create_post(
+            profile={
+                "name": profile.display_name,
+                "title": profile.professional_title,
+                "industry": profile.industry,
+                "audience": profile.audience,
+                "goals": profile.goals,
+                "positioning": profile.brand_positioning,
+                "tone": profile.tone,
+            },
+            topic=topic,
+            pillar=pillar,
+            objective=objective,
+            evidence=[],
+            voice=await self._voice(),
+        )
 
     async def _create_candidate(
         self,
@@ -58,25 +121,49 @@ class AgentOrchestrator:
             return None
 
         profile = await self._profile()
-        audience = profile.audience or "professional audience"
-        body = (
-            f"{title}\n\n"
-            f"A practical way to think about {topic.lower()} is to start with the "
-            f"business problem, make the workflow explicit, and separate assumptions "
-            f"from evidence.\n\n"
-            f"For {audience}, three questions are useful:\n"
-            f"1. What is the actual bottleneck?\n"
-            f"2. Which part can be standardized or automated safely?\n"
-            f"3. What should remain under human review?\n\n"
-            f"The useful takeaway is not to automate everything. It is to design a "
-            f"system where automation handles repeatable work and people retain "
-            f"control over decisions that carry meaningful risk.\n\n"
-            f"Objective: {objective}"
-        )
+
+        generated = None
+        if settings.gemini_api_key:
+            generated = await self._generate_with_gemini(
+                profile=profile,
+                title=title,
+                topic=topic,
+                pillar=pillar,
+                objective=objective,
+            )
+
+        if generated:
+            final_title = str(generated.get("title") or title)[:200]
+            body = str(generated.get("body") or "").strip()
+            angle = str(generated.get("angle") or "").strip()
+            claims = generated.get("claims") or []
+            confidence = str(generated.get("confidence") or "medium")
+        else:
+            final_title = title
+            angle = "Focus on the practical tradeoffs behind the topic."
+            claims = []
+            confidence = "low"
+            audience = profile.audience or "professional audience"
+            body = (
+                f"{title}\n\n"
+                f"A practical way to think about {topic.lower()} is to start with the "
+                f"business problem, make the workflow explicit, and separate assumptions "
+                f"from evidence.\n\n"
+                f"For {audience}, three questions are useful:\n"
+                f"1. What is the actual bottleneck?\n"
+                f"2. Which part can be standardized or automated safely?\n"
+                f"3. What should remain under human review?\n\n"
+                f"The useful takeaway is not to automate everything. It is to design a "
+                f"system where automation handles repeatable work and people retain "
+                f"control over decisions that carry meaningful risk."
+            )
+
+        if not body:
+            raise ValueError("Gemini did not produce a usable draft.")
 
         guard = run_content_guards(body)
         item = ContentItem(
-            title=title,
+            title=final_title,
             topic=topic,
             pillar=pillar,
             status="AWAITING_APPROVAL" if guard.passed else "EDIT_REQUIRED",
@@ -94,13 +181,30 @@ class AgentOrchestrator:
         self.session.add(version)
         await self.session.flush()
 
+        metadata = {
+            "trigger": trigger,
+            "objective": objective,
+            "angle": angle,
+            "claims": claims,
+            "confidence": confidence,
+            "generator": "gemini" if generated else "deterministic_fallback",
+        }
+
         if guard.passed:
             approval = await ApprovalService(self.session).request(version)
             self.session.add(
                 AuditLog(
                     event_type="AGENT_CANDIDATE_CREATED",
                     actor="agent-orchestrator",
-                    payload=f"approval={approval.id};trigger={trigger};topic={topic}",
+                    payload=json.dumps(
+                        {
+                            "approval": approval.id,
+                            "content": item.id,
+                            "topic": topic,
+                            "metadata": metadata,
+                        },
+                        ensure_ascii=False,
+                    ),
                 )
             )
         else:
@@ -108,9 +212,18 @@ class AgentOrchestrator:
                 AuditLog(
                     event_type="AGENT_CANDIDATE_BLOCKED",
                     actor="agent-orchestrator",
-                    payload=f"content={item.id};trigger={trigger};issues={';'.join(guard.issues)}",
+                    payload=json.dumps(
+                        {
+                            "content": item.id,
+                            "topic": topic,
+                            "issues": guard.issues,
+                            "metadata": metadata,
+                        },
+                        ensure_ascii=False,
+                    ),
                 )
             )
+
         await self.session.commit()
         return item.id
 
@@ -174,10 +287,10 @@ class AgentOrchestrator:
         objective = payload.get("objective") or "Respond to a relevant event"
 
         item_id = await self._create_candidate(
-            title=title,
-            topic=topic,
-            pillar=pillar,
-            objective=objective,
+            title=str(title),
+            topic=str(topic),
+            pillar=str(pillar),
+            objective=str(objective),
             trigger=f"event:{event_type}",
         )
         return {

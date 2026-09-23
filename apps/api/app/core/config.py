@@ -21,8 +21,9 @@ class Settings(BaseSettings):
     linkedin_api_base_url: str | None = None
     api_base_url: str | None = None
 
-    # Agent orchestration. All three modes are enabled by default, but none can
-    # publish externally; publishing still requires a human approval.
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-3.8-flash"
+
     agent_enabled: bool = True
     agent_timezone: str = "Asia/Kolkata"
     agent_daily_discovery_enabled: bool = True
