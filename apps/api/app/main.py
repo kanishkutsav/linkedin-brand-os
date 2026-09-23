@@ -453,7 +453,7 @@ async def brand_onboard(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Brand onboarding analysis failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Brand analysis failed. Gemini did not return a usable analysis. Please try again; your imported posts were saved.") from exc
+        raise HTTPException(status_code=502, detail="Brand analysis failed. Neither configured LLM provider returned a usable analysis. Please try again; your imported posts were saved.") from exc
 
     return {"import": import_result, "brand_memory": memory}
 
@@ -482,7 +482,7 @@ async def brand_initialize(
     try:
         memory = await BrandIntelligenceService(session).analyze(1)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Brand Intelligence initialization failed. Check Gemini configuration and try again.") from exc
+        raise HTTPException(status_code=502, detail="Brand Intelligence initialization failed. Check the configured LLM providers and try again.") from exc
 
     return {"brand_memory": memory}
 
@@ -498,7 +498,7 @@ async def rebuild_brand(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Brand analysis failed. Check the Gemini configuration and try again.") from exc
+        raise HTTPException(status_code=502, detail="Brand analysis failed. Check the configured LLM providers and try again.") from exc
 
 
 @app.get("/api/dashboard/approvals")
