@@ -614,7 +614,11 @@ async def trigger_agent_event(
     session.add(run)
     await session.flush()
     try:
-        result = await AgentOrchestrator(session).run_event(req.event_type, req.payload)
+        orchestrator = AgentOrchestrator(session)
+        if req.event_type == "manual_generate_content":
+            result = await orchestrator.run_manual_content_generation()
+        else:
+            result = await orchestrator.run_event(req.event_type, req.payload)
         run.status = "SUCCEEDED"
         run.created_count = result["created_count"]
         run.details = str(result)
