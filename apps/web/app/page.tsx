@@ -344,7 +344,7 @@ useEffect(() => {
         action === 'regenerate'
           ? 'Regenerated successfully.'
           : action === 'approve'
-            ? 'Approved and published to your connected LinkedIn account.'
+            ? 'approved and published to linkedin'
             : 'Action completed successfully.'
       );
     } catch (e) {
@@ -686,7 +686,7 @@ function ApprovalWorkspace(props: any) {
                     else window.localStorage.removeItem(key);
                   }
                 }}
-                placeholder="Tell Brand OS what to change, add, remove, or make more personal. Example: “Make the opening less polished and add the point about stakeholder alignment.”"
+                placeholder="Tell us what to change, add or remove. Example: make the opening less polished and add the point about stakeholder alignment"
               />
               {['PENDING','EDITED','REGENERATED'].includes(selected.status) ? (
                 <>
@@ -715,7 +715,7 @@ function ApprovalWorkspace(props: any) {
                 <>
                   <div className={selected.status === 'EXECUTED' ? 'notice success' : 'notice error'} style={{ marginTop: 10 }}>
                     <CircleCheck size={15}/>
-                    <span>{selected.status === 'EXECUTED' ? 'Approved and published to LinkedIn through the official API.' : selected.status === 'APPROVED' ? 'Approved, but publication did not complete. Use Publish to LinkedIn to retry.' : 'This post is no longer awaiting a decision.'}</span>
+                    <span>{selected.status === 'EXECUTED' ? 'approved and published to linkedin' : selected.status === 'APPROVED' ? 'Approved, but publication did not complete. Use Publish to LinkedIn to retry.' : 'This post is no longer awaiting a decision.'}</span>
                   </div>
                   {selected.status === 'APPROVED' && (
                     <div className="review-actions review-actions-publish">
