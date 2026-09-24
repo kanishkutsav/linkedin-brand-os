@@ -66,7 +66,7 @@ export default function Home() {
   const [isBuildingBrand, setIsBuildingBrand] = useState(false);
   const [queue, setQueue] = useState<ApprovalItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'EXECUTED' | 'REJECTED'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'EXECUTED' | 'REJECTED'>('PENDING');
   const [searchTerm, setSearchTerm] = useState('');
   const [editedBody, setEditedBody] = useState('');
   const [reviewNote, setReviewNote] = useState('');
@@ -599,7 +599,7 @@ function ApprovalWorkspace(props: any) {
         <div className="queue-tools">
           <div className="searchbox"><Search size={13}/><input className="input" placeholder="Search drafts…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
           <div className="filter-row">
-            {(['PENDING','REGENERATED','APPROVED','EXECUTED','REJECTED','all'] as const).map((x) => <button key={x} className={`filter-chip ${statusFilter === x ? 'active' : ''}`} onClick={() => setStatusFilter(x)}>{x === 'all' ? 'All' : x[0] + x.slice(1).toLowerCase()}</button>)}
+            {(['PENDING','REGENERATED','EDITED','APPROVED','EXECUTED','REJECTED','all'] as const).map((x) => <button key={x} className={`filter-chip ${statusFilter === x ? 'active' : ''}`} onClick={() => setStatusFilter(x)}>{x === 'all' ? 'All' : x[0] + x.slice(1).toLowerCase()}</button>)}
           </div>
         </div>
         <div className="queue-items">
