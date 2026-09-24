@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.models import AuthUser, LinkedInConnection, LinkedInOAuthExchange, LinkedInOAuthState
-from app.services.auth_service import AppUser, AuthService, WHITELISTED_LINKEDIN_USERS
+from app.services.auth_service import AppUser, AuthService
 
 
 LINKEDIN_AUTHORIZE_URL = "https://www.linkedin.com/oauth/v2/authorization"
@@ -129,28 +129,33 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
     if not email or not member_sub:
         raise HTTPException(status_code=403, detail="LinkedIn did not return the required member identity.")
 
-    whitelist = WHITELISTED_LINKEDIN_USERS.get(email)
-    if whitelist is None:
-        raise HTTPException(status_code=403, detail="You are not authorized to use this application. Please contact the administrator.")
-
-    user_result = await session.execute(select(AuthUser).where(AuthUser.email == email))
+    # The Supabase/Postgres auth_users table is the single source of truth.
+    # Adding an email there is sufficient to authorize a new user.
+    user_result = await session.execute(
+        select(AuthUser).where(
+            AuthUser.email == email,
+            AuthUser.is_active.is_(True),
+            AuthUser.is_whitelisted.is_(True),
+        )
+    )
     user = user_result.scalar_one_or_none()
     if user is None:
-        user = AuthUser(
-            email=email,
-            linkedin_url=whitelist["linkedin_url"],
-            display_name=display_name,
-            role=whitelist["role"],
-            is_active=True,
-            is_whitelisted=True,
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to use this application. Please contact the administrator.",
         )
-        session.add(user)
-        await session.flush()
-    else:
-        user.linkedin_url = whitelist["linkedin_url"]
-        user.display_name = display_name
-        user.is_active = True
-        user.is_whitelisted = True
+
+    user.display_name = display_name
+    user.is_active = True
+    user.is_whitelisted = True
+
+    # If no LinkedIn URL has been stored yet, learn it from the OAuth identity.
+    # Existing stored URLs remain an optional additional identity check.
+    linkedin_url = user.linkedin_url
+    if not linkedin_url:
+        linkedin_url = userinfo.get("profile") or userinfo.get("picture")
+        if linkedin_url and "linkedin.com" in str(linkedin_url).lower():
+            user.linkedin_url = str(linkedin_url)
 
     connection_result = await session.execute(
         select(LinkedInConnection).where(LinkedInConnection.user_id == user.id)
@@ -203,8 +208,8 @@ async def exchange_code(session: AsyncSession, code: str) -> dict:
 
     user_result = await session.execute(select(AuthUser).where(AuthUser.id == exchange.user_id))
     user = user_result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=404, detail="Brand OS user not found.")
+    if user is None or not user.is_active or not user.is_whitelisted:
+        raise HTTPException(status_code=403, detail="Brand OS user is no longer active or whitelisted.")
 
     token = await AuthService.create_session(
         session,
