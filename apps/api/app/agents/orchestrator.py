@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.strategy import ContentStrategyService
 from app.agents.voice import VoiceProfileBuilder
 from app.agents.research import ResearchService
-from app.core.config import settings
 from app.guards.guardrails import run_content_guards
 from app.models.models import (
     AuditLog,
