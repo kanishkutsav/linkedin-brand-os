@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 );
 
 CREATE TABLE IF NOT EXISTS user_profiles (
-    id SERIAL PRIMARY KEY,
+    id INTEGER PRIMARY KEY REFERENCES auth_users(id),
     display_name VARCHAR(150) NOT NULL DEFAULT 'User',
     professional_title VARCHAR(200),
     industry VARCHAR(200),
