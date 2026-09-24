@@ -403,6 +403,11 @@ async def brand_status(
             "tone": profile.tone if profile else None,
             "goals": (profile.goals.split(",") if profile and profile.goals else []),
         },
+        "source_posts": [
+            {"id": post.id, "body": post.body, "published_at": post.published_at, "source": post.source}
+            for post in posts[:5]
+            if post.source == "user_import"
+        ],
     }
 
 
