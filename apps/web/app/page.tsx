@@ -1035,7 +1035,7 @@ function SettingsView(props: any) {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span className={"status-pill " + (brand.ready ? 'approved' : 'edited')}>{brand.ready ? '● ACTIVE' : '● SETUP NEEDED'}</span>
           {linkedin.connected && <button className="button" onClick={onConnect}><Link2 size={14}/> Refresh LinkedIn profile</button>}
-          {brand.ready && !editing && <button className="button" onClick={() => setEditing(true)}><Pencil size={14}/> Edit Brand DNA</button>}
+          {brand.ready && !editing && <button className="button" onClick={() => setEditing(true)}><Pencil size={14}/> Manage Brand DNA</button>}
         </div>
       </div>
 
