@@ -1,3 +1,20 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = { reactStrictMode: true };
+const backend = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+const nextConfig = {
+  reactStrictMode: true,
+  async rewrites() {
+    return [
+      {
+        source: '/api/auth/linkedin/start',
+        destination: `${backend}/api/auth/linkedin/start`,
+      },
+      {
+        source: '/api/auth/linkedin/callback',
+        destination: `${backend}/api/auth/linkedin/callback`,
+      },
+    ];
+  },
+};
+
 export default nextConfig;
