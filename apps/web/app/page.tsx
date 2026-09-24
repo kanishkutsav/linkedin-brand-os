@@ -34,13 +34,12 @@ type Opportunity = {
   evidence?: { summary?: string; why_now?: string; source_hints?: string[]; grounding_queries?: string[] };
   source_ids?: number[]; sources?: { title?: string; url?: string; domain?: string }[];
 };
-type Tab = 'Dashboard' | 'Research' | 'Content' | 'Engagement' | 'Analytics' | 'Settings';
+type Tab = 'Dashboard' | 'Research' | 'Content' | 'Analytics' | 'Settings';
 
 const nav = [
   ['Dashboard', LayoutDashboard, 'Command center'],
   ['Research', Search, 'Find opportunities'],
   ['Content', FileText, 'Draft & refine'],
-  ['Engagement', MessageSquare, 'Community layer'],
   ['Analytics', BarChart3, 'Performance'],
   ['Settings', Settings, 'Brand DNA'],
 ] as const;
@@ -57,6 +56,11 @@ export default function Home() {
   const [brandTone, setBrandTone] = useState('');
   const [brandGoals, setBrandGoals] = useState('');
   const [historicalPostEntries, setHistoricalPostEntries] = useState<string[]>(['']);
+  const [brandEditing, setBrandEditing] = useState(false);
+  const [analytics, setAnalytics] = useState<any>(null);
+  const [draftLanguage, setDraftLanguage] = useState('');
+  const [isImproving, setIsImproving] = useState(false);
+  const [improvementNotes, setImprovementNotes] = useState<string[]>([]);
   const [isBuildingBrand, setIsBuildingBrand] = useState(false);
   const [queue, setQueue] = useState<ApprovalItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -109,12 +113,14 @@ export default function Home() {
     if (!authToken) return;
     setLoading(true);
     try {
-      const [profileRes, approvalsRes, linkedinRes, brandRes, opportunityRes] = await Promise.all([
+      const [profileRes, approvalsRes, linkedinRes, brandRes, opportunityRes, sourceRes, analyticsRes] = await Promise.all([
         fetch(`${API_BASE}/api/auth/me`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/dashboard/approvals`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/linkedin/status`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/brand/status`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/research/opportunities`, { headers: headers(authToken) }),
+        fetch(`${API_BASE}/api/brand/source-posts`, { headers: headers(authToken) }),
+        fetch(`${API_BASE}/api/analytics/overview`, { headers: headers(authToken) }),
       ]);
       if (profileRes.status === 401 || approvalsRes.status === 401) {
         window.localStorage.removeItem(STORAGE_KEY);
@@ -131,6 +137,12 @@ export default function Home() {
       const p = brandJson.profile || {};
       setBrandTitle(p.professional_title || ''); setBrandIndustry(p.industry || '');
       setBrandAudience(p.audience || ''); setBrandPositioning(p.brand_positioning || ''); setBrandTone(p.tone || '');
+      setBrandGoals(Array.isArray(p.goals) ? p.goals.join(', ') : (p.goals || ''));
+      const sourceJson = sourceRes.ok ? await sourceRes.json() : { posts: [] };
+      const sourcePosts = (sourceJson.posts || []).map((item: any) => item.body).filter((body: any) => typeof body === 'string' && body.trim());
+      if (sourcePosts.length) setHistoricalPostEntries(sourcePosts.slice(0, 5));
+      const analyticsJson = analyticsRes.ok ? await analyticsRes.json() : null;
+      setAnalytics(analyticsJson);
       const opportunityJson = opportunityRes.ok ? await opportunityRes.json() : { opportunities: [] };
       setOpportunities(opportunityJson.opportunities || []);
       const nextQueue: ApprovalItem[] = (approvalsJson.pending_approvals || []).map((item: any) => ({
@@ -169,6 +181,7 @@ export default function Home() {
   const initials = (profile.display_name || 'User').split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase();
   const closeSidebar = () => setSidebarOpen(false);
   const connectLinkedIn = () => { window.location.href = '/api/auth/linkedin/start'; };
+  const cancelBrandEdit = async () => { await fetchData(); setBrandEditing(false); };
   const cancelBrandEdit = async () => { await fetchData(); setBrandEditing(false); };
   const logout = () => {
     window.localStorage.removeItem(STORAGE_KEY);
@@ -252,6 +265,26 @@ export default function Home() {
       await fetchData();
     } catch (e) { setError(e instanceof Error ? e.message : 'Brand Intelligence setup failed'); }
     finally { setIsBuildingBrand(false); }
+  };
+
+  const improveDraft = async () => {
+    if (!token || !draftBody.trim()) { setError('Write a draft first, then ask Brand OS to polish it.'); return; }
+    setIsImproving(true); setError(null); setNotice(null);
+    try {
+      const res = await fetch(API_BASE + '/api/content/improve', {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: draftTitle, topic: draftTopic, body: draftBody, language: draftLanguage || null }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(getApiError(data, 'Content improvement failed'));
+      setDraftTitle(data.title || draftTitle);
+      setDraftTopic(data.topic || draftTopic);
+      setDraftBody(data.body || draftBody);
+      setImprovementNotes(data.changes || []);
+      setNotice('Polished version ready for your preview. Nothing has been sent for approval yet.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Content improvement failed'); }
+    finally { setIsImproving(false); }
   };
 
   const createDraft = async () => {
@@ -396,9 +429,8 @@ export default function Home() {
           )}
 
           {tab === 'Research' && <ResearchView opportunities={opportunities} isResearching={isResearching} onResearch={discoverResearch} />}
-          {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} busy={isBusy} onSubmit={createDraft} />}
-          {tab === 'Engagement' && <PlaceholderView icon={MessageSquare} title="Engagement workspace" copy="A dedicated relationship layer is ready for officially supported LinkedIn data and explicit user-approved actions. No scraping, browser automation or hidden APIs." />}
-          {tab === 'Analytics' && <PlaceholderView icon={BarChart3} title="Performance intelligence" copy="Once supported LinkedIn analytics permissions are available, this space will connect published content to reach, reactions, comments and other approved metrics." />}
+          {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} />}
+          {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
           {tab === 'Settings' && (
             <SettingsView
               brand={brand} profile={profile} brandTitle={brandTitle} setBrandTitle={setBrandTitle}
@@ -406,7 +438,7 @@ export default function Home() {
               brandPositioning={brandPositioning} setBrandPositioning={setBrandPositioning} brandTone={brandTone} setBrandTone={setBrandTone}
               brandGoals={brandGoals} setBrandGoals={setBrandGoals} posts={historicalPostEntries}
               updatePost={updateHistoricalPost} addPost={addHistoricalPost} removePost={removeHistoricalPost}
-              building={isBuildingBrand} onBuild={buildBrand} linkedin={linkedin} onConnect={connectLinkedIn}
+              building={isBuildingBrand} onBuild={buildBrand} linkedin={linkedin} onConnect={connectLinkedIn} editing={brandEditing} setEditing={setBrandEditing} onCancel={cancelBrandEdit}
             />
           )}
         </main>
