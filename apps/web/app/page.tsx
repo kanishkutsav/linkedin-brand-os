@@ -18,7 +18,7 @@ function getApiError(data: any, fallback: string) {
   return fallback;
 }
 
-type ApprovalStatus = 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'REJECTED' | 'EXECUTED';
+type ApprovalStatus = 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'PUBLISHING' | 'REJECTED' | 'EXECUTED';
 type ApprovalItem = { id: number; status: ApprovalStatus; action_type: string; reason: string | null; content: string; title?: string; topic?: string; approved_at?: string | null; created_at?: string };
 type Profile = { display_name: string; role?: string };
 type LinkedInStatus = { connected: boolean; name?: string | null; email?: string | null; expires_at?: string | null };
@@ -410,7 +410,9 @@ useEffect(() => {
           ? 'New content suggestion generated and added to the approval queue.'
           : data.blocked_by_guardrails
             ? 'Content was generated but held back by guardrails and was not added to the approval queue.'
-            : 'No new suggestion was created. Try again with a different feedback or research angle.'
+            : data.duplicate_blocked
+              ? 'The generated draft matched content already in your brand memory, so it was not added to the approval queue.'
+              : 'No new suggestion was created. Try again with a different feedback or research angle.'
       );
     } catch (e) { setError(e instanceof Error ? e.message : 'Content generation failed'); }
     finally { setIsGenerating(false); }
