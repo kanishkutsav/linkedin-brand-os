@@ -84,3 +84,4 @@ The default LinkedIn adapter is a mock. Real LinkedIn OAuth/API integration is i
 - Database: Supabase Postgres
 - Approval workflow and audit state: Postgres-backed tables
 - Safe execution boundary: backend-only, never browser-executable
+
