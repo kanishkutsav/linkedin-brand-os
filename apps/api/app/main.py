@@ -239,10 +239,10 @@ async def linkedin_oauth_start(
 
 @app.get("/api/auth/linkedin/callback")
 async def linkedin_oauth_callback(
+    request: Request,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
-    request: Request,
     session: AsyncSession = Depends(get_session),
 ):
     if error:
