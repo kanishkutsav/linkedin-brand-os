@@ -160,7 +160,7 @@ a { color: inherit; }
 .notice.error { background: #fff4f2; color: #b42318; border: 1px solid #fecdca; }
 @keyframes slideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 
-.metrics { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin: 16px 0; }
+.metrics { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; margin: 16px 0; }
 .metric-card {
   position: relative; overflow: hidden; padding: 17px; background: var(--surface); border: 1px solid var(--line);
   border-radius: 16px; box-shadow: var(--shadow-sm); transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
@@ -171,6 +171,17 @@ a { color: inherit; }
 .metric-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: #f2f1ff; color: var(--accent); }
 .metric-value { font-family: 'Space Grotesk', sans-serif; font-size: 29px; letter-spacing: -.05em; margin-top: 12px; }
 .metric-meta { color: var(--muted-2); font-size: 10px; margin-top: 2px; }
+.metric-card { min-width: 0; }
+.approval-panel { margin-top: 16px; }
+.approval-panel .queue-layout { min-height: 620px; }
+.approval-panel .queue-items { max-height: 540px; }
+.approval-panel .review-pane { padding: 24px; }
+.approval-panel .review-editor .textarea { min-height: 310px; }
+.progress-button { position: relative; overflow: hidden; min-width: 150px; }
+.progress-button .button-content { position: relative; z-index: 2; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.button-progress-track { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,.22); z-index: 1; }
+.button-progress-track > span { display: block; height: 100%; background: rgba(255,255,255,.95); transition: width .35s ease; }
+.progress-button:disabled { cursor: wait; }
 
 .section-grid { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(320px, .82fr); gap: 16px; margin-top: 16px; }
 .panel {
@@ -299,7 +310,7 @@ a { color: inherit; }
   .sidebar { width: 220px; min-width: 220px; }
   .section-grid, .studio-grid { grid-template-columns: 1fr; }
   .live-preview { border-left: 0; border-top: 1px solid #eef0f4; }
-  .metrics { grid-template-columns: repeat(2,1fr); }
+  .metrics { grid-template-columns: repeat(3,1fr); }
 }
 @media (max-width: 760px) {
   .sidebar { position: fixed; left: -270px; width: 252px; min-width: 252px; transition: left .22s ease; box-shadow: 20px 0 50px rgba(16,24,40,.18); }
@@ -315,6 +326,8 @@ a { color: inherit; }
   .hero-status { display: none; }
   .metrics { grid-template-columns: repeat(2,1fr); gap: 8px; }
   .metric-card { padding: 13px; }
+  .approval-panel .queue-layout { min-height: 0; }
+  .approval-panel .review-pane { padding: 15px; }
   .metric-value { font-size: 24px; }
   .queue-layout { grid-template-columns: 1fr; }
   .queue-list { border-right: 0; border-bottom: 1px solid #eef0f4; }
