@@ -542,115 +542,78 @@ function ResearchCard({ item }: { item: Opportunity }) {
   );
 }
 
-function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBody, busy, onSubmit }: any) {
+function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBody, language, setLanguage, busy, improving, improvementNotes, onImprove, onSubmit }: any) {
   return (
     <>
-      <div className="page-header"><div><div className="page-kicker"><WandSparkles size={13}/> Editorial studio</div><h1 className="page-title">Create with intention.</h1><p className="page-description">Write manually or use the agent. Every draft enters the same human approval workflow before external action.</p></div></div>
+      <div className="page-header">
+        <div>
+          <div className="page-kicker"><WandSparkles size={13}/> Editorial studio</div>
+          <h1 className="page-title">Write it your way. Let Brand OS polish it.</h1>
+          <p className="page-description">Start with your own idea and wording in any language. Brand OS can improve structure and clarity using your Brand DNA, then you preview the exact version before it enters the approval queue.</p>
+        </div>
+      </div>
       <section className="panel studio-grid">
         <div className="studio-form">
-          <div className="form-group"><label className="form-label">Post title</label><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. What I learned shipping an AI workflow" /></div>
-          <div className="form-group"><label className="form-label">Topic / theme</label><input className="input" value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="The idea this post should own" /></div>
-          <div className="form-group"><label className="form-label">Draft</label><textarea className="textarea" style={{ minHeight: 330 }} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write your draft here…\n\nBrand OS will validate it before it enters the approval queue." /></div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-            <span className="form-help"><ShieldCheck size={11} style={{ verticalAlign: 'middle' }}/> Guardrails remain active.</span>
-            <button className="button dark" disabled={busy} onClick={onSubmit}><Zap size={14}/>{busy ? 'Sending…' : 'Send to approval queue'}</button>
+          <div className="form-group"><label className="form-label">Post heading / working title</label><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Write the idea or heading you have in mind" /></div>
+          <div className="form-group"><label className="form-label">Topic / theme <span className="form-help">(optional)</span></label><input className="input" value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="What is this post about?" /></div>
+          <div className="form-group"><label className="form-label">Your language</label><input className="input" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="e.g. English, Hindi, Hinglish" /></div>
+          <div className="form-group">
+            <label className="form-label">Your draft</label>
+            <textarea className="textarea" style={{ minHeight: 270 }} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write naturally. Do not worry about formatting — Brand OS will preserve your meaning and improve the presentation." />
           </div>
+          <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="button primary" disabled={improving || !body.trim()} onClick={onImprove}><WandSparkles size={14}/>{improving ? 'Polishing…' : 'Improvise / polish with Brand OS'}</button>
+            <button className="button dark" disabled={busy || !body.trim()} onClick={onSubmit}><ShieldCheck size={14}/>{busy ? 'Sending…' : 'Send this version to approval'}</button>
+          </div>
+          {improvementNotes?.length ? <div style={{ marginTop: 12, padding: 11, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.5 }}><b style={{ color: '#5145cd' }}>What changed:</b> {improvementNotes.join(' · ')}</div> : null}
         </div>
         <div className="live-preview">
-          <div className="panel-title" style={{ marginBottom: 4 }}>Live LinkedIn preview</div>
-          <div className="panel-subtitle" style={{ marginBottom: 14 }}>A calm preview of how the post reads as a professional artifact.</div>
+          <div className="panel-title" style={{ marginBottom: 4 }}>Preview before approval</div>
+          <div className="panel-subtitle" style={{ marginBottom: 14 }}>This is the exact text you can send to the HITL queue. Nothing is published from this screen.</div>
           <div className="linkedin-card">
-            <div className="li-head"><div className="li-avatar">{(profile.display_name || 'U').slice(0,1).toUpperCase()}</div><div><div className="li-name">{profile.display_name}</div><div className="li-meta">Professional profile · Just now</div></div></div>
-            <div className="li-body">{body || 'Your post preview will appear here as you write.'}</div>
+            <div className="li-head"><div className="li-avatar">{(profile.display_name || 'U').slice(0,1).toUpperCase()}</div><div><div className="li-name">{profile.display_name}</div><div className="li-meta">Professional profile · Draft</div></div></div>
+            <div className="li-body">{body || 'Your polished post preview will appear here.'}</div>
             <div className="li-actions"><span>Like</span><span>Comment</span><span>Share</span></div>
           </div>
-          <div style={{ marginTop: 12, padding: 11, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.5 }}><b style={{ color: '#5145cd' }}>HITL:</b> This preview is not a publication. Nothing is sent to LinkedIn until you approve an eligible action.</div>
+          <div style={{ marginTop: 12, padding: 11, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.5 }}><b style={{ color: '#5145cd' }}>HITL:</b> Polish → preview → send to approval → approve → publish. The AI never bypasses the approval gate.</div>
         </div>
       </section>
     </>
   );
 }
 
-function SettingsView(props: any) {
-  const { brand, profile, brandTitle, setBrandTitle, brandIndustry, setBrandIndustry, brandAudience, setBrandAudience, brandPositioning, setBrandPositioning, brandTone, setBrandTone, brandGoals, setBrandGoals, posts, updatePost, addPost, removePost, building, onBuild, linkedin, onConnect } = props;
-  const count = posts.filter((x: string) => x.trim()).length;
+function AnalyticsView({ analytics }: { analytics: any }) {
+  const p = analytics?.pipeline || {};
+  const live = analytics?.linkedin_performance || {};
+  const cards = [
+    ['Historical posts', p.historical_posts ?? 0, 'User-provided brand evidence'],
+    ['Content created', p.content_items ?? 0, 'Drafts generated in Brand OS'],
+    ['Awaiting approval', p.pending_approval ?? 0, 'Needs your decision'],
+    ['Published', p.published_via_brand_os ?? 0, 'Published through approved workflow'],
+  ];
   return (
     <>
-      <div className="page-header"><div><div className="page-kicker"><BrainCircuit size={13}/> Brand intelligence</div><h1 className="page-title">Your brand memory.</h1><p className="page-description">A living memory of your positioning, audience and writing signals. It evolves from content you explicitly provide or approve.</p></div><span className={`status-pill ${brand.ready ? 'approved' : 'edited'}`}>{brand.ready ? '● ACTIVE' : '● SETUP NEEDED'}</span></div>
-      <div className="settings-stack">
-        <section className="panel settings-card">
-          <h2 className="settings-title">Current Brand DNA</h2>
-          <p className="settings-copy">{brand.ready ? (brand.summary || 'Brand Intelligence is active and ready to shape content.') : 'Start with your professional profile and at least three previous LinkedIn posts.'}</p>
-          {brand.ready && <div className="learning-flow">
-            <div className="flow-step"><BrainCircuit size={15} color="#6d5dfc"/><b>Identity</b><span>{brand.profile?.professional_title || 'Profile baseline'}</span></div>
-            <div className="flow-step"><Target size={15} color="#6d5dfc"/><b>Audience</b><span>{brand.profile?.audience || 'Audience signal'}</span></div>
-            <div className="flow-step"><Sparkles size={15} color="#6d5dfc"/><b>Voice</b><span>{brand.profile?.tone || 'Learned from posts'}</span></div>
-            <div className="flow-step"><Activity size={15} color="#6d5dfc"/><b>Memory</b><span>{brand.current_post_count ?? brand.source_post_count} signals · {brand.continuous_learning ? 'continuous' : 'snapshot'}</span></div>
-          </div>}
-        </section>
-
-        <section className="panel settings-card">
-          <h2 className="settings-title">1. Professional profile</h2>
-          <p className="settings-copy">This is the factual baseline. Brand OS does not invent credentials, achievements or experiences that you have not supplied.</p>
-          <div className="profile-grid">
-            <Field label="Professional title" value={brandTitle} setValue={setBrandTitle} placeholder="Your role / title" />
-            <Field label="Industry" value={brandIndustry} setValue={setBrandIndustry} placeholder="Your industry" />
-            <Field label="Who you want to reach" value={brandAudience} setValue={setBrandAudience} placeholder="Audience" />
-            <Field label="Goals" value={brandGoals} setValue={setBrandGoals} placeholder="Comma separated goals" />
-            <Field label="Desired tone" value={brandTone} setValue={setBrandTone} placeholder="Optional tone guidance" />
-            <Field label="How you want to be known" value={brandPositioning} setValue={setBrandPositioning} placeholder="Positioning statement" />
-          </div>
-        </section>
-
-        <section className="panel settings-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
-            <div><h2 className="settings-title">2. Voice calibration</h2><p className="settings-copy">Paste 3–5 previous LinkedIn posts. These are used as explicit source material for Brand Intelligence.</p></div>
-            <span className={`status-pill ${count >= 3 ? 'approved' : 'edited'}`}>{count}/5 posts</span>
-          </div>
-          <div className="post-stack">
-            {posts.map((post: string, index: number) => <div className="post-entry" key={index}>
-              <div className="post-entry-head"><span className="post-index">SOURCE POST {String(index + 1).padStart(2,'0')}</span>{posts.length > 1 && <button className="link-button" onClick={() => removePost(index)}>Remove</button>}</div>
-              <textarea className="textarea" style={{ minHeight: 125 }} value={post} onChange={(e) => updatePost(index, e.target.value)} placeholder={`Paste the complete text of LinkedIn post ${index + 1}…`} />
-            </div>)}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginTop: 12, flexWrap: 'wrap' }}>
-            <button className="button" onClick={addPost} disabled={posts.length >= 5}><Plus size={14}/>{posts.length >= 5 ? 'Maximum reached' : 'Add another post'}</button>
-            <button className="button primary" onClick={onBuild} disabled={building || count < 3}><Sparkles size={14}/>{building ? 'Building Brand Intelligence…' : brand.ready ? 'Refresh Brand Intelligence' : 'Build Brand Intelligence'}</button>
-          </div>
-        </section>
-
-        <section className="panel settings-card">
-          <h2 className="settings-title">How the memory evolves</h2>
-          <p className="settings-copy">Profile → identity and positioning · approved/edited content → voice signals · Brand OS published posts → durable memory · research → current opportunities. New Brand OS content can continue enriching the memory automatically.</p>
-          <div className="learning-flow">
-            {[
-              ['Profile', 'Identity baseline', UserRound], ['Approved content', 'Voice signals', Check], ['Published posts', 'Durable memory', FileText], ['Research', 'Current context', Search]
-            ].map(([title, sub, Icon]: any) => <div className="flow-step" key={title}><Icon size={15} color="#6d5dfc"/><b>{title}</b><span>{sub}</span></div>)}
-          </div>
-        </section>
-
-        <section className="panel settings-card">
-          <h2 className="settings-title">LinkedIn connection</h2>
-          <p className="settings-copy">Signed in as <b>{profile.display_name}</b>. {linkedin.connected ? 'The official connection is active.' : 'Connect LinkedIn to enable supported API actions.'}</p>
-          <button className="button" onClick={onConnect}><Link2 size={14}/>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
-        </section>
+      <div className="page-header">
+        <div><div className="page-kicker"><BarChart3 size={13}/> Performance intelligence</div><h1 className="page-title">Know what the system is doing.</h1><p className="page-description">Operational analytics are available now. LinkedIn performance metrics are shown only when the official analytics capability is connected.</p></div>
       </div>
+      <div className="metrics">{cards.map(([label, value, meta]) => <Metric key={label as string} icon={BarChart3} label={label} value={value} meta={meta} />)}</div>
+      <section className="panel" style={{ marginTop: 16 }}>
+        <div className="panel-head"><div><div className="panel-title">LinkedIn performance</div><div className="panel-subtitle">{live.available ? 'Official LinkedIn metrics are connected.' : 'No fabricated reach, impressions or engagement numbers.'}</div></div><span className="status-pill edited">● {live.available ? 'CONNECTED' : 'NOT CONNECTED'}</span></div>
+        <div className="panel-body">
+          <div className="empty-state" style={{ minHeight: 180 }}>
+            <div className="empty-icon"><TrendingUp size={19}/></div>
+            <strong>{live.available ? 'Metrics available' : 'Official performance data is not connected yet'}</strong>
+            <span>{live.message || 'Connect the official LinkedIn analytics capability to populate post-level reach, reactions, comments and other supported metrics.'}</span>
+          </div>
+        </div>
+      </section>
+      <section className="panel" style={{ marginTop: 16 }}>
+        <div className="panel-head"><div><div className="panel-title">How to use this section</div><div className="panel-subtitle">Analytics is for learning, not inventing conclusions.</div></div></div>
+        <div className="panel-body" style={{ color: '#667085', fontSize: 11, lineHeight: 1.7 }}>
+          Brand OS currently measures the content pipeline: what you imported, what was created, what is waiting for approval and what was actually published through the product. When official LinkedIn post analytics are available, those observed metrics can be added without using scraping or unsupported APIs.
+        </div>
+      </section>
     </>
   );
 }
 
-function Field({ label, value, setValue, placeholder }: any) {
-  return <label className="form-group" style={{ marginBottom: 0 }}><span className="form-label">{label}</span><input className="input" value={value} onChange={(e) => setValue(e.target.value)} placeholder={placeholder}/></label>;
-}
-
-function PlaceholderView({ icon: Icon, title, copy }: any) {
-  return <><div className="page-header"><div><div className="page-kicker"><Icon size={13}/> Workspace</div><h1 className="page-title">{title}</h1><p className="page-description">{copy}</p></div></div><section className="panel"><EmptyState icon={Icon} title="Surface ready" text="The product architecture is in place. This workspace will light up as the corresponding official LinkedIn capabilities are connected." /></section></>;
-}
-
-function EmptyState({ icon: Icon, title, text, action, onAction }: any) {
-  return <div className="empty-state"><div className="empty-icon"><Icon size={19}/></div><strong>{title}</strong><span>{text}</span>{action && <div style={{ marginTop: 14 }}><button className="button primary" onClick={onAction}>{action}<ChevronRight size={13}/></button></div>}</div>;
-}
-
-function LinkedInMark({ size = 18, color }: { size?: number; color?: string }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill={color || 'currentColor'} aria-hidden="true"><path d="M6.5 8.2H3.2V20h3.3V8.2ZM4.85 3A1.95 1.95 0 1 0 4.85 6.9 1.95 1.95 0 0 0 4.85 3ZM20.8 13.25c0-3.52-1.88-5.16-4.4-5.16-2.02 0-2.92 1.11-3.43 1.89V8.2H9.67V20h3.3v-5.84c0-1.54.29-3.03 2.2-3.03 1.88 0 1.91 1.76 1.91 3.13V20h3.3l.02-6.75Z"/></svg>;
-}
