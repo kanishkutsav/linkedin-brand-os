@@ -161,7 +161,14 @@ useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('linkedin_code');
     const oauthNonce = params.get('oauth_nonce');
+    const oauthError = params.get('linkedin_error');
     const savedToken = window.localStorage.getItem(STORAGE_KEY);
+    if (oauthError) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      window.localStorage.removeItem('brand-os-oauth-nonce');
+      setError('LinkedIn authorization was not completed. Please start the connection again.');
+      return;
+    }
     if (code) {
       const expectedNonce = window.localStorage.getItem('brand-os-oauth-nonce');
       window.history.replaceState({}, document.title, window.location.pathname);
