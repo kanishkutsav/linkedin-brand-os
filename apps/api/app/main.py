@@ -875,11 +875,36 @@ async def approve(
 ):
     try:
         approval = await ApprovalService(session).approve(approval_id)
+
+        # Approval is the explicit human authorization. Once granted, publish
+        # immediately through the connected official LinkedIn API so the UI
+        # action has one unambiguous outcome: Approve & publish.
+        user = await AuthService.get_user_from_token(
+            session,
+            credentials.credentials if credentials else None,
+        )
+        if user is None:
+            raise ValueError("Authentication required.")
+
+        connection_result = await session.execute(
+            select(LinkedInConnection).where(LinkedInConnection.user_id == int(user.id))
+        )
+        connection = connection_result.scalar_one_or_none()
+        if connection is None:
+            raise ValueError("Connect your LinkedIn account before approving for publication.")
+        if connection.token_expires_at and connection.token_expires_at <= datetime.now(timezone.utc):
+            raise ValueError("Your LinkedIn connection has expired. Reconnect LinkedIn before approving for publication.")
+
+        publish_adapter = OfficialLinkedInAdapter(connection.access_token, connection.member_sub)
+        publish_result = await ApprovalService(session).execute(approval_id, publish_adapter)
         return {
             "id": approval.id,
-            "status": approval.status,
+            "status": "EXECUTED" if publish_result.success else approval.status,
             "approval_hash": approval.approval_hash,
             "approved_at": approval.approved_at,
+            "published": publish_result.success,
+            "external_id": publish_result.external_id,
+            "message": publish_result.message,
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
