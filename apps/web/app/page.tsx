@@ -279,20 +279,33 @@ export default function Home() {
       return;
     }
     setIsBusy(true); setBusyAction(action); setError(null); setNotice(null);
+    if (action === 'approve') {
+      setOperationProgress(20);
+      setOperationStage('Authorizing publication…');
+    }
     try {
       const res = await fetch(`${API_BASE}/api/approvals/${selectedApproval.id}/${action}`, {
         method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, `Action failed: ${action}`));
-      setOperationProgress(88);
+      if (action === 'approve' && data.published === false) {
+        throw new Error(data.message || 'Approval was recorded, but LinkedIn publication failed.');
+      }
+      setOperationProgress(action === 'approve' ? 82 : 88);
       setOperationStage(action === 'regenerate' ? 'Refreshing the approval queue…' : 'Refreshing the workspace…');
       await fetchData();
       setOperationProgress(100);
       setOperationStage('Done');
       setReviewNote('');
       setNoticeTtl(action === 'regenerate' ? 1800 : 4500);
-      setNotice(action === 'regenerate' ? 'Regenerated successfully.' : 'Action completed successfully.');
+      setNotice(
+        action === 'regenerate'
+          ? 'Regenerated successfully.'
+          : action === 'approve'
+            ? 'Approved and published to your connected LinkedIn account.'
+            : 'Action completed successfully.'
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Approval action failed');
     } finally {
