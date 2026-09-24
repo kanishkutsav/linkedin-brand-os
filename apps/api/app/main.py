@@ -241,7 +241,7 @@ async def linkedin_oauth_callback(
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
-    request: Request = None,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ):
     if error:
