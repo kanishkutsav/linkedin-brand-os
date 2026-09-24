@@ -472,26 +472,20 @@ useEffect(() => {
     if (!token) return;
     const blocks = historicalPostEntries.map((body) => body.trim()).filter(Boolean);
 
-    // Historical posts are optional. If a user chooses to provide them, require
-    // the full 3–10 range so we never silently analyze an incomplete sample.
-    if (blocks.length > 0 && blocks.length < 3) {
-      setError('Previous posts are optional. Leave them empty, or add at least 3 and up to 10 posts.');
+    // Brand DNA requires a meaningful historical sample. Enforce the same
+    // 3–10 contract in the UI that the API enforces server-side.
+    if (blocks.length < 3) {
+      setError('Add at least 3 and up to 10 previous LinkedIn posts to build your Brand DNA.');
       return;
     }
 
     setIsBuildingBrand(true); setError(null); setNoticeTtl(4500); setNotice(null);
     try {
-      const endpoint = blocks.length ? '/api/brand/onboard' : '/api/brand/initialize';
-      const body = blocks.length
-        ? {
-            display_name: profile.display_name,
-            posts: blocks.map((body) => ({ body })),
-          }
-        : {
-            display_name: profile.display_name,
-            professional_title: brandTitle || null,
-            industry: brandIndustry || null,
-          };
+      const endpoint = '/api/brand/onboard';
+      const body = {
+        display_name: profile.display_name,
+        posts: blocks.map((body) => ({ body })),
+      };
 
       const res = await fetch(API_BASE + endpoint, {
         method: 'POST',
@@ -506,7 +500,7 @@ useEffect(() => {
       setNotice(
         blocks.length
           ? 'Brand Intelligence updated using your LinkedIn profile plus ' + blocks.length + ' imported posts.'
-          : 'Brand Intelligence is ready using your LinkedIn profile. You can add previous posts later to strengthen voice calibration.'
+          : 'Brand Intelligence updated using your LinkedIn profile and imported posts.'
       );
       await fetchData();
       setBrandEditing(false);
