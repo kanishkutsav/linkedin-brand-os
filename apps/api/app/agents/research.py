@@ -151,6 +151,11 @@ class ResearchService:
         live_sources = deduped_sources[:20]
 
         if not live_sources:
+            # Do not turn a temporary public-feed outage into a hard Research failure.
+            # Return the latest persisted opportunities so the workspace remains usable.
+            cached = await self.list_opportunities(profile_id, min(candidate_limit, 8))
+            if cached:
+                return cached
             raise RuntimeError("Live source discovery failed. " + " | ".join(source_errors))
 
         prompt = json.dumps({
