@@ -81,7 +81,9 @@ class ModelRouterService:
             "X-Title": settings.app_name,
         }
 
-        async with httpx.AsyncClient(timeout=90.0) as client:
+        # Free-tier routing should fail over quickly instead of holding the UI
+        # for the old 90-second provider timeout.
+        async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.post(
                 settings.openrouter_base_url.rstrip("/") + "/chat/completions",
                 headers=headers,
@@ -118,7 +120,7 @@ class ModelRouterService:
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=90.0) as client:
+        async with httpx.AsyncClient(timeout=25.0) as client:
             response = await client.post(
                 settings.groq_base_url.rstrip("/") + "/chat/completions",
                 headers=headers,
@@ -227,7 +229,7 @@ Hard rules:
             },
             ensure_ascii=False,
         )
-        return await self.generate_json(system, prompt, max_output_tokens=1800)
+        return await self.generate_json(system, prompt, max_output_tokens=1200)
 
 
 class GeminiService:
