@@ -646,7 +646,7 @@ function ApprovalWorkspace(props: any) {
                 </>
               ) : (
                 <>
-                  <div className="notice success" style={{ marginTop: 10 }}>
+                  <div className={selected.status === 'EXECUTED' ? 'notice success' : 'notice error'} style={{ marginTop: 10 }}>
                     <CircleCheck size={15}/>
                     <span>{selected.status === 'EXECUTED' ? 'Approved and published to LinkedIn through the official API.' : selected.status === 'APPROVED' ? 'Approved, but publication did not complete. Use Publish to LinkedIn to retry.' : 'This post is no longer awaiting a decision.'}</span>
                   </div>
