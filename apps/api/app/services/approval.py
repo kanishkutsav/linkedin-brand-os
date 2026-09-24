@@ -35,6 +35,7 @@ class ApprovalService:
                 ApprovalRequest.id == approval_id,
                 ContentItem.profile_id == profile_id,
             )
+            .with_for_update()
         )
         approval = result.scalar_one_or_none()
         if approval is None:
@@ -270,29 +271,69 @@ class ApprovalService:
     async def execute(self, approval_id: int, adapter, profile_id: int | None = None):
         if profile_id is None:
             raise ValueError("Profile ownership is required")
+
         approval = await self._get_owned_approval(approval_id, profile_id)
-        if not approval or approval.status != "APPROVED": raise ValueError("Valid approval required")
+
+        # A successful publication is terminal and idempotent. Never send the
+        # same approved content to LinkedIn twice.
+        if approval.status == "EXECUTED":
+            return type("PublishResult", (), {
+                "success": True,
+                "external_id": approval.published_external_id,
+                "message": "This post was already published to LinkedIn.",
+            })()
+
+        # A concurrent request may already own the publication attempt.
+        # LinkedIn calls are bounded to the adapter timeout, so stale PUBLISHING
+        # state can safely be retried after a short recovery window.
+        if approval.status == "PUBLISHING":
+            started = approval.publish_started_at
+            if started and started > datetime.now(timezone.utc) - timedelta(minutes=2):
+                raise ValueError("Publication is already in progress. Please wait for the current attempt to finish.")
+            approval.status = "APPROVED"
+            approval.reason = "Recovered a stale publication attempt. Please retry publishing."
+
+        if approval.status != "APPROVED":
+            raise ValueError("Valid approved content is required")
+
         if approval.expires_at and approval.expires_at < datetime.now(timezone.utc):
             approval.status = "EXPIRED"
             await self.session.commit()
             raise ValueError("Approval has expired")
-        if settings.emergency_stop: raise ValueError("Emergency stop is active")
+        if settings.emergency_stop:
+            raise ValueError("Emergency stop is active")
         flags = (await self.session.execute(select(SystemFlag))).scalars().first()
-        if flags and flags.emergency_stop: raise ValueError("Emergency stop is active")
+        if flags and flags.emergency_stop:
+            raise ValueError("Emergency stop is active")
+
         version = await self.session.get(ContentVersion, approval.content_version_id)
         if not version:
             raise ValueError("Content version not found")
         guard = run_content_guards(version.body)
         if not guard.passed:
             raise ValueError("Publishing blocked by guardrails: " + "; ".join(guard.issues))
+
         expected = hashlib.sha256(f"{approval.id}:{version.content_hash}".encode()).hexdigest()
-        if approval.approval_hash != expected: raise ValueError("Approval token/content hash mismatch")
+        if approval.approval_hash != expected:
+            raise ValueError("Approval token/content hash mismatch")
+
+        # Reserve the publication slot before making the external request. This
+        # is the critical concurrency boundary that prevents double-click and
+        # concurrent API requests from creating duplicate LinkedIn posts.
+        approval.status = "PUBLISHING"
+        approval.publish_started_at = datetime.now(timezone.utc)
+        await self.session.commit()
+
         result = adapter.publish_post(version.body)
+
         # Approval is the human decision and must remain durable even if the
         # external LinkedIn publish attempt fails. A failed attempt is retryable.
+        approval = await self._get_owned_approval(approval_id, profile_id)
         approval.status = "EXECUTED" if result.success else "APPROVED"
         approval.reason = None if result.success else f"LinkedIn publication failed: {result.message}"
+        approval.publish_started_at = None
         if result.success:
+            approval.published_external_id = result.external_id
             item = await self.session.get(ContentItem, version.content_id)
             if item:
                 item.status = "PUBLISHED"
