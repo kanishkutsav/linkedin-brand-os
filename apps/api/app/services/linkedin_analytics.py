@@ -12,7 +12,8 @@ from app.core.config import settings
 class LinkedInAnalyticsService:
     """Read-only member creator analytics through LinkedIn's official API."""
 
-    METRICS = ("IMPRESSION", "MEMBERS_REACHED", "REACTION", "COMMENT", "RESHARE")
+    DAILY_METRICS = ("IMPRESSION", "REACTION", "COMMENT", "RESHARE")
+    TOTAL_METRICS = ("MEMBERS_REACHED",)
 
     def __init__(self, access_token: str):
         self.access_token = access_token
@@ -63,22 +64,26 @@ class LinkedInAnalyticsService:
         start = end - timedelta(days=max(7, min(days, 90)))
         date_range = f"(start:(year:{start.year},month:{start.month},day:{start.day}),end:(year:{end.year},month:{end.month},day:{end.day}))"
 
-        async def metric(metric: str) -> tuple[str, dict]:
+        async def metric(metric: str, aggregation: str) -> tuple[str, dict]:
             data = await self._get(
                 "/rest/memberCreatorPostAnalytics",
                 {
                     "q": "me",
                     "queryType": metric,
-                    "aggregation": "DAILY",
+                    "aggregation": aggregation,
                     "dateRange": date_range,
                 },
             )
             return metric, data
 
-        # Keep the analytics page fast while using only official LinkedIn APIs.
-        results = await asyncio.gather(*(metric(item) for item in self.METRICS))
+        # LinkedIn does not support MEMBERS_REACHED + DAILY. Fetch that metric
+        # as a total and the remaining metrics as daily series in parallel.
+        results = await asyncio.gather(
+            *(metric(item, "DAILY") for item in self.DAILY_METRICS),
+            *(metric(item, "TOTAL") for item in self.TOTAL_METRICS),
+        )
         daily: dict[str, dict[str, int]] = {}
-        totals: dict[str, int] = {item: 0 for item in self.METRICS}
+        totals: dict[str, int] = {item: 0 for item in (*self.DAILY_METRICS, *self.TOTAL_METRICS)}
 
         for metric_name, payload in results:
             for element in payload.get("elements") or []:
@@ -93,6 +98,7 @@ class LinkedInAnalyticsService:
             row = {"date": day}
             row.update({metric: daily[day].get(metric, 0) for metric in self.METRICS})
             row["engagement"] = row["REACTION"] + row["COMMENT"] + row["RESHARE"]
+            row["MEMBERS_REACHED"] = 0
             row["engagement_rate"] = round(
                 (row["engagement"] / row["IMPRESSION"]) * 100, 2
             ) if row["IMPRESSION"] else 0
