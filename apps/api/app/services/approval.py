@@ -243,7 +243,10 @@ class ApprovalService:
         expected = hashlib.sha256(f"{approval.id}:{version.content_hash}".encode()).hexdigest()
         if approval.approval_hash != expected: raise ValueError("Approval token/content hash mismatch")
         result = adapter.publish_post(version.body)
-        approval.status = "EXECUTED" if result.success else "FAILED"
+        # Approval is the human decision and must remain durable even if the
+        # external LinkedIn publish attempt fails. A failed attempt is retryable.
+        approval.status = "EXECUTED" if result.success else "APPROVED"
+        approval.reason = None if result.success else f"LinkedIn publication failed: {result.message}"
         if result.success:
             item = await self.session.get(ContentItem, version.content_id)
             if item:
