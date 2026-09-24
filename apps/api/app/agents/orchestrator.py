@@ -74,7 +74,12 @@ class AgentOrchestrator:
         result = await self.session.execute(
             select(ContentVersion.body)
             .join(FeedbackEntry, FeedbackEntry.content_version_id == ContentVersion.id)
-            .where(FeedbackEntry.action == "APPROVED")
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(
+                FeedbackEntry.action == "APPROVED",
+                ContentItem.profile_id == self.profile_id,
+            )
+            .order_by(FeedbackEntry.created_at.desc())
             .limit(10)
         )
         examples = [row[0] for row in result.all()]
