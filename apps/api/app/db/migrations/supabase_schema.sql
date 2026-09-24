@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS voice_memory (
 
 CREATE TABLE IF NOT EXISTS content_items (
     id SERIAL PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES user_profiles(id),
     title VARCHAR(200) NOT NULL,
     topic VARCHAR(300) NOT NULL,
     pillar VARCHAR(100) NOT NULL,
@@ -203,3 +204,22 @@ CREATE INDEX IF NOT EXISTS idx_content_opportunities_profile_status
 
 CREATE INDEX IF NOT EXISTS idx_content_opportunities_score
     ON content_opportunities(total_score DESC);
+
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES auth_users(id),
+    mode VARCHAR(50) NOT NULL,
+    trigger VARCHAR(150) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'RUNNING',
+    created_count INTEGER NOT NULL DEFAULT 0,
+    details TEXT,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_items_profile_id
+    ON content_items(profile_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_user_id
+    ON agent_runs(user_id);
