@@ -30,6 +30,7 @@ from app.models.models import ApprovalRequest, ContentItem, ContentVersion, Hist
 from app.services.approval import ApprovalService
 from app.services.auth_service import AuthService
 from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback
+from app.services.linkedin_analytics import LinkedInAnalyticsService
 from app.services.gemini_service import ModelRouterService
 
 logger = logging.getLogger(__name__)
@@ -813,24 +814,68 @@ Rules:
 @app.get("/api/analytics/overview")
 async def analytics_overview(
     session: AsyncSession = Depends(get_session),
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     _: str = Depends(require_roles("admin", "owner", "reviewer")),
 ):
     async def count(query):
         return len((await session.execute(query)).scalars().all())
 
-    return {
-        "pipeline": {
-            "historical_posts": await count(select(HistoricalPost.id).where(HistoricalPost.profile_id == 1)),
-            "content_items": await count(select(ContentItem.id)),
-            "pending_approval": await count(select(ApprovalRequest.id).where(ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED"]))),
-            "approved": await count(select(ApprovalRequest.id).where(ApprovalRequest.status == "APPROVED")),
-            "published_via_brand_os": await count(select(ApprovalRequest.id).where(ApprovalRequest.status == "EXECUTED")),
-        },
-        "linkedin_performance": {
-            "available": False,
-            "message": "Live LinkedIn post analytics are not currently connected to this workspace. No performance numbers are fabricated.",
-        },
+    pipeline = {
+        "historical_posts": await count(select(HistoricalPost.id).where(HistoricalPost.profile_id == 1)),
+        "content_items": await count(select(ContentItem.id)),
+        "pending_approval": await count(select(ApprovalRequest.id).where(ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED"]))),
+        "approved": await count(select(ApprovalRequest.id).where(ApprovalRequest.status == "APPROVED")),
+        "published_via_brand_os": await count(select(ApprovalRequest.id).where(ApprovalRequest.status == "EXECUTED")),
     }
+
+    user = await AuthService.get_user_from_token(session, credentials.credentials if credentials else None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    connection_result = await session.execute(
+        select(LinkedInConnection).where(LinkedInConnection.user_id == int(user.id))
+    )
+    connection = connection_result.scalar_one_or_none()
+
+    if connection is None:
+        return {
+            "pipeline": pipeline,
+            "linkedin_performance": {
+                "available": False,
+                "authorization_required": True,
+                "message": "Connect LinkedIn first. Analytics requires the official Community Management member analytics permissions.",
+            },
+        }
+
+    if connection.token_expires_at and connection.token_expires_at <= datetime.now(timezone.utc):
+        return {
+            "pipeline": pipeline,
+            "linkedin_performance": {
+                "available": False,
+                "authorization_required": True,
+                "message": "Your LinkedIn connection has expired. Reconnect after analytics permissions are enabled.",
+            },
+        }
+
+    try:
+        linkedin_performance = await LinkedInAnalyticsService(connection.access_token).fetch(days=30)
+    except Exception as exc:
+        detail = str(exc)
+        if "HTTP 401" in detail or "HTTP 403" in detail:
+            linkedin_performance = {
+                "available": False,
+                "authorization_required": True,
+                "message": "LinkedIn analytics access is not enabled for this connection yet. The app needs r_member_postAnalytics, and r_member_profileAnalytics if follower trends are enabled. After LinkedIn grants the permissions, reconnect the account so the new consent is included.",
+            }
+        else:
+            logger.exception("LinkedIn analytics failed: %s", exc)
+            linkedin_performance = {
+                "available": False,
+                "authorization_required": False,
+                "message": "LinkedIn analytics is temporarily unavailable. Refresh the Analytics section and try again.",
+            }
+
+    return {"pipeline": pipeline, "linkedin_performance": linkedin_performance}
 
 
 @app.post("/api/content/drafts")
