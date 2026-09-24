@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.research import ResearchService
@@ -422,7 +422,7 @@ async def brand_source_posts(
 ):
     result = await session.execute(
         select(HistoricalPost)
-        .where(HistoricalPost.profile_id == 1)
+        .where(HistoricalPost.profile_id == 1, HistoricalPost.source == "user_import")
         .order_by(HistoricalPost.created_at.asc())
         .limit(5)
     )
@@ -459,6 +459,16 @@ async def brand_onboard(
     profile.brand_positioning = req.brand_positioning
     profile.tone = req.tone
     profile.role = profile.role or "owner"
+    await session.commit()
+
+    # The editable 3–5 source posts are a current snapshot. Replace only the
+    # user-imported set on refresh; keep Brand OS published posts as durable evidence.
+    await session.execute(
+        delete(HistoricalPost).where(
+            HistoricalPost.profile_id == 1,
+            HistoricalPost.source == "user_import",
+        )
+    )
     await session.commit()
 
     service = BrandIntelligenceService(session)
