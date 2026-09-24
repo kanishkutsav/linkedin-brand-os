@@ -93,9 +93,11 @@ class AgentOrchestrator:
         evidence: list[dict] | None = None,
         feedback: str | None = None,
         current_draft: str | None = None,
+        brand_context: dict | None = None,
     ) -> dict:
         service = ModelRouterService()
-        brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id)
+        if brand_context is None:
+            brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id)
         return await service.create_post(
             profile={
                 "name": profile.display_name,
@@ -132,7 +134,7 @@ class AgentOrchestrator:
         profile = await self._profile()
         # Do not produce generic drafts. Every autonomous draft must be grounded
         # in the user's initialized Brand DNA and historical content.
-        await BrandIntelligenceService(self.session).generation_context(profile.id)
+        brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id)
 
         generated = await self._generate_with_gemini(
             profile=profile,
@@ -141,6 +143,7 @@ class AgentOrchestrator:
             pillar=pillar,
             objective=objective,
             evidence=evidence or [],
+            brand_context=brand_context,
         )
 
         if generated:
@@ -343,6 +346,7 @@ class AgentOrchestrator:
             objective=objective,
             evidence=[],
             feedback=None,
+            brand_context=context,
         )
 
         if not generated:
