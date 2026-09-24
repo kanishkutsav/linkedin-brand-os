@@ -946,22 +946,15 @@ async def approve(
     try:
         existing = await session.get(ApprovalRequest, approval_id)
         if existing and existing.status == "APPROVED":
-            approval = existing
+            approval = await ApprovalService(session)._get_owned_approval(approval_id, int(current_user.id))
         else:
             approval = await ApprovalService(session).approve(approval_id, int(current_user.id))
 
         # Approval is the explicit human authorization. Once granted, publish
         # immediately through the connected official LinkedIn API so the UI
         # action has one unambiguous outcome: Approve & publish.
-        user = await AuthService.get_user_from_token(
-            session,
-            credentials.credentials if credentials else None,
-        )
-        if user is None:
-            raise ValueError("Authentication required.")
-
         connection_result = await session.execute(
-            select(LinkedInConnection).where(LinkedInConnection.user_id == int(user.id))
+            select(LinkedInConnection).where(LinkedInConnection.user_id == int(current_user.id))
         )
         connection = connection_result.scalar_one_or_none()
         if connection is None:
@@ -1047,15 +1040,8 @@ async def execute(
     current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
 ):
     try:
-        user = await AuthService.get_user_from_token(
-            session,
-            credentials.credentials if credentials else None,
-        )
-        if user is None:
-            raise ValueError("Authentication required.")
-
         connection_result = await session.execute(
-            select(LinkedInConnection).where(LinkedInConnection.user_id == int(user.id))
+            select(LinkedInConnection).where(LinkedInConnection.user_id == int(current_user.id))
         )
         connection = connection_result.scalar_one_or_none()
         if connection is None:
