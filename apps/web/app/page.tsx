@@ -321,7 +321,8 @@ export default function Home() {
     setOperationStage('Publishing to LinkedIn…');
     try {
       const res = await fetch(API_BASE + '/api/approvals/' + selectedApproval.id + '/execute', {
-        method: 'POST', headers: headers(),
+        method: 'POST',
+        headers: headers(),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.success === false) {
@@ -673,7 +674,7 @@ function ApprovalWorkspace(props: any) {
                   </div>
                 </>
               ) : (
-                <div className={'notice ' + (selected.status === 'EXECUTED' ? 'success' : selected.status === 'APPROVED' ? 'error' : 'success')} style={{ marginTop: 10 }}>
+                <div className={selected.status === 'APPROVED' ? 'notice error' : 'notice success'} style={{ marginTop: 10 }}>
                   {selected.status === 'EXECUTED' ? <CircleCheck size={15}/> : <X size={15}/>}
                   <span>
                     {selected.status === 'EXECUTED'
