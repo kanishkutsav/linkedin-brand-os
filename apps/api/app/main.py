@@ -281,8 +281,8 @@ async def linkedin_oauth_exchange(
         raise HTTPException(status_code=400, detail="LinkedIn exchange is not bound to the initiating browser.")
     # The frontend sends the nonce it received in the callback URL. The cookie
     # contains the exact state generated for the same browser.
-    oauth_nonce = getattr(req, "oauth_nonce", None)
-    if oauth_nonce is not None and oauth_nonce != browser_nonce:
+    oauth_nonce = req.oauth_nonce
+    if not oauth_nonce or oauth_nonce != browser_nonce:
         raise HTTPException(status_code=400, detail="LinkedIn exchange browser verification failed.")
     result = await exchange_code(session, req.code)
     response = JSONResponse(result)
