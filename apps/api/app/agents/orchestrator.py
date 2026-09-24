@@ -15,6 +15,7 @@ from app.models.models import (
     ContentItem,
     ContentVersion,
     FeedbackEntry,
+    HistoricalPost,
     UserProfile,
     VoiceMemory,
 )
@@ -74,7 +75,12 @@ class AgentOrchestrator:
         result = await self.session.execute(
             select(ContentVersion.body)
             .join(FeedbackEntry, FeedbackEntry.content_version_id == ContentVersion.id)
-            .where(FeedbackEntry.action == "APPROVED")
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(
+                FeedbackEntry.action == "APPROVED",
+                ContentItem.profile_id == self.profile_id,
+            )
+            .order_by(FeedbackEntry.created_at.desc())
             .limit(10)
         )
         examples = [row[0] for row in result.all()]
@@ -88,6 +94,28 @@ class AgentOrchestrator:
             ).limit(1)
         )
         return result.scalar_one_or_none() is not None
+
+    async def _is_duplicate_body(self, body: str) -> bool:
+        digest = hashlib.sha256(body.strip().encode("utf-8")).hexdigest()
+        version_result = await self.session.execute(
+            select(ContentVersion.id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(
+                ContentItem.profile_id == self.profile_id,
+                ContentVersion.content_hash == digest,
+            )
+            .limit(1)
+        )
+        if version_result.scalar_one_or_none() is not None:
+            return True
+
+        historical_result = await self.session.execute(
+            select(HistoricalPost.id).where(
+                HistoricalPost.profile_id == self.profile_id,
+                HistoricalPost.content_hash == digest,
+            ).limit(1)
+        )
+        return historical_result.scalar_one_or_none() is not None
 
     async def _generate_with_gemini(
         self,
@@ -183,6 +211,9 @@ class AgentOrchestrator:
             raise ValueError("Gemini did not produce a usable draft.")
 
         guard = run_content_guards(body)
+        if guard.passed and await self._is_duplicate_body(body):
+            return None
+
         item = ContentItem(
             profile_id=profile.id,
             title=final_title,
@@ -366,6 +397,18 @@ class AgentOrchestrator:
             raise ValueError("The configured content model did not return a usable draft.")
 
         guard = run_content_guards(body)
+        duplicate_blocked = guard.passed and await self._is_duplicate_body(body)
+        if duplicate_blocked:
+            return {
+                "mode": "manual_content",
+                "trigger": trigger,
+                "created_content_ids": [],
+                "created_count": 0,
+                "approval_queued": False,
+                "blocked_by_guardrails": False,
+                "duplicate_blocked": True,
+            }
+
         item = ContentItem(
             profile_id=profile.id,
             title=final_title,

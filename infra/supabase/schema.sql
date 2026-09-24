@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS approval_requests (
     edited_body TEXT,
     expires_at TIMESTAMPTZ,
     approved_at TIMESTAMPTZ,
+    publish_started_at TIMESTAMPTZ,
+    published_external_id VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -134,11 +136,18 @@ CREATE INDEX IF NOT EXISTS idx_content_versions_content_id
 CREATE INDEX IF NOT EXISTS idx_agent_runs_user_id
     ON agent_runs(user_id);
 
-CREATE INDEX IF NOT EXISTS idx_voice_memory_profile_id
-    ON voice_memory(profile_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_voice_memory_profile_id
+    ON voice_memory(profile_id)
+    WHERE profile_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_feedback_entries_approval_id
     ON feedback_entries(approval_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_historical_posts_profile_content_hash
+    ON historical_posts(profile_id, content_hash);
+
+CREATE INDEX IF NOT EXISTS idx_linkedin_oauth_exchanges_user_id
+    ON linkedin_oauth_exchanges(user_id);
 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type
     ON audit_logs(event_type);

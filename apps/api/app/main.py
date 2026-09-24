@@ -205,13 +205,6 @@ class LinkedInExchangeRequest(BaseModel):
     code: str
 
 
-class LinkedInLoginRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    email: str
-    linkedin_url: str
-
-
 @app.get("/health")
 async def health() -> dict[str, object]:
     return {
@@ -223,8 +216,13 @@ async def health() -> dict[str, object]:
 
 
 @app.get("/api/auth/linkedin/start")
-async def linkedin_oauth_start(session: AsyncSession = Depends(get_session)):
-    url = await build_authorization_url(session)
+async def linkedin_oauth_start(
+    browser_nonce: str | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    if browser_nonce and len(browser_nonce) > 200:
+        raise HTTPException(status_code=400, detail="Invalid OAuth browser nonce.")
+    url, state = await build_authorization_url(session, browser_nonce=browser_nonce)
     return RedirectResponse(url=url, status_code=302)
 
 
@@ -240,9 +238,11 @@ async def linkedin_oauth_callback(
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing LinkedIn OAuth code or state.")
 
+    browser_nonce = state.split(".", 1)[0] if "." in state else None
     exchange = await handle_callback(session, code, state)
     frontend = (settings.frontend_url or "http://localhost:3000").rstrip("/")
-    return RedirectResponse(url=f"{frontend}/?linkedin_code={exchange}", status_code=302)
+    nonce_suffix = f"&oauth_nonce={browser_nonce}" if browser_nonce else ""
+    return RedirectResponse(url=f"{frontend}/?linkedin_code={exchange}{nonce_suffix}", status_code=302)
 
 
 @app.post("/api/auth/linkedin/exchange")
@@ -286,19 +286,11 @@ async def linkedin_status(
 
 
 @app.post("/api/auth/linkedin/login")
-async def linkedin_login(req: LinkedInLoginRequest, session: AsyncSession = Depends(get_session)):
-    user = await AuthService.validate_linkedin_identity(session, req.email, req.linkedin_url)
-    if user is None:
-        raise HTTPException(status_code=403, detail="LinkedIn account is not whitelisted for this dashboard")
-
-    token = await AuthService.create_session(session, user)
-    return {
-        "token": token,
-        "role": user.role,
-        "email": user.email,
-        "display_name": user.display_name,
-        "linkedin_url": user.linkedin_url,
-    }
+async def linkedin_login_legacy():
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy LinkedIn login is disabled. Use the official LinkedIn OAuth flow.",
+    )
 
 
 @app.get("/api/auth/me")
@@ -361,53 +353,11 @@ async def get_profile(
 
 
 @app.post("/api/profile")
-async def upsert_profile(
-    req: ProfileRequest,
-    session: AsyncSession = Depends(get_session),
-    current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
-):
-    profile = await AuthService.get_or_create_profile(session, current_user)
-    if profile is None:
-        profile = UserProfile(
-            id=int(current_user.id),
-            display_name=req.display_name,
-            professional_title=req.professional_title,
-            industry=req.industry,
-            audience=req.audience,
-            goals=",".join(req.goals or []),
-            brand_positioning=req.brand_positioning,
-            tone=req.tone,
-            role=current_user.role or "user",
-        )
-        session.add(profile)
-    else:
-        profile.display_name = req.display_name
-        profile.professional_title = req.professional_title
-        profile.industry = req.industry
-        profile.audience = req.audience
-        profile.goals = ",".join(req.goals or [])
-        profile.brand_positioning = req.brand_positioning
-        profile.tone = req.tone
-        profile.role = profile.role or current_user.role or "user"
-
-    voice = (await session.execute(
-        select(VoiceMemory).where(VoiceMemory.profile_id == profile.id).limit(1)
-    )).scalar_one_or_none()
-    if voice is None:
-        voice = VoiceMemory(
-            profile_id=profile.id,
-            tone=req.tone or "practical",
-            sentence_style="clear and grounded",
-            vocabulary="alignment, execution, clarity",
-            preferred_phrases="simple systems, real bottleneck, practical",
-            avoid_phrases="game-changer, unlock the power of",
-            emoji_usage="limited",
-        )
-        session.add(voice)
-
-    await session.commit()
-    await session.refresh(profile)
-    return {"id": profile.id, "display_name": profile.display_name, "tone": profile.tone, "role": profile.role or "owner"}
+async def upsert_profile_legacy():
+    raise HTTPException(
+        status_code=410,
+        detail="Manual profile editing is disabled. LinkedIn is the factual profile source.",
+    )
 
 
 @app.get("/api/brand/status")
@@ -489,19 +439,9 @@ async def brand_onboard(
 
     profile = await AuthService.get_or_create_profile(session, current_user)
 
-    profile.display_name = req.display_name.strip() or profile.display_name or current_user.display_name or "User"
-    if req.professional_title is not None:
-        profile.professional_title = req.professional_title
-    if req.industry is not None:
-        profile.industry = req.industry
-    if req.audience is not None:
-        profile.audience = req.audience
-    if req.goals:
-        profile.goals = ",".join(req.goals)
-    if req.brand_positioning is not None:
-        profile.brand_positioning = req.brand_positioning
-    if req.tone is not None:
-        profile.tone = req.tone
+    # LinkedIn is the factual profile source. Imported posts are the only
+    # user-controlled onboarding input.
+    profile.display_name = current_user.display_name or profile.display_name or "User"
     profile.role = profile.role or current_user.role or "user"
     await session.commit()
 
@@ -548,15 +488,19 @@ async def brand_initialize(
 ):
     profile = await AuthService.get_or_create_profile(session, current_user)
 
-    profile.display_name = req.display_name.strip() or "User"
-    profile.professional_title = req.professional_title
-    profile.industry = req.industry
-    profile.audience = req.audience
-    profile.goals = ",".join(req.goals or [])
-    profile.brand_positioning = req.brand_positioning
-    profile.tone = req.tone
-    profile.role = profile.role or "owner"
-    await session.commit()
+    # Do not trust client-supplied profile facts. LinkedIn remains the factual
+    # baseline and Brand Intelligence derives the remaining signals.
+    profile.display_name = current_user.display_name or profile.display_name or "User"
+    profile.role = profile.role or current_user.role or "user"
+
+    # A no-post initialization is an explicit request to remove the current
+    # user-imported source snapshot. Published Brand OS evidence is preserved.
+    await session.execute(
+        delete(HistoricalPost).where(
+            HistoricalPost.profile_id == profile.id,
+            HistoricalPost.source == "user_import",
+        )
+    )
 
     try:
         memory = await BrandIntelligenceService(session).analyze(profile.id)
@@ -908,6 +852,28 @@ async def create_draft(
         raise HTTPException(status_code=400, detail="Complete Brand DNA setup before creating content.")
 
     guard = run_content_guards(req.body)
+    digest = hashlib.sha256(req.body.strip().encode("utf-8")).hexdigest()
+    existing_content = await session.execute(
+        select(ContentVersion.id)
+        .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+        .where(
+            ContentItem.profile_id == profile.id,
+            ContentVersion.content_hash == digest,
+        )
+        .limit(1)
+    )
+    if existing_content.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="This exact content already exists in your brand memory.")
+
+    existing_historical = await session.execute(
+        select(HistoricalPost.id).where(
+            HistoricalPost.profile_id == profile.id,
+            HistoricalPost.content_hash == digest,
+        ).limit(1)
+    )
+    if existing_historical.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="This exact content already exists in your brand memory.")
+
     item = ContentItem(
         profile_id=profile.id,
         title=req.title,

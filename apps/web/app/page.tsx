@@ -18,7 +18,7 @@ function getApiError(data: any, fallback: string) {
   return fallback;
 }
 
-type ApprovalStatus = 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'REJECTED' | 'EXECUTED';
+type ApprovalStatus = 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'PUBLISHING' | 'REJECTED' | 'EXECUTED';
 type ApprovalItem = { id: number; status: ApprovalStatus; action_type: string; reason: string | null; content: string; title?: string; topic?: string; approved_at?: string | null; created_at?: string };
 type Profile = { display_name: string; role?: string };
 type LinkedInStatus = { connected: boolean; name?: string | null; email?: string | null; expires_at?: string | null };
@@ -160,18 +160,29 @@ useEffect(() => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('linkedin_code');
+    const oauthNonce = params.get('oauth_nonce');
     const savedToken = window.localStorage.getItem(STORAGE_KEY);
     if (code) {
+      const expectedNonce = window.localStorage.getItem('brand-os-oauth-nonce');
       window.history.replaceState({}, document.title, window.location.pathname);
+      if (!expectedNonce || !oauthNonce || expectedNonce !== oauthNonce) {
+        window.localStorage.removeItem('brand-os-oauth-nonce');
+        setError('LinkedIn sign-in could not be verified in this browser. Please start the connection again.');
+        return;
+      }
       fetch(`${API_BASE}/api/auth/linkedin/exchange`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
       }).then(async (res) => {
         const data = await res.json();
         if (!res.ok) throw new Error(getApiError(data, 'LinkedIn connection failed'));
         window.localStorage.setItem(STORAGE_KEY, data.token);
+        window.localStorage.removeItem('brand-os-oauth-nonce');
         setToken(data.token);
         setNotice('LinkedIn account connected successfully.');
-      }).catch((e) => setError(e instanceof Error ? e.message : 'LinkedIn connection failed'));
+      }).catch((e) => {
+        window.localStorage.removeItem('brand-os-oauth-nonce');
+        setError(e instanceof Error ? e.message : 'LinkedIn connection failed');
+      });
       return;
     }
     if (savedToken) setToken(savedToken);
@@ -308,7 +319,11 @@ useEffect(() => {
 
   const initials = (profile.display_name || 'User').split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase();
   const closeSidebar = () => setSidebarOpen(false);
-  const connectLinkedIn = () => { window.location.href = '/api/auth/linkedin/start'; };
+  const connectLinkedIn = () => {
+    const nonce = window.crypto?.randomUUID?.() || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
+    window.localStorage.setItem('brand-os-oauth-nonce', nonce);
+    window.location.href = '/api/auth/linkedin/start?browser_nonce=' + encodeURIComponent(nonce);
+  };
   const cancelBrandEdit = async () => { await fetchData(); setBrandEditing(false); };
   const logout = async () => {
     try {
@@ -410,7 +425,9 @@ useEffect(() => {
           ? 'New content suggestion generated and added to the approval queue.'
           : data.blocked_by_guardrails
             ? 'Content was generated but held back by guardrails and was not added to the approval queue.'
-            : 'No new suggestion was created. Try again with a different feedback or research angle.'
+            : data.duplicate_blocked
+              ? 'The generated draft matched content already in your brand memory, so it was not added to the approval queue.'
+              : 'No new suggestion was created. Try again with a different feedback or research angle.'
       );
     } catch (e) { setError(e instanceof Error ? e.message : 'Content generation failed'); }
     finally { setIsGenerating(false); }

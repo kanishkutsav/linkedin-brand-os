@@ -94,14 +94,15 @@ def _localized_value(value: object) -> str | None:
     return None
 
 
-async def build_authorization_url(session: AsyncSession) -> str:
+async def build_authorization_url(session: AsyncSession, browser_nonce: str | None = None) -> tuple[str, str]:
     if not settings.linkedin_client_id or not settings.linkedin_client_secret:
         raise HTTPException(
             status_code=503,
             detail="LinkedIn OAuth is not configured. Add LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET in Render.",
         )
 
-    state = secrets.token_urlsafe(32)
+    random_state = secrets.token_urlsafe(32)
+    state = f"{browser_nonce}.{random_state}" if browser_nonce else random_state
     session.add(
         LinkedInOAuthState(
             state_hash=_hash(state),
@@ -121,7 +122,8 @@ async def build_authorization_url(session: AsyncSession) -> str:
         "state": state,
         "scope": " ".join(scopes),
     }
-    return f"{LINKEDIN_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
+    url = f"{LINKEDIN_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
+    return url, state
 
 
 async def handle_callback(session: AsyncSession, code: str, state: str) -> str:

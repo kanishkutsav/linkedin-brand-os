@@ -47,7 +47,7 @@ class UserProfile(Base):
 class VoiceMemory(Base):
     __tablename__ = "voice_memory"
     id: Mapped[int] = mapped_column(primary_key=True)
-    profile_id: Mapped[int | None] = mapped_column(ForeignKey("user_profiles.id"), nullable=True)
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("user_profiles.id"), unique=True, index=True, nullable=True)
     tone: Mapped[str] = mapped_column(String(200), default="practical")
     sentence_style: Mapped[str] = mapped_column(String(200), default="clear")
     vocabulary: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -94,6 +94,8 @@ class ApprovalRequest(Base):
     edited_body: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    publish_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
