@@ -35,6 +35,15 @@ class ApprovalService:
         )
         return result.scalars().all()
 
+    async def list_dashboard(self, limit: int = 100):
+        """Return recent approval records, including completed decisions."""
+        result = await self.session.execute(
+            select(ApprovalRequest)
+            .order_by(ApprovalRequest.created_at.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
     async def approve(self, approval_id: int):
         approval = await self.session.get(ApprovalRequest, approval_id)
         if not approval or approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
@@ -53,6 +62,9 @@ class ApprovalService:
         approval.status = "APPROVED"
         approval.approval_hash = token
         approval.approved_at = datetime.now(timezone.utc)
+        item = await self.session.get(ContentItem, version.content_id)
+        if item:
+            item.status = "APPROVED"
         self.session.add(AuditLog(event_type="APPROVAL_GRANTED", actor="user", payload=f"approval={approval.id}"))
         self.session.add(
             FeedbackEntry(
@@ -110,6 +122,10 @@ class ApprovalService:
         approval.status = "REJECTED"
         approval.reason = reason or "Rejected by human reviewer."
         version = await self.session.get(ContentVersion, approval.content_version_id)
+        if version:
+            item = await self.session.get(ContentItem, version.content_id)
+            if item:
+                item.status = "REJECTED"
         self.session.add(
             FeedbackEntry(
                 approval_id=approval.id,
@@ -228,6 +244,10 @@ class ApprovalService:
         if approval.approval_hash != expected: raise ValueError("Approval token/content hash mismatch")
         result = adapter.publish_post(version.body)
         approval.status = "EXECUTED" if result.success else "FAILED"
+        if result.success:
+            item = await self.session.get(ContentItem, version.content_id)
+            if item:
+                item.status = "PUBLISHED"
 
         # A successfully published Brand OS post becomes durable first-party
         # brand evidence. This is the automatic learning path for content created
