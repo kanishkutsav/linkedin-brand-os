@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from urllib.parse import quote_plus, urlparse
@@ -31,25 +32,35 @@ class ResearchService:
         if not queries:
             queries = ["technology business leadership AI"]
 
-        items: list[dict] = []
-        seen: set[str] = set()
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers={"User-Agent": "BrandOS/1.0"}) as client:
-            for query in queries[:3]:
-                url = "https://news.google.com/rss/search?q=" + quote_plus(query) + "&hl=en-IN&gl=IN&ceid=IN:en"
-                response = await client.get(url)
-                response.raise_for_status()
-                root = ET.fromstring(response.text)
-                for node in root.findall("./channel/item")[:8]:
-                    title = (node.findtext("title") or "").strip()
-                    link = (node.findtext("link") or "").strip()
-                    pub = (node.findtext("pubDate") or "").strip()
-                    source_node = node.find("source")
-                    source_name = (source_node.text or "").strip() if source_node is not None else ""
-                    if not title or not link or link in seen:
-                        continue
-                    seen.add(link)
+        async def fetch_query(client: httpx.AsyncClient, query: str) -> list[dict]:
+            url = "https://news.google.com/rss/search?q=" + quote_plus(query) + "&hl=en-IN&gl=IN&ceid=IN:en"
+            response = await client.get(url)
+            response.raise_for_status()
+            root = ET.fromstring(response.text)
+            items: list[dict] = []
+            for node in root.findall("./channel/item")[:6]:
+                title = (node.findtext("title") or "").strip()
+                link = (node.findtext("link") or "").strip()
+                pub = (node.findtext("pubDate") or "").strip()
+                source_node = node.find("source")
+                source_name = (source_node.text or "").strip() if source_node is not None else ""
+                if title and link:
                     items.append({"title": title, "url": link, "published_at": pub, "source": source_name, "query": query})
-        return items[:20]
+            return items
+
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, headers={"User-Agent": "BrandOS/1.0"}) as client:
+            batches = await asyncio.gather(*(fetch_query(client, query) for query in queries[:3]), return_exceptions=True)
+
+        seen: set[str] = set()
+        items: list[dict] = []
+        for batch in batches:
+            if isinstance(batch, Exception):
+                continue
+            for item in batch:
+                if item["url"] not in seen:
+                    seen.add(item["url"])
+                    items.append(item)
+        return items[:16]
 
     async def _gdelt_sources(self, profile: UserProfile, requested_topic: str | None) -> list[dict]:
         queries: list[str] = []
@@ -62,36 +73,40 @@ class ResearchService:
         if not queries:
             queries = ["technology business leadership AI"]
 
-        items: list[dict] = []
+        async def fetch_query(client: httpx.AsyncClient, query: str) -> list[dict]:
+            url = (
+                "https://api.gdeltproject.org/api/v2/doc/doc?"
+                + "query=" + quote_plus(query)
+                + "&mode=artlist&maxrecords=8&timespan=7d&sort=datedesc&format=json"
+            )
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
+            return [
+                {
+                    "title": str(article.get("title") or "").strip(),
+                    "url": str(article.get("url") or "").strip(),
+                    "published_at": str(article.get("seendate") or ""),
+                    "source": str(article.get("domain") or ""),
+                    "query": query,
+                }
+                for article in (data.get("articles") or [])[:8]
+                if str(article.get("url") or "").startswith(("https://", "http://")) and str(article.get("title") or "").strip()
+            ]
+
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, headers={"User-Agent": "BrandOS/1.0"}) as client:
+            batches = await asyncio.gather(*(fetch_query(client, query) for query in queries[:3]), return_exceptions=True)
+
         seen: set[str] = set()
-        async with httpx.AsyncClient(
-            timeout=20.0,
-            follow_redirects=True,
-            headers={"User-Agent": "BrandOS/1.0"},
-        ) as client:
-            for query in queries[:3]:
-                url = (
-                    "https://api.gdeltproject.org/api/v2/doc/doc?"
-                    + "query=" + quote_plus(query)
-                    + "&mode=artlist&maxrecords=10&timespan=7d&sort=datedesc&format=json"
-                )
-                response = await client.get(url)
-                response.raise_for_status()
-                data = response.json()
-                for article in (data.get("articles") or [])[:10]:
-                    link = str(article.get("url") or "").strip()
-                    title = str(article.get("title") or "").strip()
-                    if not link.startswith(("https://", "http://")) or not title or link in seen:
-                        continue
-                    seen.add(link)
-                    items.append({
-                        "title": title,
-                        "url": link,
-                        "published_at": str(article.get("seendate") or ""),
-                        "source": str(article.get("domain") or ""),
-                        "query": query,
-                    })
-        return items[:20]
+        items: list[dict] = []
+        for batch in batches:
+            if isinstance(batch, Exception):
+                continue
+            for item in batch:
+                if item["url"] not in seen:
+                    seen.add(item["url"])
+                    items.append(item)
+        return items[:16]
 
     async def research_and_rank(
         self,
@@ -116,18 +131,24 @@ class ResearchService:
         recent_content = [{"topic": row[0], "created_at": row[1].isoformat() if row[1] else None} for row in recent_content_result.all()]
 
         source_errors: list[str] = []
-        try:
-            live_sources = await self._live_sources(profile, requested_topic)
-        except Exception as exc:
-            source_errors.append(f"Google News RSS: {exc}")
-            live_sources = []
+        google_task = asyncio.create_task(self._live_sources(profile, requested_topic))
+        gdelt_task = asyncio.create_task(self._gdelt_sources(profile, requested_topic))
+        google_result, gdelt_result = await asyncio.gather(google_task, gdelt_task, return_exceptions=True)
 
-        if not live_sources:
-            try:
-                live_sources = await self._gdelt_sources(profile, requested_topic)
-            except Exception as exc:
-                source_errors.append(f"GDELT: {exc}")
-                live_sources = []
+        live_sources: list[dict] = []
+        for label, result in (("Google News RSS", google_result), ("GDELT", gdelt_result)):
+            if isinstance(result, Exception):
+                source_errors.append(f"{label}: {result}")
+                continue
+            live_sources.extend(result)
+
+        deduped_sources: list[dict] = []
+        seen_urls: set[str] = set()
+        for source in live_sources:
+            if source["url"] not in seen_urls:
+                seen_urls.add(source["url"])
+                deduped_sources.append(source)
+        live_sources = deduped_sources[:20]
 
         if not live_sources:
             raise RuntimeError("Live source discovery failed. " + " | ".join(source_errors))
@@ -142,11 +163,11 @@ class ResearchService:
                 "positioning": profile.brand_positioning,
             },
             "brand_intelligence": context["brand_memory"],
-            "recent_historical_posts": [p.body[:1200] for p in historical],
-            "recent_content_topics": recent_content,
+            "recent_historical_posts": [p.body[:600] for p in historical[:6]],
+            "recent_content_topics": recent_content[:10],
             "requested_topic": requested_topic,
             "candidate_limit": candidate_limit,
-            "live_sources": live_sources,
+            "live_sources": live_sources[:16],
         }, ensure_ascii=False)
 
         system = """You are the live research and content-opportunity engine for a professional LinkedIn personal-brand system.
@@ -169,8 +190,38 @@ Return:
 Generate 6-8 genuinely different opportunities. Every opportunity must cite at least one supplied source URL in source_urls.
 """
 
-        data = await ModelRouterService().generate_json(system, prompt, max_output_tokens=3600)
-        opportunities = data.get("opportunities") or []
+        try:
+            data = await ModelRouterService().generate_json(system, prompt, max_output_tokens=2200)
+            opportunities = data.get("opportunities") or []
+        except Exception:
+            # Research should remain useful even when a configured LLM provider
+            # is temporarily unavailable. The public source feed is still valid
+            # evidence, so create deterministic source-grounded candidates and
+            # mark them as fallback opportunities instead of failing the request.
+            opportunities = [
+                {
+                    "title": source["title"][:180],
+                    "topic": source["title"][:300],
+                    "angle": f"What this development means for professionals working in {profile.industry or 'technology and business'}",
+                    "pillar": "Industry insights",
+                    "format": "Insight post",
+                    "objective": "Build informed professional visibility",
+                    "why_now": "This item appeared in the live public source feed during the research run.",
+                    "evidence_summary": source["title"],
+                    "source_hints": [source.get("source") or source.get("domain") or ""],
+                    "source_urls": [source["url"]],
+                    "brand_fit": 62,
+                    "audience_relevance": 60,
+                    "timeliness": 82,
+                    "evidence_strength": 72,
+                    "novelty": 58,
+                    "conversation_potential": 55,
+                    "authenticity": 60,
+                    "risk": 20,
+                    "rationale": "Deterministic fallback based only on a current public source because the configured ranking model was unavailable.",
+                }
+                for source in live_sources[:6]
+            ]
         created: list[dict] = []
         source_by_url = {item["url"]: item for item in live_sources}
 
