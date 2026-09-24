@@ -203,9 +203,15 @@ export default function Home() {
   const closeSidebar = () => setSidebarOpen(false);
   const connectLinkedIn = () => { window.location.href = '/api/auth/linkedin/start'; };
   const cancelBrandEdit = async () => { await fetchData(); setBrandEditing(false); };
-  const logout = () => {
-    window.localStorage.removeItem(STORAGE_KEY);
-    setToken(null); setQueue([]); setLinkedin({ connected: false }); closeSidebar();
+  const logout = async () => {
+    try {
+      if (token) {
+        await fetch(API_BASE + '/api/auth/logout', { method: 'POST', headers: headers(token) });
+      }
+    } finally {
+      window.localStorage.removeItem(STORAGE_KEY);
+      setToken(null); setQueue([]); setLinkedin({ connected: false }); closeSidebar();
+    }
   };
   const go = (next: Tab) => { setTab(next); closeSidebar(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
 
