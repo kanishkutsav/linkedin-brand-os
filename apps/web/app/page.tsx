@@ -314,35 +314,6 @@ export default function Home() {
     }
   };
 
-  const publishApprovedPost = async () => {
-    if (!selectedApproval || !token) return;
-    setIsBusy(true); setBusyAction('approve'); setError(null); setNotice(null);
-    setOperationProgress(20);
-    setOperationStage('Publishing to LinkedIn…');
-    try {
-      const res = await fetch(API_BASE + '/api/approvals/' + selectedApproval.id + '/execute', {
-        method: 'POST',
-        headers: headers(),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.success === false) {
-        throw new Error(getApiError(data, data.message || 'LinkedIn publication failed. Please reconnect LinkedIn and retry.'));
-      }
-      setOperationProgress(82);
-      setOperationStage('Refreshing the workspace…');
-      await fetchData();
-      setOperationProgress(100);
-      setOperationStage('Published');
-      setNoticeTtl(4500);
-      setNotice('Published successfully to your connected LinkedIn account.');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'LinkedIn publication failed');
-    } finally {
-      setIsBusy(false);
-      setBusyAction(null);
-    }
-  };
-
   const generateContent = async () => {
     if (!token) return;
     if (!requireBrand('generating content')) return;
@@ -674,25 +645,21 @@ function ApprovalWorkspace(props: any) {
                   </div>
                 </>
               ) : (
-                <div className="notice error" style={{ marginTop: 10 }}>
-                  {selected.status === 'EXECUTED' ? <CircleCheck size={15}/> : <X size={15}/>}
-                  <span>
-                    {selected.status === 'EXECUTED'
-                      ? 'Approved and published to LinkedIn through the official API.'
-                      : selected.status === 'APPROVED'
-                        ? (selected.reason || 'Approval is saved, but publication did not complete. You can retry publication below.')
-                        : 'This post is no longer awaiting a decision.'}
-                  </span>
-                </div>
+                <>
+                  <div className="notice success" style={{ marginTop: 10 }}>
+                    <CircleCheck size={15}/>
+                    <span>{selected.status === 'EXECUTED' ? 'Approved and published to LinkedIn through the official API.' : selected.status === 'APPROVED' ? 'Approved, but publication did not complete. Use Publish to LinkedIn to retry.' : 'This post is no longer awaiting a decision.'}</span>
+                  </div>
+                  {selected.status === 'APPROVED' && (
+                    <div className="review-actions review-actions-publish">
+                      <button className="button success progress-button publish-retry-button" disabled={isBusy} onClick={() => onAction('approve')}>
+                        <span className="button-content"><ExternalLink size={14}/>{busyAction === 'approve' ? operationStage || 'Publishing…' : 'Publish to LinkedIn'}</span>
+                        {busyAction === 'approve' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
-              {selected.status === 'APPROVED' && (
-                <div className="review-actions review-actions-publish">
-                  <button className="button success progress-button publish-retry-button" disabled={isBusy} onClick={publishApprovedPost}>
-                    <span className="button-content"><ExternalLink size={14}/>{busyAction === 'approve' && operationStage ? operationStage : 'Publish to LinkedIn'}</span>
-                    {busyAction === 'approve' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
-                  </button>
-                </div>
-              )}}
             </div>
             <div style={{ marginTop: 17 }}>
               <div className="review-label" style={{ marginBottom: 9 }}>Safety rail</div>
