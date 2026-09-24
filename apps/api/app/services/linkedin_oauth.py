@@ -37,7 +37,7 @@ def redirect_uri() -> str:
     return f"{base}/api/auth/linkedin/callback"
 
 
-def _request_json(url: str, *, data: dict | None = None, headers: dict | None = None) -> dict:
+def _request_json(url: str, *, data: dict | None = None, headers: dict | None = None, timeout: int = 20) -> dict:
     encoded = urllib.parse.urlencode(data).encode("utf-8") if data is not None else None
     request = urllib.request.Request(
         url,
@@ -46,7 +46,7 @@ def _request_json(url: str, *, data: dict | None = None, headers: dict | None = 
         method="POST" if data is not None else "GET",
     )
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"LinkedIn API request failed: {exc}") from exc
@@ -69,6 +69,7 @@ def _best_effort_profile(access_token: str, userinfo: dict) -> dict:
                 "Linkedin-Version": settings.linkedin_api_version,
                 "X-Restli-Protocol-Version": "2.0.0",
             },
+            timeout=5,
         )
         if isinstance(member, dict):
             for key, value in member.items():
