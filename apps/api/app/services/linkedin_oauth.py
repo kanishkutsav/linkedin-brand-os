@@ -73,7 +73,7 @@ async def build_authorization_url(session: AsyncSession) -> str:
         "client_id": settings.linkedin_client_id,
         "redirect_uri": redirect_uri(),
         "state": state,
-        "scope": "openid profile email w_member_social r_member_postAnalytics r_member_profileAnalytics",
+        "scope": " ".join(scopes),
     }
     return f"{LINKEDIN_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
 
