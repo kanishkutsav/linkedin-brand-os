@@ -532,7 +532,7 @@ export default function Home() {
                   editedBody={editedBody} setEditedBody={setEditedBody}
                   reviewNote={reviewNote} setReviewNote={setReviewNote}
                   isBusy={isBusy} busyAction={busyAction} operationProgress={operationProgress} operationStage={operationStage}
-                  onAction={runApprovalAction}
+                  linkedin={linkedin} onAction={runApprovalAction}
                 />
               </section>
             </>
@@ -594,7 +594,7 @@ function MiniStat({ icon: Icon, label, value }: any) {
 }
 
 function ApprovalWorkspace(props: any) {
-  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction } = props;
+  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, linkedin, onAction } = props;
   return (
     <div className="queue-layout">
       <div className="queue-list">
