@@ -28,8 +28,7 @@ async def _resolve_user(request: Request, credentials: HTTPAuthorizationCredenti
         if token:
             user = await AuthService.get_user_from_token(session, token)
             if user:
-                return user.role.lower()
-            return token.lower()
+                return user
 
     return None
 
@@ -40,8 +39,6 @@ def require_roles(*allowed_roles: str):
         credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
         session: AsyncSession = Depends(get_session),
     ) -> AppUser:
-        role = await _resolve_role(request, credentials, session)
-
         user = await _resolve_user(request, credentials, session)
 
         if user is None:
@@ -51,7 +48,7 @@ def require_roles(*allowed_roles: str):
                     detail="Authentication required",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
-            return "owner"
+            return AppUser(id="owner", email="owner@local.test", role="owner")
 
         role = user.role.lower()
         if role not in {"owner", "admin", "reviewer", "user"}:
