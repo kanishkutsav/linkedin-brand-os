@@ -91,6 +91,8 @@ class AgentOrchestrator:
         pillar: str,
         objective: str,
         evidence: list[dict] | None = None,
+        feedback: str | None = None,
+        current_draft: str | None = None,
     ) -> dict:
         service = ModelRouterService()
         brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id)
@@ -110,6 +112,8 @@ class AgentOrchestrator:
             objective=objective,
             evidence=evidence or [],
             voice=await self._voice(),
+            feedback=feedback,
+            current_draft=current_draft,
         )
 
     async def _create_candidate(
