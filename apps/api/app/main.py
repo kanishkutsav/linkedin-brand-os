@@ -171,7 +171,7 @@ class BrandOnboardingPost(BaseModel):
     body: str
     published_at: str | None = None
     external_id: str | None = None
-    metadata: dict[str, object] = {}
+    metadata: dict[str, object] = Field(default_factory=dict)
 
 
 class BrandOnboardingRequest(BaseModel):
@@ -436,7 +436,7 @@ async def brand_source_posts(
 ):
     result = await session.execute(
         select(HistoricalPost)
-        .where(HistoricalPost.profile_id == int(current_user.id), HistoricalPost.source == "user_import")
+        .where(HistoricalPost.profile_id == int(profile.id), HistoricalPost.source == "user_import")
         .order_by(HistoricalPost.created_at.asc())
         .limit(10)
     )
@@ -591,7 +591,7 @@ class AgentEventRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     event_type: str
-    payload: dict[str, object] = {}
+    payload: dict[str, object] = Field(default_factory=dict)
 
 
 @app.post("/api/agent/events")
@@ -911,15 +911,6 @@ async def approve(
     current_user: AppUser = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
     try:
-        existing = await session.get(ApprovalRequest, approval_id)
-        if existing and existing.status == "APPROVED":
-            approval = await ApprovalService(session)._get_owned_approval(approval_id, int(current_user.id))
-        else:
-            approval = await ApprovalService(session).approve(approval_id, int(current_user.id))
-
-        # Approval is the explicit human authorization. Once granted, publish
-        # immediately through the connected official LinkedIn API so the UI
-        # action has one unambiguous outcome: Approve & publish.
         connection_result = await session.execute(
             select(LinkedInConnection).where(LinkedInConnection.user_id == int(current_user.id))
         )
@@ -929,6 +920,15 @@ async def approve(
         if connection.token_expires_at and connection.token_expires_at <= datetime.now(timezone.utc):
             raise ValueError("Your LinkedIn connection has expired. Reconnect LinkedIn before approving for publication.")
 
+        existing = await session.get(ApprovalRequest, approval_id)
+        if existing and existing.status == "APPROVED":
+            approval = await ApprovalService(session)._get_owned_approval(approval_id, int(current_user.id))
+        else:
+            approval = await ApprovalService(session).approve(approval_id, int(current_user.id))
+
+        # Approval is the explicit human authorization. Once granted, publish
+        # immediately through the connected official LinkedIn API so the UI
+        # action has one unambiguous outcome: Approve & publish.
         publish_adapter = OfficialLinkedInAdapter(connection.access_token, connection.member_sub)
         publish_result = await ApprovalService(session).execute(approval_id, publish_adapter, int(current_user.id))
         return {
@@ -997,4 +997,3 @@ async def regenerate_approval(
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
