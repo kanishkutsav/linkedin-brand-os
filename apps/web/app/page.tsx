@@ -113,14 +113,13 @@ export default function Home() {
     if (!authToken) return;
     setLoading(true);
     try {
-      const [profileRes, approvalsRes, linkedinRes, brandRes, opportunityRes, sourceRes, analyticsRes] = await Promise.all([
+      // Load the core workspace first. Optional panels must never block the
+      // dashboard/Brand DNA from appearing.
+      const [profileRes, approvalsRes, linkedinRes, brandRes] = await Promise.all([
         fetch(`${API_BASE}/api/auth/me`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/dashboard/approvals`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/linkedin/status`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/brand/status`, { headers: headers(authToken) }),
-        fetch(`${API_BASE}/api/research/opportunities`, { headers: headers(authToken) }),
-        fetch(`${API_BASE}/api/brand/source-posts`, { headers: headers(authToken) }),
-        fetch(`${API_BASE}/api/analytics/overview`, { headers: headers(authToken) }),
       ]);
       if (profileRes.status === 401 || approvalsRes.status === 401) {
         window.localStorage.removeItem(STORAGE_KEY);
@@ -128,33 +127,55 @@ export default function Home() {
         throw new Error('Your session expired. Please sign in with LinkedIn again.');
       }
       if (!profileRes.ok || !approvalsRes.ok) throw new Error('Unable to load dashboard data.');
+
       const profileJson = await profileRes.json();
       const approvalsJson = await approvalsRes.json();
       setProfile({ display_name: profileJson.display_name || 'User', role: profileJson.role || 'owner' });
       setLinkedin(linkedinRes.ok ? await linkedinRes.json() : { connected: false });
+
       const brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
       setBrand(brandJson);
       const p = brandJson.profile || {};
-      setBrandTitle(p.professional_title || ''); setBrandIndustry(p.industry || '');
-      setBrandAudience(p.audience || ''); setBrandPositioning(p.brand_positioning || ''); setBrandTone(p.tone || '');
+      setBrandTitle(p.professional_title || '');
+      setBrandIndustry(p.industry || '');
+      setBrandAudience(p.audience || '');
+      setBrandPositioning(p.brand_positioning || '');
+      setBrandTone(p.tone || '');
       setBrandGoals(Array.isArray(p.goals) ? p.goals.join(', ') : (p.goals || ''));
-      const sourceJson = sourceRes.ok ? await sourceRes.json() : { posts: [] };
-      const sourcePosts = (sourceJson.posts || []).map((item: any) => item.body).filter((body: any) => typeof body === 'string' && body.trim());
+
+      // Brand status now carries the frozen source-post snapshot, so Brand DNA
+      // does not depend on a second request just to display the user's posts.
+      const sourcePosts = (brandJson.source_posts || [])
+        .map((item: any) => item.body)
+        .filter((body: any) => typeof body === 'string' && body.trim());
       if (sourcePosts.length) setHistoricalPostEntries(sourcePosts.slice(0, 5));
-      const analyticsJson = analyticsRes.ok ? await analyticsRes.json() : null;
-      setAnalytics(analyticsJson);
-      const opportunityJson = opportunityRes.ok ? await opportunityRes.json() : { opportunities: [] };
-      setOpportunities(opportunityJson.opportunities || []);
+
       const nextQueue: ApprovalItem[] = (approvalsJson.pending_approvals || []).map((item: any) => ({
         id: item.id, status: item.status, action_type: item.action_type, reason: item.reason, content: item.content || '',
       }));
       setQueue(nextQueue);
       if (nextQueue.length && !nextQueue.some((i) => i.id === selectedId)) setSelectedId(nextQueue[0].id);
+
+      setLoading(false);
+
+      // Optional workspace panels load independently. A slow research feed or
+      // analytics query must not blank/freeze the main workspace.
+      void Promise.all([
+        fetch(`${API_BASE}/api/research/opportunities`, { headers: headers(authToken) }),
+        fetch(`${API_BASE}/api/analytics/overview`, { headers: headers(authToken) }),
+      ]).then(async ([opportunityRes, analyticsRes]) => {
+        const opportunityJson = opportunityRes.ok ? await opportunityRes.json() : { opportunities: [] };
+        setOpportunities(opportunityJson.opportunities || []);
+        const analyticsJson = analyticsRes.ok ? await analyticsRes.json() : null;
+        setAnalytics(analyticsJson);
+      }).catch(() => {
+        // Optional panels are allowed to fail without affecting the core workspace.
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load dashboard data');
-    } finally { setLoading(false); }
+      setLoading(false);
+    }
   };
-
   useEffect(() => { fetchData(token); }, [token]);
   useEffect(() => {
     const selected = queue.find((item) => item.id === selectedId);
