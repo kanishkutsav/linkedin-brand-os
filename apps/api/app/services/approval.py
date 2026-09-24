@@ -135,6 +135,24 @@ class ApprovalService:
         if not version:
             raise ValueError("Content version not found")
         new_hash = hashlib.sha256(edited_body.encode("utf-8")).hexdigest()
+        duplicate_version = await self.session.execute(
+            select(ContentVersion.id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(
+                ContentItem.profile_id == profile_id,
+                ContentVersion.content_hash == new_hash,
+                ContentVersion.id != version.id,
+            )
+            .limit(1)
+        )
+        duplicate_historical = await self.session.execute(
+            select(HistoricalPost.id).where(
+                HistoricalPost.profile_id == profile_id,
+                HistoricalPost.content_hash == new_hash,
+            ).limit(1)
+        )
+        if duplicate_version.scalar_one_or_none() is not None or duplicate_historical.scalar_one_or_none() is not None:
+            raise ValueError("This exact content already exists in your brand memory.")
         new_version = ContentVersion(
             content_id=version.content_id,
             body=edited_body,
@@ -252,10 +270,30 @@ class ApprovalService:
         if not guard.passed:
             raise ValueError("Regenerated content blocked by guardrails: " + "; ".join(guard.issues))
 
+        new_hash = hashlib.sha256(new_body.encode("utf-8")).hexdigest()
+        duplicate_version = await self.session.execute(
+            select(ContentVersion.id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(
+                ContentItem.profile_id == profile_id,
+                ContentVersion.content_hash == new_hash,
+                ContentVersion.id != version.id,
+            )
+            .limit(1)
+        )
+        duplicate_historical = await self.session.execute(
+            select(HistoricalPost.id).where(
+                HistoricalPost.profile_id == profile_id,
+                HistoricalPost.content_hash == new_hash,
+            ).limit(1)
+        )
+        if duplicate_version.scalar_one_or_none() is not None or duplicate_historical.scalar_one_or_none() is not None:
+            raise ValueError("This exact content already exists in your brand memory.")
+
         new_version = ContentVersion(
             content_id=version.content_id,
             body=new_body,
-            content_hash=hashlib.sha256(new_body.encode("utf-8")).hexdigest(),
+            content_hash=new_hash,
             version_number=version.version_number + 1,
         )
         self.session.add(new_version)
