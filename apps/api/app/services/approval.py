@@ -6,6 +6,7 @@ from app.models.models import ApprovalRequest, ContentVersion, ContentItem, User
 from app.core.config import settings
 from app.services.brand_intelligence import BrandIntelligenceService
 from app.services.gemini_service import ModelRouterService
+from app.guards.guardrails import run_content_guards
 
 
 class ApprovalService:
@@ -38,9 +39,16 @@ class ApprovalService:
         approval = await self.session.get(ApprovalRequest, approval_id)
         if not approval or approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
             raise ValueError("Approval is not in an approvable state")
+        if approval.expires_at and approval.expires_at <= datetime.now(timezone.utc):
+            approval.status = "EXPIRED"
+            await self.session.commit()
+            raise ValueError("Approval has expired")
         version = await self.session.get(ContentVersion, approval.content_version_id)
         if not version:
             raise ValueError("Content version not found")
+        guard = run_content_guards(version.body)
+        if not guard.passed:
+            raise ValueError("Approval blocked by guardrails: " + "; ".join(guard.issues))
         token = hashlib.sha256(f"{approval.id}:{version.content_hash}".encode()).hexdigest()
         approval.status = "APPROVED"
         approval.approval_hash = token
@@ -60,8 +68,16 @@ class ApprovalService:
 
     async def edit(self, approval_id: int, edited_body: str, reason: str | None = None):
         approval = await self.session.get(ApprovalRequest, approval_id)
-        if not approval:
-            raise ValueError("Approval not found")
+        if not approval or approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
+            raise ValueError("Approval is not editable in its current state")
+        if approval.expires_at and approval.expires_at <= datetime.now(timezone.utc):
+            approval.status = "EXPIRED"
+            await self.session.commit()
+            raise ValueError("Approval has expired")
+        edited_body = (edited_body or "").strip()
+        guard = run_content_guards(edited_body)
+        if not guard.passed:
+            raise ValueError("Edit blocked by guardrails: " + "; ".join(guard.issues))
         version = await self.session.get(ContentVersion, approval.content_version_id)
         if not version:
             raise ValueError("Content version not found")
@@ -89,6 +105,8 @@ class ApprovalService:
         approval = await self.session.get(ApprovalRequest, approval_id)
         if not approval:
             raise ValueError("Approval not found")
+        if approval.status == "EXECUTED":
+            raise ValueError("Published content cannot be rejected from the approval workflow.")
         approval.status = "REJECTED"
         approval.reason = reason or "Rejected by human reviewer."
         version = await self.session.get(ContentVersion, approval.content_version_id)
@@ -107,8 +125,12 @@ class ApprovalService:
 
     async def regenerate(self, approval_id: int, feedback: str | None = None):
         approval = await self.session.get(ApprovalRequest, approval_id)
-        if not approval:
-            raise ValueError("Approval not found")
+        if not approval or approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
+            raise ValueError("Approval is not regenerable in its current state")
+        if approval.expires_at and approval.expires_at <= datetime.now(timezone.utc):
+            approval.status = "EXPIRED"
+            await self.session.commit()
+            raise ValueError("Approval has expired")
         version = await self.session.get(ContentVersion, approval.content_version_id)
         if not version:
             raise ValueError("Content version not found")
@@ -145,6 +167,10 @@ class ApprovalService:
         if not new_body:
             raise ValueError("The configured content model did not return a usable regenerated draft.")
 
+        guard = run_content_guards(new_body)
+        if not guard.passed:
+            raise ValueError("Regenerated content blocked by guardrails: " + "; ".join(guard.issues))
+
         version.body = new_body
         version.content_hash = hashlib.sha256(new_body.encode("utf-8")).hexdigest()
         version.version_number += 1
@@ -179,6 +205,11 @@ class ApprovalService:
         flags = (await self.session.execute(select(SystemFlag))).scalars().first()
         if flags and flags.emergency_stop: raise ValueError("Emergency stop is active")
         version = await self.session.get(ContentVersion, approval.content_version_id)
+        if not version:
+            raise ValueError("Content version not found")
+        guard = run_content_guards(version.body)
+        if not guard.passed:
+            raise ValueError("Publishing blocked by guardrails: " + "; ".join(guard.issues))
         expected = hashlib.sha256(f"{approval.id}:{version.content_hash}".encode()).hexdigest()
         if approval.approval_hash != expected: raise ValueError("Approval token/content hash mismatch")
         result = adapter.publish_post(version.body)
