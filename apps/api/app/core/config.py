@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     linkedin_api_version: str = "202609"
     api_base_url: str | None = None
     linkedin_redirect_uri: str | None = None
+    # Request analytics scopes only after LinkedIn Community Management access is approved.
+    linkedin_analytics_oauth_enabled: bool = False
 
     # LLM provider routing
     # OpenRouter is the primary free-inference provider.
