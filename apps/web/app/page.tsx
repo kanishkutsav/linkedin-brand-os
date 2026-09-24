@@ -49,6 +49,7 @@ export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile>({ display_name: 'User', role: 'owner' });
   const [linkedin, setLinkedin] = useState<LinkedInStatus>({ connected: false });
+  const [linkedinProfileSynced, setLinkedinProfileSynced] = useState(false);
   const [brand, setBrand] = useState<BrandStatus>({ ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 });
   const [brandTitle, setBrandTitle] = useState('');
   const [brandIndustry, setBrandIndustry] = useState('');
@@ -200,7 +201,26 @@ useEffect(() => {
       setProfile({ display_name: profileJson.display_name || 'User', role: profileJson.role || 'owner' });
       setLinkedin(linkedinRes.ok ? await linkedinRes.json() : { connected: false });
 
-      const brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
+      let brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
+
+      // Keep Brand DNA profile facts synchronized from the connected LinkedIn
+      // account once per browser session. This replaces the old manual profile form.
+      if (linkedinRes.ok && !linkedinProfileSynced) {
+        setLinkedinProfileSynced(true);
+        try {
+          const syncRes = await fetch(API_BASE + '/api/linkedin/sync-profile', {
+            method: 'POST',
+            headers: headers(authToken),
+          });
+          if (syncRes.ok) {
+            const refreshedBrandRes = await fetch(API_BASE + '/api/brand/status', { headers: headers(authToken) });
+            if (refreshedBrandRes.ok) brandJson = await refreshedBrandRes.json();
+          }
+        } catch {
+          // Profile sync is best-effort. Existing Brand DNA remains usable.
+        }
+      }
+
       setBrand(brandJson);
       const p = brandJson.profile || {};
       setBrandTitle(p.professional_title || '');
@@ -297,7 +317,7 @@ useEffect(() => {
       }
     } finally {
       window.localStorage.removeItem(STORAGE_KEY);
-      setToken(null); setQueue([]); setLinkedin({ connected: false }); closeSidebar();
+      setToken(null); setQueue([]); setLinkedin({ connected: false }); setLinkedinProfileSynced(false); closeSidebar();
     }
   };
   const go = (next: Tab) => { setTab(next); closeSidebar(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
