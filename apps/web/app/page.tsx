@@ -86,6 +86,8 @@ export default function Home() {
   const [generationStage, setGenerationStage] = useState('');
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [isResearching, setIsResearching] = useState(false);
+  const [researchProgress, setResearchProgress] = useState(0);
+  const [researchStage, setResearchStage] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -123,6 +125,23 @@ export default function Home() {
   }, [isImproving]);
 
   useEffect(() => {
+    if (!isResearching) {
+      setResearchProgress(0);
+      setResearchStage('');
+      return;
+    }
+    setResearchProgress(8);
+    setResearchStage('Connecting to live sources…');
+    const timers = [
+      window.setTimeout(() => { setResearchProgress(24); setResearchStage('Collecting current public sources…'); }, 700),
+      window.setTimeout(() => { setResearchProgress(46); setResearchStage('Cross-checking and deduplicating evidence…'); }, 1800),
+      window.setTimeout(() => { setResearchProgress(68); setResearchStage('Matching evidence to your Brand DNA…'); }, 3000),
+      window.setTimeout(() => { setResearchProgress(82); setResearchStage('Ranking opportunities…'); }, 4800),
+    ];
+    return () => timers.forEach(window.clearTimeout);
+  }, [isResearching]);
+
+useEffect(() => {
     if (!busyAction) {
       setOperationProgress(0);
       setOperationStage('');
@@ -236,17 +255,28 @@ export default function Home() {
 
   const filteredQueue = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
+    const pendingStatuses = new Set(['PENDING', 'REGENERATED', 'EDITED']);
     return queue.filter((item) => {
-      const pendingStatuses = ['PENDING', 'REGENERATED', 'EDITED'];
+      const normalizedStatus = String(item.status || '').trim().toUpperCase();
       const statusMatch = statusFilter === 'all'
         ? true
         : statusFilter === 'PENDING'
-          ? pendingStatuses.includes(item.status)
-          : item.status === statusFilter;
+          ? pendingStatuses.has(normalizedStatus)
+          : normalizedStatus === statusFilter;
       const haystack = `${item.action_type} ${item.content} ${item.reason || ''}`.toLowerCase();
       return statusMatch && (!query || haystack.includes(query));
     });
   }, [queue, searchTerm, statusFilter]);
+
+  useEffect(() => {
+    if (!filteredQueue.length) {
+      setSelectedId(null);
+      return;
+    }
+    if (!filteredQueue.some((item) => item.id === selectedId)) {
+      setSelectedId(filteredQueue[0].id);
+    }
+  }, [filteredQueue, selectedId]);
 
   const selectedApproval = queue.find((item) => item.id === selectedId) ?? null;
   const summary = useMemo(() => ({
@@ -300,15 +330,15 @@ export default function Home() {
       if (action === 'approve' && data.published === false) {
         throw new Error(data.message || 'Approval was recorded, but LinkedIn publication failed.');
       }
+      if (action === 'regenerate') {
+        window.localStorage.removeItem(`brand-os-regeneration-feedback:${selectedApproval.id}`);
+        setReviewNote('');
+      }
       setOperationProgress(action === 'approve' ? 82 : 88);
       setOperationStage(action === 'regenerate' ? 'Refreshing the approval queue…' : 'Refreshing the workspace…');
       await fetchData();
       setOperationProgress(100);
       setOperationStage('Done');
-      if (action === 'regenerate') {
-        window.localStorage.removeItem(`brand-os-regeneration-feedback:${selectedApproval.id}`);
-        setReviewNote('');
-      }
       setNoticeTtl(action === 'regenerate' ? 1800 : 4500);
       setNotice(
         action === 'regenerate'
@@ -358,17 +388,29 @@ export default function Home() {
   const discoverResearch = async () => {
     if (!token) return;
     if (!requireBrand('running live research')) return;
-    setIsResearching(true); setError(null); setNoticeTtl(4500); setNotice(null);
+    setIsResearching(true); setResearchProgress(8); setResearchStage('Starting live research…');
+    setError(null); setNoticeTtl(4500); setNotice(null);
     try {
       const res = await fetch(API_BASE + '/api/research/discover', {
         method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({}),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, 'Live research failed'));
+      setResearchProgress(96);
+      setResearchStage(data.fallback ? 'Using the latest available research evidence…' : 'Finalizing ranked opportunities…');
       setOpportunities(data.opportunities || []);
-      setNotice('Fresh research completed. Opportunities were ranked against your Brand DNA.');
-    } catch (e) { setError(e instanceof Error ? e.message : 'Live research failed'); }
-    finally { setIsResearching(false); }
+      setResearchProgress(100);
+      setResearchStage('Research complete');
+      setNotice(data.fallback
+        ? 'Live sources were temporarily unavailable. Showing the latest available research evidence.'
+        : 'Fresh research completed. Opportunities were ranked against your Brand DNA.');
+    } catch (e) {
+      setResearchProgress(0);
+      setResearchStage('');
+      setError(e instanceof Error ? e.message : 'Live research failed');
+    } finally {
+      setIsResearching(false);
+    }
   };
 
   const updateHistoricalPost = (index: number, value: string) =>
@@ -546,7 +588,7 @@ export default function Home() {
             </>
           )}
 
-          {tab === 'Research' && <ResearchView opportunities={opportunities} isResearching={isResearching} onResearch={discoverResearch} />}
+          {tab === 'Research' && <ResearchView opportunities={opportunities} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
           {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} />}
           {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'APPROVED' || item.status === 'EXECUTED')} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
@@ -737,12 +779,15 @@ function LinkedInPostsView({ posts }: { posts: ApprovalItem[] }) {
   );
 }
 
-function ResearchView({ opportunities, isResearching, onResearch }: { opportunities: Opportunity[]; isResearching: boolean; onResearch: () => void }) {
+function ResearchView({ opportunities, isResearching, researchProgress, researchStage, onResearch }: { opportunities: Opportunity[]; isResearching: boolean; researchProgress: number; researchStage: string; onResearch: () => void }) {
   return (
     <>
       <div className="page-header">
         <div><div className="page-kicker"><Search size={13}/> Intelligence layer</div><h1 className="page-title">Research & opportunities</h1><p className="page-description">Live evidence is combined with your Brand DNA before an idea reaches the drafting engine.</p></div>
-        <button className="button primary" onClick={onResearch} disabled={isResearching}><Search size={14}/>{isResearching ? 'Researching…' : 'Research now'}</button>
+        <button className="button primary progress-button" onClick={onResearch} disabled={isResearching}>
+          <span className="button-content"><Search size={14}/>{isResearching ? researchStage || 'Researching…' : 'Research now'}</span>
+          {isResearching && <span className="button-progress-track"><span style={{ width: researchProgress + '%' }} /></span>}
+        </button>
       </div>
       <div className="research-grid">
         {opportunities.length ? opportunities.map((item) => <ResearchCard key={item.id} item={item}/>) :
