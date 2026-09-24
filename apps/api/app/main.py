@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import sqlite3
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -170,7 +171,7 @@ class BrandOnboardingPost(BaseModel):
     body: str
     published_at: str | None = None
     external_id: str | None = None
-    metadata: dict[str, object] = {}
+    metadata: dict[str, object] = Field(default_factory=dict)
 
 
 class BrandOnboardingRequest(BaseModel):
@@ -223,26 +224,48 @@ async def linkedin_oauth_start(
     if browser_nonce and len(browser_nonce) > 200:
         raise HTTPException(status_code=400, detail="Invalid OAuth browser nonce.")
     url, state = await build_authorization_url(session, browser_nonce=browser_nonce)
-    return RedirectResponse(url=url, status_code=302)
+    response = RedirectResponse(url=url, status_code=302)
+    response.set_cookie(
+        key="brand_os_oauth_state",
+        value=state,
+        max_age=600,
+        httponly=True,
+        secure=bool(settings.environment == "production"),
+        samesite="lax",
+        path="/api/auth/linkedin",
+    )
+    return response
 
 
 @app.get("/api/auth/linkedin/callback")
 async def linkedin_oauth_callback(
+    request: Request,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     if error:
-        raise HTTPException(status_code=400, detail=f"LinkedIn authorization was not completed: {error}")
+        response = RedirectResponse(
+            url=f"{(settings.frontend_url or 'http://localhost:3000').rstrip('/')}/?linkedin_error=authorization_denied",
+            status_code=302,
+        )
+        response.delete_cookie("brand_os_oauth_state", path="/api/auth/linkedin")
+        return response
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing LinkedIn OAuth code or state.")
+
+    expected_state = request.cookies.get("brand_os_oauth_state") if request else None
+    if not expected_state or not secrets.compare_digest(expected_state, state):
+        raise HTTPException(status_code=400, detail="Invalid LinkedIn OAuth state.")
 
     browser_nonce = state.split(".", 1)[0] if "." in state else None
     exchange = await handle_callback(session, code, state)
     frontend = (settings.frontend_url or "http://localhost:3000").rstrip("/")
     nonce_suffix = f"&oauth_nonce={browser_nonce}" if browser_nonce else ""
-    return RedirectResponse(url=f"{frontend}/?linkedin_code={exchange}{nonce_suffix}", status_code=302)
+    response = RedirectResponse(url=f"{frontend}/?linkedin_code={exchange}{nonce_suffix}", status_code=302)
+    response.delete_cookie("brand_os_oauth_state", path="/api/auth/linkedin")
+    return response
 
 
 @app.post("/api/auth/linkedin/exchange")
@@ -413,7 +436,7 @@ async def brand_source_posts(
 ):
     result = await session.execute(
         select(HistoricalPost)
-        .where(HistoricalPost.profile_id == int(current_user.id), HistoricalPost.source == "user_import")
+        .where(HistoricalPost.profile_id == int(profile.id), HistoricalPost.source == "user_import")
         .order_by(HistoricalPost.created_at.asc())
         .limit(10)
     )
@@ -481,33 +504,11 @@ async def brand_onboard(
 
 
 @app.post("/api/brand/initialize")
-async def brand_initialize(
-    req: ProfileRequest,
-    session: AsyncSession = Depends(get_session),
-    current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
-):
-    profile = await AuthService.get_or_create_profile(session, current_user)
-
-    # Do not trust client-supplied profile facts. LinkedIn remains the factual
-    # baseline and Brand Intelligence derives the remaining signals.
-    profile.display_name = current_user.display_name or profile.display_name or "User"
-    profile.role = profile.role or current_user.role or "user"
-
-    # A no-post initialization is an explicit request to remove the current
-    # user-imported source snapshot. Published Brand OS evidence is preserved.
-    await session.execute(
-        delete(HistoricalPost).where(
-            HistoricalPost.profile_id == profile.id,
-            HistoricalPost.source == "user_import",
-        )
+async def brand_initialize_legacy():
+    raise HTTPException(
+        status_code=410,
+        detail="Brand DNA initialization without historical posts is disabled. Submit 3–10 previous LinkedIn posts through the Brand DNA onboarding flow.",
     )
-
-    try:
-        memory = await BrandIntelligenceService(session).analyze(profile.id)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="Brand Intelligence initialization failed. Check the configured LLM providers and try again.") from exc
-
-    return {"brand_memory": memory}
 
 
 @app.post("/api/brand/rebuild")
@@ -590,7 +591,7 @@ class AgentEventRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     event_type: str
-    payload: dict[str, object] = {}
+    payload: dict[str, object] = Field(default_factory=dict)
 
 
 @app.post("/api/agent/events")
@@ -910,15 +911,6 @@ async def approve(
     current_user: AppUser = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
     try:
-        existing = await session.get(ApprovalRequest, approval_id)
-        if existing and existing.status == "APPROVED":
-            approval = await ApprovalService(session)._get_owned_approval(approval_id, int(current_user.id))
-        else:
-            approval = await ApprovalService(session).approve(approval_id, int(current_user.id))
-
-        # Approval is the explicit human authorization. Once granted, publish
-        # immediately through the connected official LinkedIn API so the UI
-        # action has one unambiguous outcome: Approve & publish.
         connection_result = await session.execute(
             select(LinkedInConnection).where(LinkedInConnection.user_id == int(current_user.id))
         )
@@ -928,6 +920,15 @@ async def approve(
         if connection.token_expires_at and connection.token_expires_at <= datetime.now(timezone.utc):
             raise ValueError("Your LinkedIn connection has expired. Reconnect LinkedIn before approving for publication.")
 
+        existing = await session.get(ApprovalRequest, approval_id)
+        if existing and existing.status == "APPROVED":
+            approval = await ApprovalService(session)._get_owned_approval(approval_id, int(current_user.id))
+        else:
+            approval = await ApprovalService(session).approve(approval_id, int(current_user.id))
+
+        # Approval is the explicit human authorization. Once granted, publish
+        # immediately through the connected official LinkedIn API so the UI
+        # action has one unambiguous outcome: Approve & publish.
         publish_adapter = OfficialLinkedInAdapter(connection.access_token, connection.member_sub)
         publish_result = await ApprovalService(session).execute(approval_id, publish_adapter, int(current_user.id))
         return {
@@ -993,33 +994,6 @@ async def regenerate_approval(
             "id": approval.id,
             "status": approval.status,
             "reason": approval.reason,
-        }
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.post("/api/approvals/{approval_id}/execute")
-async def execute(
-    approval_id: int,
-    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
-    session: AsyncSession = Depends(get_session),
-    current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
-):
-    try:
-        connection_result = await session.execute(
-            select(LinkedInConnection).where(LinkedInConnection.user_id == int(current_user.id))
-        )
-        connection = connection_result.scalar_one_or_none()
-        if connection is None:
-            raise ValueError("Connect your LinkedIn account before publishing.")
-        if connection.token_expires_at and connection.token_expires_at <= datetime.now(timezone.utc):
-            raise ValueError("Your LinkedIn connection has expired. Reconnect LinkedIn before publishing.")
-        publish_adapter = OfficialLinkedInAdapter(connection.access_token, connection.member_sub)
-        result = await ApprovalService(session).execute(approval_id, publish_adapter, int(current_user.id))
-        return {
-            "success": result.success,
-            "external_id": result.external_id,
-            "message": result.message,
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
