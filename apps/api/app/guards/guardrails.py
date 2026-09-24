@@ -7,6 +7,15 @@ class GuardResult:
     risk: str
     issues: list[str]
 
+def normalize_human_style(body: str) -> str:
+    """Apply deterministic style cleanup before content reaches review."""
+    text = (body or "").replace("\u2014", ", ").replace("\u2013", ", ")
+    text = text.replace(";", ". ")
+    text = re.sub(r" {2,}", " ", text)
+    text = re.sub(r" +\n", "\n", text)
+    return text.strip()
+
+
 GENERIC_AI_PHRASES = [
     "in today's rapidly evolving",
     "game-changer",
@@ -23,6 +32,11 @@ def run_content_guards(body: str) -> GuardResult:
     issues: list[str] = []
     text = (body or "").strip()
     lower = text.lower()
+
+    if "\u2014" in text or "\u2013" in text:
+        issues.append("Em/en dashes are not allowed in generated content.")
+    if ";" in text:
+        issues.append("Semicolons are not allowed in generated content.")
 
     if not text:
         issues.append("Content is empty.")
