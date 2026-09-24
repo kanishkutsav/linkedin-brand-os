@@ -94,7 +94,7 @@ class BrandIntelligenceService:
         if profile is None:
             raise ValueError("Complete your profile before building Brand DNA.")
 
-        posts = await self.get_posts(profile_id, limit=5)
+        posts = await self.get_posts(profile_id, limit=10)
         count_result = await self.session.execute(
             select(func.count(HistoricalPost.id)).where(HistoricalPost.profile_id == profile_id)
         )
@@ -151,7 +151,7 @@ Return:
                 },
                 "historical_posts": examples,
                 "post_count": total_post_count,
-                "analysis_limit": 5,
+                "analysis_limit": 10,
                 "historical_posts_are_optional": True,
             },
             ensure_ascii=False,
