@@ -344,7 +344,7 @@ useEffect(() => {
         action === 'regenerate'
           ? 'Regenerated successfully.'
           : action === 'approve'
-            ? 'approved and published to linkedin'
+            ? 'Approved and published to LinkedIn.'
             : 'Action completed successfully.'
       );
     } catch (e) {
@@ -687,7 +687,7 @@ function ApprovalWorkspace(props: any) {
                     else window.localStorage.removeItem(key);
                   }
                 }}
-                placeholder="Tell us what to change, add or remove. Example: make the opening less polished and add the point about stakeholder alignment"
+                placeholder="Tell us what to change, add, or remove. Example: Make the opening less polished and add the point about stakeholder alignment."
               />
               {['PENDING','EDITED','REGENERATED'].includes(selected.status) ? (
                 <>
