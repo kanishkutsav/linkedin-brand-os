@@ -1,4 +1,9 @@
 -- Add explicit ownership boundaries for user workspaces.
+
+ALTER TABLE public.user_profiles
+  ADD CONSTRAINT user_profiles_auth_user_id_fkey
+  FOREIGN KEY (id) REFERENCES public.auth_users(id);
+
 -- Existing records belong to the original profile (id 1).
 -- New application users use a profile id matching auth_users.id.
 
