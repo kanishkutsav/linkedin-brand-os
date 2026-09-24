@@ -351,7 +351,7 @@ useEffect(() => {
   const requireBrand = (actionLabel: string) => {
     if (brand.ready) return true;
     go('Settings');
-    setError('Brand DNA is not set up yet. Before ' + actionLabel + ', connect LinkedIn and build Brand DNA. Previous posts are optional; you can add 3–10 for stronger voice calibration.');
+    setError('Brand DNA is not set up yet. Before ' + actionLabel + ', connect LinkedIn and build Brand DNA. Add 3–10 previous LinkedIn posts to calibrate your Brand DNA and writing voice.');
     return false;
   };
 
