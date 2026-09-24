@@ -202,8 +202,10 @@ class AgentOrchestrator:
         }
 
         approval_queued = False
+        approval_queued = False
         if guard.passed:
             approval = await ApprovalService(self.session).request(version)
+            approval_queued = True
             approval_queued = True
             self.session.add(
                 AuditLog(
