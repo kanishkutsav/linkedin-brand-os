@@ -593,7 +593,7 @@ useEffect(() => {
 
           {tab === 'Dashboard' && (
             <>
-              <section className="hero">
+              <section className="hero" onClick={!brand.ready ? () => go('Settings') : undefined} style={!brand.ready ? { cursor: 'pointer' } : undefined}>
                 <div className="hero-grid">
                   <div>
                     <div className="page-kicker" style={{ color: '#bdb6ff' }}>
@@ -608,7 +608,7 @@ useEffect(() => {
                         <span className="button-content"><WandSparkles size={15} /> {isGenerating ? generationStage || 'Generating…' : 'Generate content'}</span>
                         {isGenerating && <span className="button-progress-track"><span style={{ width: generationProgress + '%' }} /></span>}
                       </button>
-                      <button className="button ghost-dark" onClick={() => go('Research')}><Search size={15} /> Discover opportunities</button>
+                      <button className="button ghost-dark" onClick={(event) => { event.stopPropagation(); go('Research'); }}><Search size={15} /> Discover opportunities</button>
                     </div>
                   </div>
                   <div className="hero-status">
