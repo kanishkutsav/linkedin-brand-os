@@ -57,7 +57,7 @@ class OfficialLinkedInAdapter(LinkedInAdapter):
                 "Authorization": f"Bearer {self.access_token}",
                 "Content-Type": "application/json",
                 "X-Restli-Protocol-Version": "2.0.0",
-                "Linkedin-Version": "202603",
+                "Linkedin-Version": settings.linkedin_api_version,
             },
             method="POST",
         )
