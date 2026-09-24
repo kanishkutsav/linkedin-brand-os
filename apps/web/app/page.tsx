@@ -1184,9 +1184,6 @@ function SettingsView(props: any) {
     </>
   );
 }
-function Field({ label, value, setValue, placeholder }: any) {
-  return <label className="form-group" style={{ marginBottom: 0 }}><span className="form-label">{label}</span><input className="input" value={value} onChange={(e) => setValue(e.target.value)} placeholder={placeholder}/></label>;
-}
 
 function EmptyState({ icon: Icon, title, text, action, onAction }: any) {
   return <div className="empty-state"><div className="empty-icon"><Icon size={19}/></div><strong>{title}</strong><span>{text}</span>{action && <div style={{ marginTop: 14 }}><button className="button primary" onClick={onAction}>{action}<ChevronRight size={13}/></button></div>}</div>;
