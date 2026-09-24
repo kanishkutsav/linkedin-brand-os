@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+import asyncio
 import hashlib
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -135,6 +136,26 @@ class ApprovalService:
         if not version:
             raise ValueError("Content version not found")
         new_hash = hashlib.sha256(edited_body.encode("utf-8")).hexdigest()
+        duplicate_version = await self.session.execute(
+            select(ContentVersion.id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(
+                ContentItem.profile_id == profile_id,
+                ContentVersion.content_hash == new_hash,
+                ContentVersion.id != version.id,
+            )
+            .limit(1)
+        )
+        if duplicate_version.scalar_one_or_none() is not None:
+            raise ValueError("This exact content already exists in your brand memory.")
+        duplicate_historical = await self.session.execute(
+            select(HistoricalPost.id).where(
+                HistoricalPost.profile_id == profile_id,
+                HistoricalPost.content_hash == new_hash,
+            ).limit(1)
+        )
+        if duplicate_historical.scalar_one_or_none() is not None:
+            raise ValueError("This exact content already exists in your brand memory.")
         version.body = edited_body
         version.content_hash = new_hash
         version.version_number += 1
@@ -242,12 +263,34 @@ class ApprovalService:
         if not new_body:
             raise ValueError("The configured content model did not return a usable regenerated draft.")
 
+        new_hash = hashlib.sha256(new_body.encode("utf-8")).hexdigest()
+        duplicate_version = await self.session.execute(
+            select(ContentVersion.id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(
+                ContentItem.profile_id == profile_id,
+                ContentVersion.content_hash == new_hash,
+                ContentVersion.id != version.id,
+            )
+            .limit(1)
+        )
+        if duplicate_version.scalar_one_or_none() is not None:
+            raise ValueError("Regeneration produced content already present in your brand memory.")
+        duplicate_historical = await self.session.execute(
+            select(HistoricalPost.id).where(
+                HistoricalPost.profile_id == profile_id,
+                HistoricalPost.content_hash == new_hash,
+            ).limit(1)
+        )
+        if duplicate_historical.scalar_one_or_none() is not None:
+            raise ValueError("Regeneration produced content already present in your brand memory.")
+
         guard = run_content_guards(new_body)
         if not guard.passed:
             raise ValueError("Regenerated content blocked by guardrails: " + "; ".join(guard.issues))
 
         version.body = new_body
-        version.content_hash = hashlib.sha256(new_body.encode("utf-8")).hexdigest()
+        version.content_hash = new_hash
         version.version_number += 1
         approval.status = "REGENERATED"
         approval.reason = (feedback or "").strip() or "Regenerated using the saved Brand DNA."
@@ -325,7 +368,7 @@ class ApprovalService:
         approval.publish_started_at = datetime.now(timezone.utc)
         await self.session.commit()
 
-        result = adapter.publish_post(version.body)
+        result = await asyncio.to_thread(adapter.publish_post, version.body)
 
         # Approval is the human decision and must remain durable even if the
         # external LinkedIn publish attempt fails. A failed attempt is retryable.
