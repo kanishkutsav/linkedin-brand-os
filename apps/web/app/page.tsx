@@ -604,8 +604,19 @@ useEffect(() => {
                       ? 'Research, content strategy, drafting and review — orchestrated around your brand voice, with you always in control of what reaches LinkedIn.'
                       : 'Your LinkedIn profile is the factual starting point. Brand OS can build your Brand DNA automatically, and previous posts are optional evidence for stronger voice calibration.'}</p>
                     <div className="hero-actions">
-                      <button className="button primary progress-button" onClick={generateContent} disabled={isGenerating}>
-                        <span className="button-content"><WandSparkles size={15} /> {isGenerating ? generationStage || 'Generating…' : 'Generate content'}</span>
+                      <button
+                        className="button primary progress-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (!brand.ready) {
+                            go('Settings');
+                            return;
+                          }
+                          void generateContent();
+                        }}
+                        disabled={isGenerating}
+                      >
+                        <span className="button-content"><WandSparkles size={15} /> {isGenerating ? generationStage || 'Generating…' : brand.ready ? 'Generate content' : 'Build Brand DNA'}</span>
                         {isGenerating && <span className="button-progress-track"><span style={{ width: generationProgress + '%' }} /></span>}
                       </button>
                       <button className="button ghost-dark" onClick={(event) => { event.stopPropagation(); go('Research'); }}><Search size={15} /> Discover opportunities</button>
