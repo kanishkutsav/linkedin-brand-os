@@ -13,6 +13,10 @@ const nextConfig = {
         source: '/api/auth/linkedin/callback',
         destination: `${backend}/api/auth/linkedin/callback`,
       },
+      {
+        source: '/api/backend/:path*',
+        destination: `${backend}/:path*`,
+      },
     ];
   },
 };
