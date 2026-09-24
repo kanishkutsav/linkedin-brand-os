@@ -42,7 +42,22 @@ class ApprovalService:
             .order_by(ApprovalRequest.created_at.desc())
             .limit(limit)
         )
-        return result.scalars().all()
+        approvals = result.scalars().all()
+
+        # Older deployments used FAILED as a terminal approval state when a
+        # LinkedIn publish attempt failed. Restore those records to APPROVED so
+        # the human decision remains durable and the post can be retried.
+        migrated = False
+        for approval in approvals:
+            if approval.status == "FAILED":
+                approval.status = "APPROVED"
+                if not approval.reason:
+                    approval.reason = "A previous LinkedIn publication attempt failed. The post is approved and ready to retry."
+                migrated = True
+        if migrated:
+            await self.session.commit()
+
+        return approvals
 
     async def approve(self, approval_id: int):
         approval = await self.session.get(ApprovalRequest, approval_id)
