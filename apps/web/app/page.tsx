@@ -8,7 +8,7 @@ import {
   ShieldCheck, Sparkles, Target, TrendingUp, UserRound, WandSparkles, X, Zap
 } from 'lucide-react';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE = typeof window !== 'undefined' && window.location.hostname === 'localhost' ? (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000') : '/api/backend';
 const STORAGE_KEY = 'brand-os-token';
 
 function getApiError(data: any, fallback: string) {
@@ -236,7 +236,13 @@ export default function Home() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, 'Content generation failed'));
       await fetchData(); go('Dashboard');
-      setNotice(data.created_count ? 'New content suggestion generated and added to the approval queue.' : 'No new suggestion was created. The agent may have detected a duplicate.');
+      setNotice(
+        data.approval_queued
+          ? 'New content suggestion generated and added to the approval queue.'
+          : data.blocked_by_guardrails
+            ? 'Content was generated but held back by guardrails and was not added to the approval queue.'
+            : 'No new suggestion was created. Try again with a different feedback or research angle.'
+      );
     } catch (e) { setError(e instanceof Error ? e.message : 'Content generation failed'); }
     finally { setIsGenerating(false); }
   };
