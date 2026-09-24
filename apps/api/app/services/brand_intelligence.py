@@ -216,8 +216,8 @@ Return:
             "patterns": json.loads(memory.patterns_json or "{}"),
             "voice": json.loads(memory.voice_json or "{}"),
             "source_post_count": memory.source_post_count,
-            "initialized_at": memory.initialized_at,
-            "updated_at": memory.updated_at,
+            "initialized_at": memory.initialized_at.isoformat() if memory.initialized_at else None,
+            "updated_at": memory.updated_at.isoformat() if memory.updated_at else None,
         }
 
     async def generation_context(self, profile_id: int = 1) -> dict:
