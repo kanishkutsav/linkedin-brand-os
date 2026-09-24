@@ -205,9 +205,9 @@ a { color: inherit; }
 .searchbox .input { padding-left: 33px; }
 .textarea { min-height: 160px; padding: 13px; resize: vertical; line-height: 1.55; }
 .input:focus, .textarea:focus, .select:focus { border-color: #a79fff; box-shadow: 0 0 0 3px rgba(109,93,252,.10); background: #fff; }
-.filter-row { display: flex; gap: 5px; }
+.filter-row { display: flex; gap: 5px; flex-wrap: wrap; }
 .filter-chip {
-  flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 7px 5px; background: #fff; color: var(--muted);
+  flex: 0 0 auto; min-width: 46px; border: 1px solid var(--line); border-radius: 8px; padding: 7px 7px; background: #fff; color: var(--muted);
   font-size: 10px; font-weight: 700; cursor: pointer; transition: all .16s ease;
 }
 .filter-chip.active { background: #f0efff; color: #5145cd; border-color: #d9d5ff; }
