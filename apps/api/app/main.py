@@ -3,11 +3,12 @@ import json
 import logging
 import os
 import sqlite3
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
@@ -238,10 +239,10 @@ async def linkedin_oauth_start(
 
 @app.get("/api/auth/linkedin/callback")
 async def linkedin_oauth_callback(
+    request: Request,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
-    request: Request,
     session: AsyncSession = Depends(get_session),
 ):
     if error:
@@ -997,29 +998,3 @@ async def regenerate_approval(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-
-@app.post("/api/approvals/{approval_id}/execute")
-async def execute(
-    approval_id: int,
-    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
-    session: AsyncSession = Depends(get_session),
-    current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
-):
-    try:
-        connection_result = await session.execute(
-            select(LinkedInConnection).where(LinkedInConnection.user_id == int(current_user.id))
-        )
-        connection = connection_result.scalar_one_or_none()
-        if connection is None:
-            raise ValueError("Connect your LinkedIn account before publishing.")
-        if connection.token_expires_at and connection.token_expires_at <= datetime.now(timezone.utc):
-            raise ValueError("Your LinkedIn connection has expired. Reconnect LinkedIn before publishing.")
-        publish_adapter = OfficialLinkedInAdapter(connection.access_token, connection.member_sub)
-        result = await ApprovalService(session).execute(approval_id, publish_adapter, int(current_user.id))
-        return {
-            "success": result.success,
-            "external_id": result.external_id,
-            "message": result.message,
-        }
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
