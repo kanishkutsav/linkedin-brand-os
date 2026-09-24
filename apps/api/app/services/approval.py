@@ -2,7 +2,7 @@ from datetime import datetime, timezone, timedelta
 import hashlib
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.models import ApprovalRequest, ContentVersion, ContentItem, UserProfile, AuditLog, SystemFlag, FeedbackEntry, HistoricalPost
+from app.models.models import ApprovalRequest, ContentVersion, ContentItem, UserProfile, VoiceMemory, AuditLog, SystemFlag, FeedbackEntry, HistoricalPost
 from app.core.config import settings
 from app.services.brand_intelligence import BrandIntelligenceService
 from app.services.gemini_service import ModelRouterService
@@ -143,6 +143,20 @@ class ApprovalService:
             raise ValueError("Brand profile not found")
 
         brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id)
+        voice_result = await self.session.execute(select(VoiceMemory).where(VoiceMemory.profile_id == profile.id).limit(1))
+        voice = voice_result.scalar_one_or_none()
+        voice_context = {
+            "tone": voice.tone if voice else profile.tone,
+            "sentence_style": voice.sentence_style if voice else "clear and grounded",
+            "vocabulary": voice.vocabulary if voice else "",
+            "preferred_phrases": voice.preferred_phrases if voice else "",
+            "avoid_phrases": voice.avoid_phrases if voice else "",
+            "emoji_usage": voice.emoji_usage if voice else "limited",
+            "humor_style": voice.humor_style if voice else "",
+            "technical_depth": voice.technical_depth if voice else "moderate",
+            "opinion_style": voice.opinion_style if voice else "grounded in observed content",
+            "storytelling_style": voice.storytelling_style if voice else "concrete",
+        }
         generated = await ModelRouterService().create_post(
             profile={
                 "display_name": profile.display_name,
@@ -158,7 +172,7 @@ class ApprovalService:
             pillar=item.pillar if item else "Expertise",
             objective="Regenerate the current LinkedIn draft using the reviewer's feedback while preserving the user's meaning and factual boundaries.",
             evidence=[],
-            voice=brand_context,
+            voice=voice_context,
             feedback=(feedback or "").strip() or None,
             current_draft=version.body,
         )
