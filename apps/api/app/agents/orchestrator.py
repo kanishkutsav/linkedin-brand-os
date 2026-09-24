@@ -201,7 +201,6 @@ class AgentOrchestrator:
             "generator": "openrouter_groq_router" if generated else "deterministic_fallback",
         }
 
-        approval_queued = False
         if guard.passed:
             approval = await ApprovalService(self.session).request(version)
             self.session.add(
@@ -385,6 +384,7 @@ class AgentOrchestrator:
             "blocked_by_guardrails": not guard.passed,
         }
 
+        approval_queued = False
         if guard.passed:
             approval = await ApprovalService(self.session).request(version)
             approval_queued = True
