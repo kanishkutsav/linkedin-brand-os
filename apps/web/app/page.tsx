@@ -243,7 +243,7 @@ export default function Home() {
   const selectedApproval = queue.find((item) => item.id === selectedId) ?? null;
   const summary = useMemo(() => ({
     pending: queue.filter((i) => ['PENDING', 'EDITED', 'REGENERATED'].includes(i.status)).length,
-    reviewed: queue.filter((i) => i.status === 'APPROVED').length,
+    reviewed: queue.filter((i) => ['APPROVED', 'EXECUTED'].includes(i.status)).length,
     rejected: queue.filter((i) => i.status === 'REJECTED').length,
     executed: queue.filter((i) => i.status === 'EXECUTED').length,
   }), [queue]);
@@ -498,7 +498,7 @@ export default function Home() {
 
               <div className="metrics">
                 <Metric icon={Clock3} label="Awaiting approval" value={summary.pending} meta="Needs your decision" />
-                <Metric icon={CircleCheck} label="Approved" value={summary.reviewed} meta="Ready for execution" />
+                <Metric icon={CircleCheck} label="Approved" value={summary.reviewed} meta="Approved for publication" />
                 <Metric icon={TrendingUp} label="Published" value={summary.executed} meta="Tracked by Brand OS" />
                 <Metric icon={ShieldCheck} label="Guardrail status" value="ON" meta="Claims · voice · duplicate · action" />
                 <Metric icon={BrainCircuit} label="Brand Pulse" value={brand.ready ? 'ACTIVE' : 'INACTIVE'} meta={brand.ready ? ((brand.current_post_count ?? brand.source_post_count) + ' signals in memory') : 'Set up before AI actions'} />
@@ -611,7 +611,10 @@ function ApprovalWorkspace(props: any) {
               {['PENDING','EDITED','REGENERATED'].includes(selected.status) ? (
                 <>
                   <div className="review-actions">
-                    <button className="button success" disabled={isBusy} onClick={() => onAction('approve')}><Check size={14}/> Approve</button>
+                    <button className="button success progress-button" disabled={isBusy} onClick={() => onAction('approve')}>
+                      <span className="button-content"><Check size={14}/> {busyAction === 'approve' ? operationStage || 'Publishing…' : 'Approve & publish'}</span>
+                      {busyAction === 'approve' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
+                    </button>
                     <button className="button" disabled={isBusy} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>
                     <button
                       className="button progress-button"
@@ -631,7 +634,7 @@ function ApprovalWorkspace(props: any) {
               ) : (
                 <div className="notice success" style={{ marginTop: 10 }}>
                   <CircleCheck size={15}/>
-                  <span>{selected.status === 'EXECUTED' ? 'Published through the approved LinkedIn workflow.' : selected.status === 'APPROVED' ? 'Approved and ready for LinkedIn execution.' : 'This post is no longer awaiting a decision.'}</span>
+                  <span>{selected.status === 'EXECUTED' ? 'Approved and published to LinkedIn through the official API.' : selected.status === 'APPROVED' ? 'Approved, but publication did not complete. Reconnect LinkedIn and retry from the approval workflow.' : 'This post is no longer awaiting a decision.'}</span>
                 </div>
               )}
             </div>
