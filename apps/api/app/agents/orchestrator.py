@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.strategy import ContentStrategyService
 from app.agents.voice import VoiceProfileBuilder
 from app.agents.research import ResearchService
-from app.core.config import settings
 from app.guards.guardrails import run_content_guards
 from app.models.models import (
     AuditLog,
@@ -21,7 +20,7 @@ from app.models.models import (
 )
 from app.services.approval import ApprovalService
 from app.services.brand_intelligence import BrandIntelligenceService
-from app.services.gemini_service import GeminiService
+from app.services.gemini_service import ModelRouterService
 
 
 class AgentOrchestrator:
@@ -93,7 +92,7 @@ class AgentOrchestrator:
         objective: str,
         evidence: list[dict] | None = None,
     ) -> dict:
-        service = GeminiService()
+        service = ModelRouterService()
         brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id)
         return await service.create_post(
             profile={
@@ -131,16 +130,14 @@ class AgentOrchestrator:
         # in the user's initialized Brand DNA and historical content.
         await BrandIntelligenceService(self.session).generation_context(profile.id)
 
-        generated = None
-        if settings.gemini_api_key:
-            generated = await self._generate_with_gemini(
-                profile=profile,
-                title=title,
-                topic=topic,
-                pillar=pillar,
-                objective=objective,
-                evidence=evidence or [],
-            )
+        generated = await self._generate_with_gemini(
+            profile=profile,
+            title=title,
+            topic=topic,
+            pillar=pillar,
+            objective=objective,
+            evidence=evidence or [],
+        )
 
         if generated:
             final_title = str(generated.get("title") or title)[:200]
@@ -197,7 +194,7 @@ class AgentOrchestrator:
             "angle": angle,
             "claims": claims,
             "confidence": confidence,
-            "generator": "gemini" if generated else "deterministic_fallback",
+            "generator": "openrouter_groq_router" if generated else "deterministic_fallback",
         }
 
         if guard.passed:

@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
+import xml.etree.ElementTree as ET
+import httpx
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import ContentItem, ContentOpportunity, ResearchSource, UserProfile
 from app.services.brand_intelligence import BrandIntelligenceService
-from app.services.gemini_service import GeminiService
+from app.services.gemini_service import ModelRouterService
 
 
 class ResearchService:
@@ -17,6 +19,37 @@ class ResearchService:
 
     def __init__(self, session: AsyncSession | None = None):
         self.session = session
+
+    async def _live_sources(self, profile: UserProfile, requested_topic: str | None) -> list[dict]:
+        queries = []
+        if requested_topic:
+            queries.append(requested_topic)
+        if profile.industry:
+            queries.append(f"{profile.industry} technology business")
+        if profile.brand_positioning:
+            queries.append(profile.brand_positioning)
+        if not queries:
+            queries = ["technology business leadership AI"]
+
+        items: list[dict] = []
+        seen: set[str] = set()
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers={"User-Agent": "BrandOS/1.0"}) as client:
+            for query in queries[:3]:
+                url = "https://news.google.com/rss/search?q=" + quote_plus(query) + "&hl=en-IN&gl=IN&ceid=IN:en"
+                response = await client.get(url)
+                response.raise_for_status()
+                root = ET.fromstring(response.text)
+                for node in root.findall("./channel/item")[:8]:
+                    title = (node.findtext("title") or "").strip()
+                    link = (node.findtext("link") or "").strip()
+                    pub = (node.findtext("pubDate") or "").strip()
+                    source_node = node.find("source")
+                    source_name = (source_node.text or "").strip() if source_node is not None else ""
+                    if not title or not link or link in seen:
+                        continue
+                    seen.add(link)
+                    items.append({"title": title, "url": link, "published_at": pub, "source": source_name, "query": query})
+        return items[:20]
 
     async def research_and_rank(
         self,
@@ -35,141 +68,96 @@ class ResearchService:
         brand = BrandIntelligenceService(self.session)
         context = await brand.generation_context(profile_id)
         historical = await brand.get_posts(profile_id, limit=12)
-
         recent_content_result = await self.session.execute(
-            select(ContentItem.topic, ContentItem.created_at)
-            .order_by(ContentItem.created_at.desc())
-            .limit(20)
+            select(ContentItem.topic, ContentItem.created_at).order_by(ContentItem.created_at.desc()).limit(20)
         )
-        recent_content = [
-            {"topic": row[0], "created_at": row[1].isoformat() if row[1] else None}
-            for row in recent_content_result.all()
-        ]
+        recent_content = [{"topic": row[0], "created_at": row[1].isoformat() if row[1] else None} for row in recent_content_result.all()]
 
-        prompt = json.dumps(
-            {
-                "date": datetime.now(timezone.utc).date().isoformat(),
-                "profile": {
-                    "title": profile.professional_title,
-                    "industry": profile.industry,
-                    "audience": profile.audience,
-                    "goals": profile.goals,
-                    "positioning": profile.brand_positioning,
-                },
-                "brand_intelligence": context["brand_memory"],
-                "recent_historical_posts": [p.body[:1200] for p in historical],
-                "recent_content_topics": recent_content,
-                "requested_topic": requested_topic,
-                "candidate_limit": candidate_limit,
+        try:
+            live_sources = await self._live_sources(profile, requested_topic)
+        except Exception as exc:
+            raise RuntimeError(f"Live source discovery failed: {exc}") from exc
+        if not live_sources:
+            raise RuntimeError("No live public sources were found.")
+
+        prompt = json.dumps({
+            "date": datetime.now(timezone.utc).date().isoformat(),
+            "profile": {
+                "title": profile.professional_title,
+                "industry": profile.industry,
+                "audience": profile.audience,
+                "goals": profile.goals,
+                "positioning": profile.brand_positioning,
             },
-            ensure_ascii=False,
-        )
+            "brand_intelligence": context["brand_memory"],
+            "recent_historical_posts": [p.body[:1200] for p in historical],
+            "recent_content_topics": recent_content,
+            "requested_topic": requested_topic,
+            "candidate_limit": candidate_limit,
+            "live_sources": live_sources,
+        }, ensure_ascii=False)
 
-        system = """You are the research and content-opportunity engine for a professional LinkedIn personal-brand system.
+        system = """You are the live research and content-opportunity engine for a professional LinkedIn personal-brand system.
 
-Use Google Search grounding to research CURRENT public information. Search broadly enough to identify meaningful developments, but prioritize:
-1. primary/official sources,
-2. authoritative technical/business sources,
-3. reputable reporting when primary sources are unavailable.
-
-The goal is NOT to find random news. Find developments that create a credible reason for THIS person to post.
+You are given current public-news RSS results collected immediately before this request. Use only the supplied sources as current evidence. Prioritize credible, primary or authoritative sources when the source list contains them.
 
 Hard rules:
 - Never invent a personal experience, credential, client, employer, metric or opinion.
-- Do not recommend a topic merely because it is trending.
-- Prefer topics where the user's documented expertise gives them a useful lens.
+- Do not recommend a topic merely because it is popular.
+- Prefer developments where the user's documented expertise gives them a useful lens.
 - Penalize topics already covered in recent content or historical posts.
-- Penalize generic AI hype, motivational content and recycled listicles.
-- For time-sensitive claims, require current evidence.
 - Distinguish facts from interpretation.
-- If evidence is weak or conflicting, lower evidence strength and say so.
+- If evidence is weak, say so and lower evidence_strength.
 - Do not make political persuasion content or infer political preferences.
 - Return JSON only.
 
 Return:
-{
-  "opportunities": [
-    {
-      "title": "specific opportunity title",
-      "topic": "precise topic",
-      "angle": "specific point of view the user can credibly take without inventing experience",
-      "pillar": "one brand pillar",
-      "format": "post format",
-      "objective": "why this post exists",
-      "why_now": "what changed or why it matters now",
-      "evidence_summary": "2-4 factual sentences",
-      "source_hints": ["source title or domain"],
-      "brand_fit": 0,
-      "audience_relevance": 0,
-      "timeliness": 0,
-      "evidence_strength": 0,
-      "novelty": 0,
-      "conversation_potential": 0,
-      "authenticity": 0,
-      "risk": 0,
-      "rationale": "why this survived the filter"
-    }
-  ]
-}
+{"opportunities":[{"title":"","topic":"","angle":"","pillar":"","format":"","objective":"","why_now":"","evidence_summary":"","source_hints":[],"source_urls":[],"brand_fit":0,"audience_relevance":0,"timeliness":0,"evidence_strength":0,"novelty":0,"conversation_potential":0,"authenticity":0,"risk":0,"rationale":""}]}
 
-Generate 6-8 genuinely different opportunities. Avoid near-duplicates.
+Generate 6-8 genuinely different opportunities. Every opportunity must cite at least one supplied source URL in source_urls.
 """
 
-        data, grounding = await GeminiService().research_json(system, prompt)
+        data = await ModelRouterService().generate_json(system, prompt, max_output_tokens=3600)
         opportunities = data.get("opportunities") or []
-        sources = grounding.get("sources") or []
-        queries = grounding.get("queries") or []
-
-        source_records: list[ResearchSource] = []
-        for source in sources:
-            url = str(source.get("url") or "").strip()
-            title = str(source.get("title") or "").strip() or None
-            if not url and not title:
-                continue
-            record = ResearchSource(
-                profile_id=profile_id,
-                topic=requested_topic or "brand opportunity discovery",
-                title=title,
-                url=url or None,
-                domain=urlparse(url).netloc.lower() or None,
-                source_type="google_search_grounding",
-                evidence_json=json.dumps({"grounded": True}, ensure_ascii=False),
-                search_queries_json=json.dumps(queries, ensure_ascii=False),
-                confidence="medium",
-            )
-            self.session.add(record)
-            source_records.append(record)
-
-        await self.session.flush()
-
         created: list[dict] = []
+        source_by_url = {item["url"]: item for item in live_sources}
+
         for raw in opportunities:
             try:
                 scores = {
                     key: max(0.0, min(100.0, float(raw.get(key, 0) or 0)))
-                    for key in (
-                        "brand_fit",
-                        "audience_relevance",
-                        "timeliness",
-                        "evidence_strength",
-                        "novelty",
-                        "conversation_potential",
-                        "authenticity",
-                        "risk",
-                    )
+                    for key in ("brand_fit","audience_relevance","timeliness","evidence_strength","novelty","conversation_potential","authenticity","risk")
                 }
                 total = (
-                    scores["brand_fit"] * 0.22
-                    + scores["audience_relevance"] * 0.18
-                    + scores["timeliness"] * 0.15
-                    + scores["evidence_strength"] * 0.15
-                    + scores["novelty"] * 0.12
-                    + scores["conversation_potential"] * 0.08
-                    + scores["authenticity"] * 0.07
-                    - scores["risk"] * 0.03
+                    scores["brand_fit"] * 0.22 + scores["audience_relevance"] * 0.18 +
+                    scores["timeliness"] * 0.15 + scores["evidence_strength"] * 0.15 +
+                    scores["novelty"] * 0.12 + scores["conversation_potential"] * 0.08 +
+                    scores["authenticity"] * 0.07 - scores["risk"] * 0.03
                 )
                 if scores["evidence_strength"] < 55 or scores["brand_fit"] < 55:
                     total *= 0.75
+
+                urls = [str(u).strip() for u in (raw.get("source_urls") or []) if str(u).strip()]
+                linked_sources = [source_by_url[u] for u in urls if u in source_by_url][:5]
+                if not linked_sources:
+                    linked_sources = live_sources[:1]
+
+                records = []
+                for source in linked_sources:
+                    record = ResearchSource(
+                        profile_id=profile_id,
+                        topic=str(raw.get("topic") or requested_topic or "live brand opportunity"),
+                        title=source["title"][:500],
+                        url=source["url"],
+                        domain=urlparse(source["url"]).netloc.lower() or None,
+                        source_type="public_news_rss",
+                        evidence_json=json.dumps({"published_at": source["published_at"], "source": source["source"]}, ensure_ascii=False),
+                        search_queries_json=json.dumps([source["query"]], ensure_ascii=False),
+                        confidence="medium",
+                    )
+                    self.session.add(record)
+                    records.append(record)
+                await self.session.flush()
 
                 opportunity = ContentOpportunity(
                     profile_id=profile_id,
@@ -183,39 +171,23 @@ Generate 6-8 genuinely different opportunities. Avoid near-duplicates.
                     **scores,
                     total_score=round(total, 2),
                     rationale=str(raw.get("rationale") or ""),
-                    research_source_ids_json=json.dumps(
-                        [source.id for source in source_records], ensure_ascii=False
-                    ),
-                    evidence_json=json.dumps(
-                        {
-                            "why_now": raw.get("why_now"),
-                            "summary": raw.get("evidence_summary"),
-                            "source_hints": raw.get("source_hints") or [],
-                            "grounding_queries": queries,
-                        },
-                        ensure_ascii=False,
-                    ),
+                    research_source_ids_json=json.dumps([s.id for s in records], ensure_ascii=False),
+                    evidence_json=json.dumps({
+                        "why_now": raw.get("why_now"),
+                        "summary": raw.get("evidence_summary"),
+                        "source_hints": raw.get("source_hints") or [],
+                        "source_urls": [s["url"] for s in linked_sources],
+                    }, ensure_ascii=False),
                 )
                 self.session.add(opportunity)
-                created.append(
-                    {
-                        "title": opportunity.title,
-                        "topic": opportunity.topic,
-                        "angle": opportunity.angle,
-                        "pillar": opportunity.pillar,
-                        "format": opportunity.format,
-                        "objective": opportunity.objective,
-                        "total_score": opportunity.total_score,
-                        "scores": scores,
-                        "rationale": opportunity.rationale,
-                        "evidence": json.loads(opportunity.evidence_json or "{}"),
-                        "source_ids": [source.id for source in source_records],
-                        "sources": [
-                            {"title": source.title, "url": source.url, "domain": source.domain}
-                            for source in source_records
-                        ],
-                    }
-                )
+                created.append({
+                    "title": opportunity.title, "topic": opportunity.topic, "angle": opportunity.angle,
+                    "pillar": opportunity.pillar, "format": opportunity.format, "objective": opportunity.objective,
+                    "total_score": opportunity.total_score, "scores": scores, "rationale": opportunity.rationale,
+                    "evidence": json.loads(opportunity.evidence_json or "{}"),
+                    "source_ids": [s.id for s in records],
+                    "sources": [{"title": s.title, "url": s.url, "domain": s.domain} for s in records],
+                })
             except (TypeError, ValueError):
                 continue
 
