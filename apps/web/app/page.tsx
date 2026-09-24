@@ -521,7 +521,7 @@ export default function Home() {
           )}
 
           {tab === 'Research' && <ResearchView opportunities={opportunities} isResearching={isResearching} onResearch={discoverResearch} />}
-          {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} />}
+          {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
           {tab === 'Settings' && (
             <SettingsView
@@ -679,7 +679,7 @@ function ResearchCard({ item }: { item: Opportunity }) {
   );
 }
 
-function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBody, language, setLanguage, busy, improving, improvementNotes, onImprove, onSubmit }: any) {
+function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBody, language, setLanguage, busy, improving, improvementProgress, improvementNotes, onImprove, onSubmit }: any) {
   return (
     <>
       <div className="page-header">
