@@ -600,6 +600,11 @@ async def trigger_agent_event(
     session: AsyncSession = Depends(get_session),
     current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
 ):
+    if req.event_type == "manual_generate_content":
+        profile = await AuthService.get_or_create_profile(session, current_user)
+        memory = await BrandIntelligenceService(session).get_memory(profile.id)
+        if memory is None or memory.status != "READY":
+            raise HTTPException(status_code=400, detail="Complete Brand DNA setup before generating content.")
     run = AgentRun(user_id=int(current_user.id), mode="event", trigger=f"event:{req.event_type}", status="RUNNING")
     session.add(run)
     await session.flush()
