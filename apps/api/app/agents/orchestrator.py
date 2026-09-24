@@ -38,19 +38,7 @@ class AgentOrchestrator:
     async def _profile(self) -> UserProfile:
         profile = await self.session.get(UserProfile, self.profile_id)
         if profile is None:
-            profile = UserProfile(
-                id=self.profile_id,
-                display_name="User",
-                professional_title="Technical Project Manager",
-                industry="Technology",
-                audience="technology and business leaders",
-                goals="Build professional authority",
-                brand_positioning="Practical technology, AI, delivery and leadership insights",
-                tone="practical, direct, credible",
-                role="owner",
-            )
-            self.session.add(profile)
-            await self.session.flush()
+            raise ValueError("Complete LinkedIn onboarding before generating content.")
         return profile
 
     async def _voice(self) -> dict:
