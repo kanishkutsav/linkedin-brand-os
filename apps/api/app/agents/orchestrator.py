@@ -334,6 +334,7 @@ class AgentOrchestrator:
             pillar="Professional insights",
             objective=objective,
             evidence=[],
+            feedback=None,
         )
 
         if not generated:
