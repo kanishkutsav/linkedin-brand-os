@@ -674,7 +674,7 @@ function ApprovalWorkspace(props: any) {
                   </div>
                 </>
               ) : (
-                <div className={selected.status === 'APPROVED' ? 'notice error' : 'notice success'} style={{ marginTop: 10 }}>
+                <div className="notice error" style={{ marginTop: 10 }}>
                   {selected.status === 'EXECUTED' ? <CircleCheck size={15}/> : <X size={15}/>}
                   <span>
                     {selected.status === 'EXECUTED'
@@ -688,7 +688,7 @@ function ApprovalWorkspace(props: any) {
               {selected.status === 'APPROVED' && (
                 <div className="review-actions review-actions-publish">
                   <button className="button success progress-button publish-retry-button" disabled={isBusy} onClick={publishApprovedPost}>
-                    <span className="button-content"><LinkedInMark size={14}/>{busyAction === 'approve' && operationStage ? operationStage : 'Publish to LinkedIn'}</span>
+                    <span className="button-content"><ExternalLink size={14}/>{busyAction === 'approve' && operationStage ? operationStage : 'Publish to LinkedIn'}</span>
                     {busyAction === 'approve' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
                   </button>
                 </div>
