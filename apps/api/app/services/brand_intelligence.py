@@ -230,11 +230,9 @@ Return:
         )
         current_post_count = int(count_result.scalar_one() or 0)
 
-        # Refresh derived memory automatically when new user-controlled content arrives.
-        if memory.source_post_count != current_post_count:
-            await self.analyze(profile_id)
-            memory = await self.get_memory(profile_id)
-
+        # Do not silently re-run Brand Intelligence during every content request.
+        # Refreshing Brand DNA is an explicit user action. This keeps generation fast
+        # and prevents a hidden second LLM call from blocking the editor.
         posts = await self.get_posts(profile_id, limit=5)
         return {
             "brand_memory": self.serialize(memory),

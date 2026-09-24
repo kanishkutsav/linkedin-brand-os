@@ -189,13 +189,13 @@ Hard rules:
 - Vary sentence length and paragraph rhythm. Natural fragments are allowed when they sound intentional.
 - Prefer concrete observations, small tensions, trade-offs, lessons and practical questions over polished slogans.
 - Avoid formulaic hooks such as "In today's fast-changing world", "The future of", "X is no longer...", "Here's the thing", "Let that sink in", "Game changer", and similar templates.
-- Avoid excessive em dashes, colon-heavy lists, repetitive three-part constructions, buzzwords, motivational filler, broad 'future of work' commentary and obvious AI-generated phrasing.
+- Never use em dashes, en dashes or semicolons. Use commas, periods or line breaks instead. Avoid colon-heavy lists, repetitive three-part constructions, buzzwords, motivational filler, broad 'future of work' commentary and obvious AI-generated phrasing.
 - Do not over-explain. Leave some room for the reader to think.
 - If a claim is not supported by supplied evidence or profile context, phrase it as a general observation or omit it.
 - Do not use generic AI-marketing language.
 - Do not use fake quotations.
 - Do not use hashtags unless they materially help.
-- Keep the post human, specific, practical, and concise.
+- Use ordinary human wording. Prefer simple verbs and concrete language over polished corporate vocabulary. The final body must contain no em dash, en dash or semicolon. Keep the post human, specific, practical, and concise.
 - Return JSON only."""
         prompt = json.dumps(
             {
@@ -229,7 +229,7 @@ Hard rules:
             },
             ensure_ascii=False,
         )
-        return await self.generate_json(system, prompt, max_output_tokens=1200)
+        return await self.generate_json(system, prompt, max_output_tokens=900)
 
 
 class GeminiService:

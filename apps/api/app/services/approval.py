@@ -6,7 +6,7 @@ from app.models.models import ApprovalRequest, ContentVersion, ContentItem, User
 from app.core.config import settings
 from app.services.brand_intelligence import BrandIntelligenceService
 from app.services.gemini_service import ModelRouterService
-from app.guards.guardrails import run_content_guards
+from app.guards.guardrails import normalize_human_style, run_content_guards
 
 
 class ApprovalService:
@@ -177,7 +177,7 @@ class ApprovalService:
             current_draft=version.body,
         )
 
-        new_body = str(generated.get("body") or "").strip()
+        new_body = normalize_human_style(str(generated.get("body") or ""))
         if not new_body:
             raise ValueError("The configured content model did not return a usable regenerated draft.")
 

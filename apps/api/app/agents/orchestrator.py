@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.strategy import ContentStrategyService
 from app.agents.voice import VoiceProfileBuilder
 from app.agents.research import ResearchService
-from app.guards.guardrails import run_content_guards
+from app.guards.guardrails import normalize_human_style, run_content_guards
 from app.models.models import (
     AuditLog,
     ContentItem,
@@ -318,7 +318,7 @@ class AgentOrchestrator:
         profile = await self._profile()
         brand = BrandIntelligenceService(self.session)
         context = await brand.generation_context(profile.id)
-        historical = await brand.get_posts(profile.id, limit=8)
+        historical = await brand.get_posts(profile.id, limit=5)
 
         # Build a deterministic, brand-grounded topic seed from persisted
         # positioning and recent source posts. The LLM then turns it into the
@@ -330,7 +330,7 @@ class AgentOrchestrator:
             if text:
                 recent_topics.append(text[:220])
 
-        topic = f"{positioning} — a fresh practical perspective"
+        topic = f"{positioning}, a fresh practical perspective"
         title = "A practical perspective from your work"
         avoid_text = "; ".join(recent_topics[:8]) or "No prior post topics are available."
         objective = (
@@ -353,7 +353,7 @@ class AgentOrchestrator:
             raise ValueError("The configured content model did not return a usable draft.")
 
         final_title = str(generated.get("title") or title)[:200]
-        body = str(generated.get("body") or "").strip()
+        body = normalize_human_style(str(generated.get("body") or ""))
         if not body:
             raise ValueError("The configured content model did not return a usable draft.")
 
