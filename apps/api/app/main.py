@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 import os
 import sqlite3
@@ -22,7 +23,7 @@ from app.core.config import settings
 from app.db.database import engine, get_session, SessionLocal
 from app.services.agent_scheduler import AgentScheduler
 from app.services.brand_intelligence import BrandIntelligenceService
-from app.guards.guardrails import run_content_guards
+from app.guards.guardrails import normalize_human_style, run_content_guards
 from app.integrations.linkedin import OfficialLinkedInAdapter
 from app.models.base import Base
 from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LinkedInConnection, UserProfile, VoiceMemory, AgentRun, AuthSession
@@ -722,8 +723,28 @@ async def improve_content(
     if profile is None:
         raise HTTPException(status_code=400, detail="Complete Brand Intelligence setup first.")
 
-    brand_context = await BrandIntelligenceService(session).generation_context(1)
-    voice_result = await session.execute(select(VoiceMemory).limit(1))
+    brand_service = BrandIntelligenceService(session)
+    memory = await brand_service.get_memory(profile.id)
+    if memory is None or memory.status != "READY":
+        raise HTTPException(status_code=400, detail="Complete Brand Intelligence setup first.")
+
+    # Polishing should not trigger a hidden Brand DNA re-analysis. The user's
+    # saved Brand DNA is the source of truth and the editor should stay fast.
+    recent_posts = await brand_service.get_posts(profile.id, limit=3)
+    brand_context = {
+        "brand_memory": brand_service.serialize(memory),
+        "historical_examples": [
+            {
+                "published_at": post.published_at.isoformat() if post.published_at else None,
+                "source": post.source,
+                "body": post.body[:1200],
+            }
+            for post in recent_posts
+        ],
+    }
+    voice_result = await session.execute(
+        select(VoiceMemory).where(VoiceMemory.profile_id == profile.id).limit(1)
+    )
     voice = voice_result.scalar_one_or_none()
     voice_context = {
         "tone": voice.tone if voice else profile.tone,
@@ -743,6 +764,9 @@ Rules:
 - Remove filler, generic AI language and repetition.
 - Do not make the post sound artificially corporate.
 - Do not add unsupported facts.
+- Never use em dashes, en dashes or semicolons.
+- Prefer ordinary human wording, natural sentence lengths and concrete language.
+- Avoid polished corporate filler, generic AI hooks and phrases that sound machine-written.
 - Return JSON only:
 {"title":"","topic":"","body":"","changes":[""],"claims":[{"text":"","support":"user_draft"}]}
 """
@@ -762,12 +786,12 @@ Rules:
     }, ensure_ascii=False)
 
     try:
-        improved = await ModelRouterService().generate_json(system, prompt, max_output_tokens=2200)
+        improved = await ModelRouterService().generate_json(system, prompt, max_output_tokens=1000)
     except Exception as exc:
         logger.exception("Content improvement failed: %s", exc)
         raise HTTPException(status_code=502, detail="Content improvement failed. Please try again.") from exc
 
-    body = str(improved.get("body") or "").strip()
+    body = normalize_human_style(str(improved.get("body") or ""))
     if not body:
         raise HTTPException(status_code=502, detail="The configured LLM provider returned an empty polished draft.")
     guard = run_content_guards(body)
