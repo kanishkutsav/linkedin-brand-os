@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Activity, ArrowUpRight, BarChart3, BrainCircuit, Check, ChevronRight, CircleCheck,
   Clock3, Command, ExternalLink, FileText, Gauge, Globe2, LayoutDashboard, Link2,
-  LogOut, Menu, MessageSquare, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings,
+  LogOut, Menu, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings,
   ShieldCheck, Sparkles, Target, TrendingUp, UserRound, WandSparkles, X, Zap
 } from 'lucide-react';
 
@@ -182,7 +182,6 @@ export default function Home() {
   const closeSidebar = () => setSidebarOpen(false);
   const connectLinkedIn = () => { window.location.href = '/api/auth/linkedin/start'; };
   const cancelBrandEdit = async () => { await fetchData(); setBrandEditing(false); };
-  const cancelBrandEdit = async () => { await fetchData(); setBrandEditing(false); };
   const logout = () => {
     window.localStorage.removeItem(STORAGE_KEY);
     setToken(null); setQueue([]); setLinkedin({ connected: false }); closeSidebar();
@@ -263,6 +262,7 @@ export default function Home() {
       setBrand({ ...data.brand_memory, ready: data.brand_memory?.status === 'READY' });
       setNotice(`Brand Intelligence updated using your profile plus ${blocks.length} imported posts.`);
       await fetchData();
+      setBrandEditing(false);
     } catch (e) { setError(e instanceof Error ? e.message : 'Brand Intelligence setup failed'); }
     finally { setIsBuildingBrand(false); }
   };
