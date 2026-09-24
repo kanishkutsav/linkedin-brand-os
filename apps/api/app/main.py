@@ -871,7 +871,7 @@ async def regenerate_approval(
     _: str = Depends(require_roles("admin", "reviewer", "owner")),
 ):
     try:
-        approval = await ApprovalService(session).regenerate(approval_id, None)
+        approval = await ApprovalService(session).regenerate(approval_id, req.reason)
         return {
             "id": approval.id,
             "status": approval.status,

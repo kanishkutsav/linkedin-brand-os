@@ -532,7 +532,8 @@ function ApprovalWorkspace(props: any) {
             <div className="review-editor">
               <div className="editor-toolbar"><span>Exact content bound to approval</span><span>{editedBody.length} chars</span></div>
               <textarea className="textarea" value={editedBody} onChange={(e) => setEditedBody(e.target.value)} />
-              <textarea className="textarea" style={{ minHeight: 65, marginTop: 8 }} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Add an editorial note (optional)…" />
+              <div className="review-label" style={{ marginTop: 10, marginBottom: 7 }}>Feedback for regeneration <span className="form-help">(optional)</span></div>
+              <textarea className="textarea" style={{ minHeight: 82, marginTop: 0 }} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Tell Brand OS what to change, add, remove, or make more personal. Example: “Make the opening less polished and add the point about stakeholder alignment.”" />
               <div className="review-actions">
                 <button className="button success" disabled={isBusy} onClick={() => onAction('approve')}><Check size={14}/> Approve</button>
                 <button className="button" disabled={isBusy} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>

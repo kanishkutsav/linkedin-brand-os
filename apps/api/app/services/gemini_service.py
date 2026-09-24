@@ -170,6 +170,8 @@ class ModelRouterService:
         objective: str,
         evidence: list[dict],
         voice: dict,
+        feedback: str | None = None,
+        current_draft: str | None = None,
     ) -> dict:
         system = """You are the writing engine for a professional LinkedIn personal-brand assistant.
 Create useful, credible content for a real person.
@@ -181,7 +183,12 @@ Hard rules:
 - Use historical_examples to learn structure, specificity, pacing and voice; do not copy their sentences or pretend a historical example is a new experience.
 - Prefer the user's observed themes and real experience signals over generic technology commentary.
 - Do not force every post to mention AI, automation or technology unless the supplied brand context supports it.
-- Avoid generic hooks, motivational filler, broad 'future of work' commentary and obvious AI-generated phrasing.
+- Write like a thoughtful professional actually speaking to peers, not like a content marketer or AI assistant.
+- Vary sentence length and paragraph rhythm. Natural fragments are allowed when they sound intentional.
+- Prefer concrete observations, small tensions, trade-offs, lessons and practical questions over polished slogans.
+- Avoid formulaic hooks such as "In today's fast-changing world", "The future of", "X is no longer...", "Here's the thing", "Let that sink in", "Game changer", and similar templates.
+- Avoid excessive em dashes, colon-heavy lists, repetitive three-part constructions, buzzwords, motivational filler, broad 'future of work' commentary and obvious AI-generated phrasing.
+- Do not over-explain. Leave some room for the reader to think.
 - If a claim is not supported by supplied evidence or profile context, phrase it as a general observation or omit it.
 - Do not use generic AI-marketing language.
 - Do not use fake quotations.
@@ -196,7 +203,10 @@ Hard rules:
                 "objective": objective,
                 "evidence": evidence,
                 "voice": voice,
+                "feedback": feedback or "",
+                "current_draft": current_draft or "",
                 "generation_rules": {
+
                     "use_brand_memory": True,
                     "use_historical_examples_as_style_reference_only": True,
                     "never_copy_historical_sentences": True,
