@@ -23,7 +23,7 @@ from app.db.database import engine, get_session, SessionLocal
 from app.services.agent_scheduler import AgentScheduler
 from app.services.brand_intelligence import BrandIntelligenceService
 from app.guards.guardrails import run_content_guards
-from app.integrations.linkedin import MockLinkedInAdapter, OfficialLinkedInAdapter
+from app.integrations.linkedin import OfficialLinkedInAdapter
 from app.models.base import Base
 from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LinkedInConnection, UserProfile, VoiceMemory, AgentRun, AuthSession
 from app.services.approval import ApprovalService
@@ -109,7 +109,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-adapter = MockLinkedInAdapter()
 
 
 class DraftRequest(BaseModel):
