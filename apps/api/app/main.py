@@ -205,13 +205,6 @@ class LinkedInExchangeRequest(BaseModel):
     code: str
 
 
-class LinkedInLoginRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    email: str
-    linkedin_url: str
-
-
 @app.get("/health")
 async def health() -> dict[str, object]:
     return {
@@ -224,25 +217,46 @@ async def health() -> dict[str, object]:
 
 @app.get("/api/auth/linkedin/start")
 async def linkedin_oauth_start(session: AsyncSession = Depends(get_session)):
-    url = await build_authorization_url(session)
-    return RedirectResponse(url=url, status_code=302)
+    url, state = await build_authorization_url(session)
+    response = RedirectResponse(url=url, status_code=302)
+    response.set_cookie(
+        "brand_os_oauth_state",
+        state,
+        max_age=600,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        path="/api/auth/linkedin",
+    )
+    return response
 
 
 @app.get("/api/auth/linkedin/callback")
 async def linkedin_oauth_callback(
+    request: Request,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
+    response_cookie_state = request.cookies.get("brand_os_oauth_state")
     if error:
-        raise HTTPException(status_code=400, detail=f"LinkedIn authorization was not completed: {error}")
+        response = RedirectResponse(
+            url=f"{(settings.frontend_url or 'http://localhost:3000').rstrip('/')}/?linkedin_error=authorization_denied",
+            status_code=302,
+        )
+        response.delete_cookie("brand_os_oauth_state", path="/api/auth/linkedin")
+        return response
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing LinkedIn OAuth code or state.")
+    if not response_cookie_state or not secrets.compare_digest(response_cookie_state, state):
+        raise HTTPException(status_code=400, detail="Invalid LinkedIn OAuth browser session state.")
 
     exchange = await handle_callback(session, code, state)
     frontend = (settings.frontend_url or "http://localhost:3000").rstrip("/")
-    return RedirectResponse(url=f"{frontend}/?linkedin_code={exchange}", status_code=302)
+    response = RedirectResponse(url=f"{frontend}/?linkedin_code={exchange}", status_code=302)
+    response.delete_cookie("brand_os_oauth_state", path="/api/auth/linkedin")
+    return response
 
 
 @app.post("/api/auth/linkedin/exchange")
@@ -286,19 +300,11 @@ async def linkedin_status(
 
 
 @app.post("/api/auth/linkedin/login")
-async def linkedin_login(req: LinkedInLoginRequest, session: AsyncSession = Depends(get_session)):
-    user = await AuthService.validate_linkedin_identity(session, req.email, req.linkedin_url)
-    if user is None:
-        raise HTTPException(status_code=403, detail="LinkedIn account is not whitelisted for this dashboard")
-
-    token = await AuthService.create_session(session, user)
-    return {
-        "token": token,
-        "role": user.role,
-        "email": user.email,
-        "display_name": user.display_name,
-        "linkedin_url": user.linkedin_url,
-    }
+async def linkedin_login_legacy():
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy LinkedIn login is disabled. Use the official LinkedIn OAuth flow.",
+    )
 
 
 @app.get("/api/auth/me")
@@ -361,53 +367,11 @@ async def get_profile(
 
 
 @app.post("/api/profile")
-async def upsert_profile(
-    req: ProfileRequest,
-    session: AsyncSession = Depends(get_session),
-    current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
-):
-    profile = await AuthService.get_or_create_profile(session, current_user)
-    if profile is None:
-        profile = UserProfile(
-            id=int(current_user.id),
-            display_name=req.display_name,
-            professional_title=req.professional_title,
-            industry=req.industry,
-            audience=req.audience,
-            goals=",".join(req.goals or []),
-            brand_positioning=req.brand_positioning,
-            tone=req.tone,
-            role=current_user.role or "user",
-        )
-        session.add(profile)
-    else:
-        profile.display_name = req.display_name
-        profile.professional_title = req.professional_title
-        profile.industry = req.industry
-        profile.audience = req.audience
-        profile.goals = ",".join(req.goals or [])
-        profile.brand_positioning = req.brand_positioning
-        profile.tone = req.tone
-        profile.role = profile.role or current_user.role or "user"
-
-    voice = (await session.execute(
-        select(VoiceMemory).where(VoiceMemory.profile_id == profile.id).limit(1)
-    )).scalar_one_or_none()
-    if voice is None:
-        voice = VoiceMemory(
-            profile_id=profile.id,
-            tone=req.tone or "practical",
-            sentence_style="clear and grounded",
-            vocabulary="alignment, execution, clarity",
-            preferred_phrases="simple systems, real bottleneck, practical",
-            avoid_phrases="game-changer, unlock the power of",
-            emoji_usage="limited",
-        )
-        session.add(voice)
-
-    await session.commit()
-    await session.refresh(profile)
-    return {"id": profile.id, "display_name": profile.display_name, "tone": profile.tone, "role": profile.role or "owner"}
+async def upsert_profile_legacy():
+    raise HTTPException(
+        status_code=410,
+        detail="Manual profile editing is disabled. LinkedIn is the factual profile source.",
+    )
 
 
 @app.get("/api/brand/status")
@@ -489,19 +453,9 @@ async def brand_onboard(
 
     profile = await AuthService.get_or_create_profile(session, current_user)
 
-    profile.display_name = req.display_name.strip() or profile.display_name or current_user.display_name or "User"
-    if req.professional_title is not None:
-        profile.professional_title = req.professional_title
-    if req.industry is not None:
-        profile.industry = req.industry
-    if req.audience is not None:
-        profile.audience = req.audience
-    if req.goals:
-        profile.goals = ",".join(req.goals)
-    if req.brand_positioning is not None:
-        profile.brand_positioning = req.brand_positioning
-    if req.tone is not None:
-        profile.tone = req.tone
+    # LinkedIn is the factual profile source. Imported posts are the only
+    # user-controlled onboarding input.
+    profile.display_name = current_user.display_name or profile.display_name or "User"
     profile.role = profile.role or current_user.role or "user"
     await session.commit()
 
@@ -548,15 +502,19 @@ async def brand_initialize(
 ):
     profile = await AuthService.get_or_create_profile(session, current_user)
 
-    profile.display_name = req.display_name.strip() or "User"
-    profile.professional_title = req.professional_title
-    profile.industry = req.industry
-    profile.audience = req.audience
-    profile.goals = ",".join(req.goals or [])
-    profile.brand_positioning = req.brand_positioning
-    profile.tone = req.tone
-    profile.role = profile.role or "owner"
-    await session.commit()
+    # Do not trust client-supplied profile facts. LinkedIn remains the factual
+    # baseline and Brand Intelligence derives the remaining signals.
+    profile.display_name = current_user.display_name or profile.display_name or "User"
+    profile.role = profile.role or current_user.role or "user"
+
+    # A no-post initialization is an explicit request to remove the current
+    # user-imported source snapshot. Published Brand OS evidence is preserved.
+    await session.execute(
+        delete(HistoricalPost).where(
+            HistoricalPost.profile_id == profile.id,
+            HistoricalPost.source == "user_import",
+        )
+    )
 
     try:
         memory = await BrandIntelligenceService(session).analyze(profile.id)
