@@ -291,7 +291,7 @@ export default function Home() {
   const generateContent = async () => {
     if (!token) return;
     if (!requireBrand('generating content')) return;
-    setIsGenerating(true); setError(null); setNotice(null);
+    setIsGenerating(true); setError(null); setNoticeTtl(4500); setNotice(null);
     try {
       setGenerationProgress(34);
       setGenerationStage('Generating with AI…');
@@ -321,7 +321,7 @@ export default function Home() {
   const discoverResearch = async () => {
     if (!token) return;
     if (!requireBrand('running live research')) return;
-    setIsResearching(true); setError(null); setNotice(null);
+    setIsResearching(true); setError(null); setNoticeTtl(4500); setNotice(null);
     try {
       const res = await fetch(API_BASE + '/api/research/discover', {
         method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({}),
@@ -345,7 +345,7 @@ export default function Home() {
     if (!token) return;
     const blocks = historicalPostEntries.map((body) => body.trim()).filter(Boolean);
     if (blocks.length < 3) { setError('Please add at least 3 previous LinkedIn posts before building Brand Intelligence.'); return; }
-    setIsBuildingBrand(true); setError(null); setNotice(null);
+    setIsBuildingBrand(true); setError(null); setNoticeTtl(4500); setNotice(null);
     try {
       const res = await fetch(API_BASE + '/api/brand/onboard', {
         method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' },
@@ -368,7 +368,7 @@ export default function Home() {
   const improveDraft = async () => {
     if (!token || !draftBody.trim()) { setError('Write a draft first, then ask Brand OS to polish it.'); return; }
     if (!requireBrand('polishing content')) return;
-    setIsImproving(true); setError(null); setNotice(null);
+    setIsImproving(true); setError(null); setNoticeTtl(4500); setNotice(null);
     try {
       const res = await fetch(API_BASE + '/api/content/improve', {
         method: 'POST',
@@ -391,7 +391,7 @@ export default function Home() {
       setError('Title, topic and draft body are required.'); return;
     }
     if (!requireBrand('sending content to approval')) return;
-    setIsBusy(true); setError(null); setNotice(null);
+    setIsBusy(true); setError(null); setNoticeTtl(4500); setNotice(null);
     try {
       const res = await fetch(`${API_BASE}/api/content/drafts`, {
         method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' },
@@ -461,9 +461,13 @@ export default function Home() {
               <section className="hero">
                 <div className="hero-grid">
                   <div>
-                    <div className="page-kicker" style={{ color: '#bdb6ff' }}><Sparkles size={13} /> Brand intelligence active</div>
-                    <h1>Turn your expertise into a recognizable point of view.</h1>
-                    <p>Research, content strategy, drafting and review — orchestrated around your brand voice, with you always in control of what reaches LinkedIn.</p>
+                    <div className="page-kicker" style={{ color: '#bdb6ff' }}>
+                      {brand.ready ? <><Sparkles size={13} /> Brand intelligence active</> : <><BrainCircuit size={13} /> Brand DNA setup required</>}
+                    </div>
+                    <h1>{brand.ready ? 'Turn your expertise into a recognizable point of view.' : 'Start by teaching Brand OS your voice.'}</h1>
+                    <p>{brand.ready
+                      ? 'Research, content strategy, drafting and review — orchestrated around your brand voice, with you always in control of what reaches LinkedIn.'
+                      : 'Your workspace is ready, but AI actions stay paused until you add your professional profile and 3–5 previous LinkedIn posts in Settings.'}</p>
                     <div className="hero-actions">
                       <button className="button primary progress-button" onClick={generateContent} disabled={isGenerating}>
                         <span className="button-content"><WandSparkles size={15} /> {isGenerating ? generationStage || 'Generating…' : 'Generate content'}</span>
