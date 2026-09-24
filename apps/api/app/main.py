@@ -28,7 +28,7 @@ from app.integrations.linkedin import OfficialLinkedInAdapter
 from app.models.base import Base
 from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LinkedInConnection, UserProfile, VoiceMemory, AgentRun, AuthSession
 from app.services.approval import ApprovalService
-from app.services.auth_service import AuthService
+from app.services.auth_service import AppUser, AuthService
 from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback, sync_linkedin_profile
 from app.services.linkedin_analytics import LinkedInAnalyticsService
 from app.services.gemini_service import ModelRouterService
@@ -344,11 +344,10 @@ async def auth_logout(
 @app.get("/api/profile")
 async def get_profile(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
-    profile = await session.get(UserProfile, 1)
-    if profile is None:
-        return {"id": 1, "display_name": "User", "tone": "practical", "role": "owner"}
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    await session.commit()
     return {
         "id": profile.id,
         "display_name": profile.display_name,
@@ -365,12 +364,12 @@ async def get_profile(
 async def upsert_profile(
     req: ProfileRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
 ):
-    profile = await session.get(UserProfile, 1)
+    profile = await AuthService.get_or_create_profile(session, current_user)
     if profile is None:
         profile = UserProfile(
-            id=1,
+            id=int(current_user.id),
             display_name=req.display_name,
             professional_title=req.professional_title,
             industry=req.industry,
@@ -378,7 +377,7 @@ async def upsert_profile(
             goals=",".join(req.goals or []),
             brand_positioning=req.brand_positioning,
             tone=req.tone,
-            role="owner",
+            role=current_user.role or "user",
         )
         session.add(profile)
     else:
@@ -389,9 +388,11 @@ async def upsert_profile(
         profile.goals = ",".join(req.goals or [])
         profile.brand_positioning = req.brand_positioning
         profile.tone = req.tone
-        profile.role = profile.role or "owner"
+        profile.role = profile.role or current_user.role or "user"
 
-    voice = (await session.execute(select(VoiceMemory).limit(1))).scalar_one_or_none()
+    voice = (await session.execute(
+        select(VoiceMemory).where(VoiceMemory.profile_id == profile.id).limit(1)
+    )).scalar_one_or_none()
     if voice is None:
         voice = VoiceMemory(
             profile_id=profile.id,
@@ -412,12 +413,13 @@ async def upsert_profile(
 @app.get("/api/brand/status")
 async def brand_status(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     service = BrandIntelligenceService(session)
-    memory = await service.get_memory(1)
-    posts = await service.get_posts(1, limit=100)
-    profile = await session.get(UserProfile, 1)
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    await session.commit()
+    memory = await service.get_memory(profile.id)
+    posts = await service.get_posts(profile.id, limit=100)
     return {
         "status": memory.status if memory else "NOT_INITIALIZED",
         "ready": bool(memory and memory.status == "READY"),
@@ -447,20 +449,21 @@ async def brand_status(
 @app.get("/api/brand/memory")
 async def brand_memory(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     service = BrandIntelligenceService(session)
-    return service.serialize(await service.get_memory(1))
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    return service.serialize(await service.get_memory(profile.id))
 
 
 @app.get("/api/brand/source-posts")
 async def brand_source_posts(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     result = await session.execute(
         select(HistoricalPost)
-        .where(HistoricalPost.profile_id == 1, HistoricalPost.source == "user_import")
+        .where(HistoricalPost.profile_id == int(current_user.id), HistoricalPost.source == "user_import")
         .order_by(HistoricalPost.created_at.asc())
         .limit(10)
     )
@@ -474,7 +477,7 @@ async def brand_source_posts(
 async def brand_onboard(
     req: BrandOnboardingRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
 ):
 
     if len(req.posts) < 3:
@@ -484,26 +487,29 @@ async def brand_onboard(
     if any(not post.body.strip() for post in req.posts):
         raise HTTPException(status_code=400, detail="Every imported post must contain content.")
 
-    profile = await session.get(UserProfile, 1)
-    if profile is None:
-        profile = UserProfile(id=1, role="owner")
-        session.add(profile)
+    profile = await AuthService.get_or_create_profile(session, current_user)
 
-    profile.display_name = req.display_name.strip() or "User"
-    profile.professional_title = req.professional_title
-    profile.industry = req.industry
-    profile.audience = req.audience
-    profile.goals = ",".join(req.goals or [])
-    profile.brand_positioning = req.brand_positioning
-    profile.tone = req.tone
-    profile.role = profile.role or "owner"
+    profile.display_name = req.display_name.strip() or profile.display_name or current_user.display_name or "User"
+    if req.professional_title is not None:
+        profile.professional_title = req.professional_title
+    if req.industry is not None:
+        profile.industry = req.industry
+    if req.audience is not None:
+        profile.audience = req.audience
+    if req.goals:
+        profile.goals = ",".join(req.goals)
+    if req.brand_positioning is not None:
+        profile.brand_positioning = req.brand_positioning
+    if req.tone is not None:
+        profile.tone = req.tone
+    profile.role = profile.role or current_user.role or "user"
     await session.commit()
 
     # The editable 3–10 source posts are a current snapshot. Replace only the
     # user-imported set on refresh; keep Brand OS published posts as durable evidence.
     await session.execute(
         delete(HistoricalPost).where(
-            HistoricalPost.profile_id == 1,
+            HistoricalPost.profile_id == int(current_user.id),
             HistoricalPost.source == "user_import",
         )
     )
@@ -521,10 +527,10 @@ async def brand_onboard(
             }
             for post in req.posts
         ],
-        profile_id=1,
+        profile_id=profile.id,
     )
     try:
-        memory = await service.analyze(1)
+        memory = await service.analyze(profile.id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -538,12 +544,9 @@ async def brand_onboard(
 async def brand_initialize(
     req: ProfileRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
 ):
-    profile = await session.get(UserProfile, 1)
-    if profile is None:
-        profile = UserProfile(id=1, role="owner")
-        session.add(profile)
+    profile = await AuthService.get_or_create_profile(session, current_user)
 
     profile.display_name = req.display_name.strip() or "User"
     profile.professional_title = req.professional_title
@@ -556,7 +559,7 @@ async def brand_initialize(
     await session.commit()
 
     try:
-        memory = await BrandIntelligenceService(session).analyze(1)
+        memory = await BrandIntelligenceService(session).analyze(profile.id)
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Brand Intelligence initialization failed. Check the configured LLM providers and try again.") from exc
 
@@ -566,11 +569,12 @@ async def brand_initialize(
 @app.post("/api/brand/rebuild")
 async def rebuild_brand(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
 ):
+    profile = await AuthService.get_or_create_profile(session, current_user)
     service = BrandIntelligenceService(session)
     try:
-        return await service.analyze(1)
+        return await service.analyze(profile.id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -580,9 +584,9 @@ async def rebuild_brand(
 @app.get("/api/dashboard/approvals")
 async def dashboard_approvals(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "reviewer", "owner", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
-    approvals = await ApprovalService(session).list_dashboard()
+    approvals = await ApprovalService(session).list_dashboard(int(current_user.id))
     records = []
     for item in approvals:
         version = await session.get(ContentVersion, item.content_version_id)
@@ -606,10 +610,13 @@ async def dashboard_approvals(
 @app.get("/api/agent/status")
 async def agent_status(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "reviewer", "owner", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
     result = await session.execute(
-        select(AgentRun).order_by(AgentRun.started_at.desc()).limit(10)
+        select(AgentRun)
+        .where(AgentRun.user_id == int(current_user.id))
+        .order_by(AgentRun.started_at.desc())
+        .limit(10)
     )
     runs = result.scalars().all()
     return {
@@ -646,13 +653,13 @@ class AgentEventRequest(BaseModel):
 async def trigger_agent_event(
     req: AgentEventRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
 ):
-    run = AgentRun(mode="event", trigger=f"event:{req.event_type}", status="RUNNING")
+    run = AgentRun(user_id=int(current_user.id), mode="event", trigger=f"event:{req.event_type}", status="RUNNING")
     session.add(run)
     await session.flush()
     try:
-        orchestrator = AgentOrchestrator(session)
+        orchestrator = AgentOrchestrator(session, int(current_user.id))
         if req.event_type == "manual_generate_content":
             result = await orchestrator.run_manual_content_generation()
         else:
@@ -674,7 +681,7 @@ async def trigger_agent_event(
 @app.post("/api/strategy/recommend")
 async def recommend_strategy(
     req: StrategyRequest,
-    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     return ContentStrategyService().recommend(req.goal, req.audience)
 
@@ -683,11 +690,11 @@ async def recommend_strategy(
 async def research_discover(
     req: ResearchRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     try:
         opportunities = await ResearchService(session).research_and_rank(
-            profile_id=1,
+            profile_id=int(current_user.id),
             requested_topic=req.topic,
             candidate_limit=8,
         )
@@ -702,16 +709,16 @@ async def research_discover(
 @app.get("/api/research/opportunities")
 async def research_opportunities(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
-    return {"opportunities": await ResearchService(session).list_opportunities(1, 20)}
+    return {"opportunities": await ResearchService(session).list_opportunities(int(current_user.id), 20)}
 
 
 @app.post("/api/research/evidence")
 async def build_research_evidence(
     req: ResearchRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     return ResearchService(session).build_evidence_pack(
         req.topic or "",
@@ -723,7 +730,7 @@ async def build_research_evidence(
 @app.post("/api/voice/profile")
 async def build_voice_profile(
     req: VoiceRequest,
-    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     return VoiceProfileBuilder().learn(req.approved_examples)
 
@@ -732,11 +739,11 @@ async def build_voice_profile(
 async def improve_content(
     req: ImproveContentRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     if not req.body.strip():
         raise HTTPException(status_code=400, detail="Enter a draft before asking Brand OS to improve it.")
-    profile = await session.get(UserProfile, 1)
+    profile = await AuthService.get_or_create_profile(session, current_user)
     if profile is None:
         raise HTTPException(status_code=400, detail="Complete Brand Intelligence setup first.")
 
@@ -826,17 +833,17 @@ Rules:
 async def analytics_overview(
     session: AsyncSession = Depends(get_session),
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
-    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     async def count(query):
         return len((await session.execute(query)).scalars().all())
 
     pipeline = {
-        "historical_posts": await count(select(HistoricalPost.id).where(HistoricalPost.profile_id == 1)),
-        "content_items": await count(select(ContentItem.id)),
-        "pending_approval": await count(select(ApprovalRequest.id).where(ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED"]))),
-        "approved": await count(select(ApprovalRequest.id).where(ApprovalRequest.status == "APPROVED")),
-        "published_via_brand_os": await count(select(ApprovalRequest.id).where(ApprovalRequest.status == "EXECUTED")),
+        "historical_posts": await count(select(HistoricalPost.id).where(HistoricalPost.profile_id == int(current_user.id))),
+        "content_items": await count(select(ContentItem.id).where(ContentItem.profile_id == int(current_user.id))),
+        "pending_approval": await count(select(ApprovalRequest.id).join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id).join(ContentItem, ContentItem.id == ContentVersion.content_id).where(ContentItem.profile_id == int(current_user.id), ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED"]))),
+        "approved": await count(select(ApprovalRequest.id).join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id).join(ContentItem, ContentItem.id == ContentVersion.content_id).where(ContentItem.profile_id == int(current_user.id), ApprovalRequest.status == "APPROVED")),
+        "published_via_brand_os": await count(select(ApprovalRequest.id).join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id).join(ContentItem, ContentItem.id == ContentVersion.content_id).where(ContentItem.profile_id == int(current_user.id), ApprovalRequest.status == "EXECUTED")),
     }
 
     user = await AuthService.get_user_from_token(session, credentials.credentials if credentials else None)
@@ -893,10 +900,16 @@ async def analytics_overview(
 async def create_draft(
     req: DraftRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    brand_memory = await BrandIntelligenceService(session).get_memory(profile.id)
+    if brand_memory is None or brand_memory.status != "READY":
+        raise HTTPException(status_code=400, detail="Complete Brand DNA setup before creating content.")
+
     guard = run_content_guards(req.body)
     item = ContentItem(
+        profile_id=profile.id,
         title=req.title,
         topic=req.topic,
         pillar=req.pillar,
@@ -928,27 +941,20 @@ async def approve(
     approval_id: int,
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "reviewer", "owner", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
     try:
         existing = await session.get(ApprovalRequest, approval_id)
         if existing and existing.status == "APPROVED":
-            approval = existing
+            approval = await ApprovalService(session)._get_owned_approval(approval_id, int(current_user.id))
         else:
-            approval = await ApprovalService(session).approve(approval_id)
+            approval = await ApprovalService(session).approve(approval_id, int(current_user.id))
 
         # Approval is the explicit human authorization. Once granted, publish
         # immediately through the connected official LinkedIn API so the UI
         # action has one unambiguous outcome: Approve & publish.
-        user = await AuthService.get_user_from_token(
-            session,
-            credentials.credentials if credentials else None,
-        )
-        if user is None:
-            raise ValueError("Authentication required.")
-
         connection_result = await session.execute(
-            select(LinkedInConnection).where(LinkedInConnection.user_id == int(user.id))
+            select(LinkedInConnection).where(LinkedInConnection.user_id == int(current_user.id))
         )
         connection = connection_result.scalar_one_or_none()
         if connection is None:
@@ -957,7 +963,7 @@ async def approve(
             raise ValueError("Your LinkedIn connection has expired. Reconnect LinkedIn before approving for publication.")
 
         publish_adapter = OfficialLinkedInAdapter(connection.access_token, connection.member_sub)
-        publish_result = await ApprovalService(session).execute(approval_id, publish_adapter)
+        publish_result = await ApprovalService(session).execute(approval_id, publish_adapter, int(current_user.id))
         return {
             "id": approval.id,
             "status": "EXECUTED" if publish_result.success else approval.status,
@@ -976,10 +982,10 @@ async def edit_approval(
     approval_id: int,
     req: ApprovalEditRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "reviewer", "owner", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
     try:
-        approval = await ApprovalService(session).edit(approval_id, req.edited_body, req.reason)
+        approval = await ApprovalService(session).edit(approval_id, req.edited_body, req.reason, int(current_user.id))
         return {
             "id": approval.id,
             "status": approval.status,
@@ -995,10 +1001,10 @@ async def reject_approval(
     approval_id: int,
     req: ApprovalDecisionRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "reviewer", "owner", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
     try:
-        approval = await ApprovalService(session).reject(approval_id, req.reason)
+        approval = await ApprovalService(session).reject(approval_id, req.reason, int(current_user.id))
         return {
             "id": approval.id,
             "status": approval.status,
@@ -1013,10 +1019,10 @@ async def regenerate_approval(
     approval_id: int,
     req: ApprovalDecisionRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "reviewer", "owner", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
     try:
-        approval = await ApprovalService(session).regenerate(approval_id, req.reason)
+        approval = await ApprovalService(session).regenerate(approval_id, req.reason, int(current_user.id))
         return {
             "id": approval.id,
             "status": approval.status,
@@ -1031,18 +1037,11 @@ async def execute(
     approval_id: int,
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "user")),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
 ):
     try:
-        user = await AuthService.get_user_from_token(
-            session,
-            credentials.credentials if credentials else None,
-        )
-        if user is None:
-            raise ValueError("Authentication required.")
-
         connection_result = await session.execute(
-            select(LinkedInConnection).where(LinkedInConnection.user_id == int(user.id))
+            select(LinkedInConnection).where(LinkedInConnection.user_id == int(current_user.id))
         )
         connection = connection_result.scalar_one_or_none()
         if connection is None:
@@ -1050,7 +1049,7 @@ async def execute(
         if connection.token_expires_at and connection.token_expires_at <= datetime.now(timezone.utc):
             raise ValueError("Your LinkedIn connection has expired. Reconnect LinkedIn before publishing.")
         publish_adapter = OfficialLinkedInAdapter(connection.access_token, connection.member_sub)
-        result = await ApprovalService(session).execute(approval_id, publish_adapter)
+        result = await ApprovalService(session).execute(approval_id, publish_adapter, int(current_user.id))
         return {
             "success": result.success,
             "external_id": result.external_id,

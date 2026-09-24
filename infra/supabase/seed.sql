@@ -28,11 +28,14 @@ SET
     is_whitelisted = TRUE,
     updated_at = NOW();
 
--- Keep a default profile row aligned with the approved dashboard owners.
-INSERT INTO user_profiles (display_name, professional_title, industry, audience, brand_positioning, tone, role)
-SELECT 'Kanishka Utsav', 'AI Strategy Lead', 'B2B SaaS', 'product leaders', 'clear, practical, anti-hype', 'direct and grounded', 'owner'
-WHERE NOT EXISTS (SELECT 1 FROM user_profiles WHERE display_name = 'Kanishka Utsav');
+-- Keep each profile explicitly bound to its auth user. New users start with an empty Brand DNA.
+INSERT INTO user_profiles (id, display_name, professional_title, industry, audience, brand_positioning, tone, role)
+SELECT id, 'Kanishka Utsav', 'AI Strategy Lead', 'B2B SaaS', 'product leaders', 'clear, practical, anti-hype', 'direct and grounded', 'owner'
+FROM auth_users
+WHERE email = 'kanishka.utsav@gmail.com'
+  AND NOT EXISTS (SELECT 1 FROM user_profiles WHERE id = auth_users.id);
 
-INSERT INTO user_profiles (display_name, professional_title, industry, audience, brand_positioning, tone, role)
-SELECT 'Kumar Pranay', 'Growth Operator', 'Technology', 'founders and operators', 'execution-focused, practical, credible', 'clear and grounded', 'owner'
-WHERE NOT EXISTS (SELECT 1 FROM user_profiles WHERE display_name = 'Kumar Pranay');
+INSERT INTO user_profiles (id, display_name, professional_title, industry, audience, brand_positioning, tone, role)
+SELECT id, COALESCE(display_name, 'User'), NULL, NULL, NULL, NULL, NULL, role
+FROM auth_users
+WHERE NOT EXISTS (SELECT 1 FROM user_profiles WHERE id = auth_users.id);

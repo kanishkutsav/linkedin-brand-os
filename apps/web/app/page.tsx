@@ -320,7 +320,18 @@ useEffect(() => {
       setToken(null); setQueue([]); setLinkedin({ connected: false }); setLinkedinProfileSynced(false); closeSidebar();
     }
   };
-  const go = (next: Tab) => { setTab(next); closeSidebar(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const go = (next: Tab) => {
+    if (!brand.ready && next !== 'Settings') {
+      setTab('Settings');
+      closeSidebar();
+      setNotice('Before using the workspace, complete your Brand DNA setup once.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setTab(next);
+    closeSidebar();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const requireBrand = (actionLabel: string) => {
     if (brand.ready) return true;
@@ -582,7 +593,7 @@ useEffect(() => {
 
           {tab === 'Dashboard' && (
             <>
-              <section className="hero">
+              <section className="hero" onClick={!brand.ready ? () => go('Settings') : undefined} style={!brand.ready ? { cursor: 'pointer' } : undefined}>
                 <div className="hero-grid">
                   <div>
                     <div className="page-kicker" style={{ color: '#bdb6ff' }}>
@@ -593,11 +604,22 @@ useEffect(() => {
                       ? 'Research, content strategy, drafting and review — orchestrated around your brand voice, with you always in control of what reaches LinkedIn.'
                       : 'Your LinkedIn profile is the factual starting point. Brand OS can build your Brand DNA automatically, and previous posts are optional evidence for stronger voice calibration.'}</p>
                     <div className="hero-actions">
-                      <button className="button primary progress-button" onClick={generateContent} disabled={isGenerating}>
-                        <span className="button-content"><WandSparkles size={15} /> {isGenerating ? generationStage || 'Generating…' : 'Generate content'}</span>
+                      <button
+                        className="button primary progress-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (!brand.ready) {
+                            go('Settings');
+                            return;
+                          }
+                          void generateContent();
+                        }}
+                        disabled={isGenerating}
+                      >
+                        <span className="button-content"><WandSparkles size={15} /> {isGenerating ? generationStage || 'Generating…' : brand.ready ? 'Generate content' : 'Build Brand DNA'}</span>
                         {isGenerating && <span className="button-progress-track"><span style={{ width: generationProgress + '%' }} /></span>}
                       </button>
-                      <button className="button ghost-dark" onClick={() => go('Research')}><Search size={15} /> Discover opportunities</button>
+                      <button className="button ghost-dark" onClick={(event) => { event.stopPropagation(); go('Research'); }}><Search size={15} /> Discover opportunities</button>
                     </div>
                   </div>
                   <div className="hero-status">

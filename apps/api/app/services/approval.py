@@ -26,19 +26,41 @@ class ApprovalService:
         await self.session.refresh(approval)
         return approval
 
-    async def list_pending(self):
+    async def _get_owned_approval(self, approval_id: int, profile_id: int) -> ApprovalRequest:
         result = await self.session.execute(
-            select(ApprovalRequest).where(
+            select(ApprovalRequest)
+            .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(
+                ApprovalRequest.id == approval_id,
+                ContentItem.profile_id == profile_id,
+            )
+        )
+        approval = result.scalar_one_or_none()
+        if approval is None:
+            raise ValueError("Approval not found")
+        return approval
+
+    async def list_pending(self, profile_id: int):
+        result = await self.session.execute(
+            select(ApprovalRequest)
+            .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(
+                ContentItem.profile_id == profile_id,
                 ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED"]),
                 (ApprovalRequest.expires_at.is_(None)) | (ApprovalRequest.expires_at > datetime.now(timezone.utc)),
             )
         )
         return result.scalars().all()
 
-    async def list_dashboard(self, limit: int = 100):
-        """Return recent approval records, including completed decisions."""
+    async def list_dashboard(self, profile_id: int, limit: int = 100):
+        """Return approval records owned by the active profile."""
         result = await self.session.execute(
             select(ApprovalRequest)
+            .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(ContentItem.profile_id == profile_id)
             .order_by(ApprovalRequest.created_at.desc())
             .limit(limit)
         )
@@ -59,8 +81,8 @@ class ApprovalService:
 
         return approvals
 
-    async def approve(self, approval_id: int):
-        approval = await self.session.get(ApprovalRequest, approval_id)
+    async def approve(self, approval_id: int, profile_id: int):
+        approval = await self._get_owned_approval(approval_id, profile_id)
         if not approval or approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
             raise ValueError("Approval is not in an approvable state")
         if approval.expires_at and approval.expires_at <= datetime.now(timezone.utc):
@@ -93,8 +115,10 @@ class ApprovalService:
         await self.session.commit()
         return approval
 
-    async def edit(self, approval_id: int, edited_body: str, reason: str | None = None):
-        approval = await self.session.get(ApprovalRequest, approval_id)
+    async def edit(self, approval_id: int, edited_body: str, reason: str | None = None, profile_id: int | None = None):
+        if profile_id is None:
+            raise ValueError("Profile ownership is required")
+        approval = await self._get_owned_approval(approval_id, profile_id)
         if not approval or approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
             raise ValueError("Approval is not editable in its current state")
         if approval.expires_at and approval.expires_at <= datetime.now(timezone.utc):
@@ -128,8 +152,10 @@ class ApprovalService:
         await self.session.commit()
         return approval
 
-    async def reject(self, approval_id: int, reason: str | None = None):
-        approval = await self.session.get(ApprovalRequest, approval_id)
+    async def reject(self, approval_id: int, reason: str | None = None, profile_id: int | None = None):
+        if profile_id is None:
+            raise ValueError("Profile ownership is required")
+        approval = await self._get_owned_approval(approval_id, profile_id)
         if not approval:
             raise ValueError("Approval not found")
         if approval.status == "EXECUTED":
@@ -154,8 +180,10 @@ class ApprovalService:
         await self.session.commit()
         return approval
 
-    async def regenerate(self, approval_id: int, feedback: str | None = None):
-        approval = await self.session.get(ApprovalRequest, approval_id)
+    async def regenerate(self, approval_id: int, feedback: str | None = None, profile_id: int | None = None):
+        if profile_id is None:
+            raise ValueError("Profile ownership is required")
+        approval = await self._get_owned_approval(approval_id, profile_id)
         if not approval or approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
             raise ValueError("Approval is not regenerable in its current state")
         if approval.expires_at and approval.expires_at <= datetime.now(timezone.utc):
@@ -169,7 +197,7 @@ class ApprovalService:
         # Regeneration is grounded in the same Brand DNA and current draft.
         # Reviewer feedback is an explicit instruction, not an optional log entry.
         item = await self.session.get(ContentItem, version.content_id)
-        profile = await self.session.get(UserProfile, 1)
+        profile = await self.session.get(UserProfile, profile_id)
         if not profile:
             raise ValueError("Brand profile not found")
 
@@ -239,8 +267,10 @@ class ApprovalService:
         await self.session.commit()
         return approval
 
-    async def execute(self, approval_id: int, adapter):
-        approval = await self.session.get(ApprovalRequest, approval_id)
+    async def execute(self, approval_id: int, adapter, profile_id: int | None = None):
+        if profile_id is None:
+            raise ValueError("Profile ownership is required")
+        approval = await self._get_owned_approval(approval_id, profile_id)
         if not approval or approval.status != "APPROVED": raise ValueError("Valid approval required")
         if approval.expires_at and approval.expires_at < datetime.now(timezone.utc):
             approval.status = "EXPIRED"
@@ -274,14 +304,14 @@ class ApprovalService:
             digest = hashlib.sha256(version.body.encode("utf-8")).hexdigest()
             existing = await self.session.execute(
                 select(HistoricalPost).where(
-                    HistoricalPost.profile_id == 1,
+                    HistoricalPost.profile_id == profile_id,
                     HistoricalPost.content_hash == digest,
                 )
             )
             if existing.scalar_one_or_none() is None:
                 self.session.add(
                     HistoricalPost(
-                        profile_id=1,
+                        profile_id=profile_id,
                         external_id=result.external_id,
                         body=version.body,
                         content_hash=digest,

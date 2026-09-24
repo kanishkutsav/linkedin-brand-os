@@ -4,9 +4,10 @@ import asyncio
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models.models import AgentRun
+from app.models.models import AgentRun, BrandMemory, UserProfile
 
 from app.agents.orchestrator import AgentOrchestrator
 from app.core.config import settings
@@ -70,25 +71,34 @@ class AgentScheduler:
 
     async def _run(self, mode: str) -> None:
         async with self.session_factory() as session:
-            run = AgentRun(
-                mode=mode,
-                trigger=f"scheduled:{mode}",
-                status="RUNNING",
+            result = await session.execute(
+                select(UserProfile.id)
+                .join(BrandMemory, BrandMemory.profile_id == UserProfile.id)
+                .where(BrandMemory.status == "READY")
             )
-            session.add(run)
-            await session.flush()
-            try:
-                orchestrator = AgentOrchestrator(session)
-                if mode == "calendar":
-                    result = await orchestrator.run_calendar()
-                else:
-                    result = await orchestrator.run_discovery()
-                run.status = "SUCCEEDED"
-                run.created_count = result["created_count"]
-                run.details = str(result)
-            except Exception as exc:
-                run.status = "FAILED"
-                run.details = str(exc)
-            finally:
-                run.finished_at = datetime.now(ZoneInfo("UTC"))
-                await session.commit()
+            profile_ids = [int(row[0]) for row in result.all()]
+
+            for profile_id in profile_ids:
+                run = AgentRun(
+                    user_id=profile_id,
+                    mode=mode,
+                    trigger=f"scheduled:{mode}",
+                    status="RUNNING",
+                )
+                session.add(run)
+                await session.flush()
+                try:
+                    orchestrator = AgentOrchestrator(session, profile_id)
+                    if mode == "calendar":
+                        run_result = await orchestrator.run_calendar()
+                    else:
+                        run_result = await orchestrator.run_discovery()
+                    run.status = "SUCCEEDED"
+                    run.created_count = run_result["created_count"]
+                    run.details = str(run_result)
+                except Exception as exc:
+                    run.status = "FAILED"
+                    run.details = str(exc)
+                finally:
+                    run.finished_at = datetime.now(ZoneInfo("UTC"))
+                    await session.commit()

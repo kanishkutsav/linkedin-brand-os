@@ -214,9 +214,9 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
     if profile_url:
         user.linkedin_url = profile_url
 
-    profile = await session.get(UserProfile, 1)
+    profile = await session.get(UserProfile, int(user.id))
     if profile is None:
-        profile = UserProfile(id=1, display_name=display_name, role="owner")
+        profile = UserProfile(id=int(user.id), display_name=display_name, role=user.role or "user")
         session.add(profile)
     else:
         profile.display_name = display_name
@@ -302,9 +302,9 @@ async def sync_linkedin_profile(session: AsyncSession, user_id: int) -> dict:
     if profile_url:
         user.linkedin_url = str(profile_url)[:255]
 
-    profile = await session.get(UserProfile, 1)
+    profile = await session.get(UserProfile, int(user.id))
     if profile is None:
-        profile = UserProfile(id=1, display_name=str(display_name)[:150], role="owner")
+        profile = UserProfile(id=int(user.id), display_name=str(display_name)[:150], role=user.role or "user")
         session.add(profile)
     else:
         profile.display_name = str(display_name)[:150]

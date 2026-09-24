@@ -37,13 +37,13 @@ class BrandIntelligenceService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_memory(self, profile_id: int = 1) -> BrandMemory | None:
+    async def get_memory(self, profile_id: int) -> BrandMemory | None:
         result = await self.session.execute(
             select(BrandMemory).where(BrandMemory.profile_id == profile_id)
         )
         return result.scalar_one_or_none()
 
-    async def get_posts(self, profile_id: int = 1, limit: int = 20) -> list[HistoricalPost]:
+    async def get_posts(self, profile_id: int, limit: int = 20) -> list[HistoricalPost]:
         result = await self.session.execute(
             select(HistoricalPost)
             .where(HistoricalPost.profile_id == profile_id)
@@ -52,7 +52,7 @@ class BrandIntelligenceService:
         )
         return list(result.scalars().all())
 
-    async def import_posts(self, posts: list[dict], profile_id: int = 1) -> dict:
+    async def import_posts(self, posts: list[dict], profile_id: int) -> dict:
         created = 0
         skipped = 0
 
@@ -89,7 +89,7 @@ class BrandIntelligenceService:
         await self.session.commit()
         return {"created": created, "skipped": skipped, "total": created + skipped}
 
-    async def analyze(self, profile_id: int = 1) -> dict:
+    async def analyze(self, profile_id: int) -> dict:
         profile = await self.session.get(UserProfile, profile_id)
         if profile is None:
             raise ValueError("Complete your profile before building Brand DNA.")
@@ -179,7 +179,7 @@ Return:
         memory.initialized_at = datetime.now(timezone.utc)
 
         voice_data = analysis.get("voice") or {}
-        voice_result = await self.session.execute(select(VoiceMemory).limit(1))
+        voice_result = await self.session.execute(select(VoiceMemory).where(VoiceMemory.profile_id == profile_id).limit(1))
         voice = voice_result.scalar_one_or_none()
         if voice is None:
             voice = VoiceMemory(profile_id=profile_id)
@@ -220,7 +220,7 @@ Return:
             "updated_at": memory.updated_at.isoformat() if memory.updated_at else None,
         }
 
-    async def generation_context(self, profile_id: int = 1) -> dict:
+    async def generation_context(self, profile_id: int) -> dict:
         memory = await self.get_memory(profile_id)
         if memory is None or memory.status != "READY":
             raise ValueError("Brand Intelligence is not initialized. Complete the lightweight profile setup first.")

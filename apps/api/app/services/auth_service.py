@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import AuthSession, AuthUser
+from app.models.models import AuthSession, AuthUser, UserProfile
 
 
 @dataclass
@@ -124,6 +124,27 @@ class AuthService:
             display_name=user.display_name,
             linkedin_url=user.linkedin_url,
         )
+
+    @staticmethod
+    async def get_or_create_profile(session: AsyncSession, user: AppUser) -> UserProfile:
+        """Return the profile owned by the authenticated application user.
+
+        Profile IDs intentionally mirror auth_users IDs so every user has a stable,
+        server-side ownership boundary without relying on browser state.
+        """
+        profile_id = int(user.id)
+        profile = await session.get(UserProfile, profile_id)
+        if profile is None:
+            profile = UserProfile(
+                id=profile_id,
+                display_name=user.display_name or user.email.split("@", 1)[0],
+                role=user.role or "user",
+            )
+            session.add(profile)
+            await session.flush()
+        elif user.display_name and profile.display_name != user.display_name:
+            profile.display_name = user.display_name
+        return profile
 
     @staticmethod
     async def create_session(session: AsyncSession, user: AppUser) -> str:

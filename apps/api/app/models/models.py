@@ -31,7 +31,7 @@ class AuthSession(Base):
 
 class UserProfile(Base):
     __tablename__ = "user_profiles"
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(ForeignKey("auth_users.id"), primary_key=True)
     display_name: Mapped[str] = mapped_column(String(150), default="User")
     professional_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     industry: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -65,6 +65,7 @@ class VoiceMemory(Base):
 class ContentItem(Base):
     __tablename__ = "content_items"
     id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id"), index=True, nullable=False)
     title: Mapped[str] = mapped_column(String(200))
     topic: Mapped[str] = mapped_column(String(300))
     pillar: Mapped[str] = mapped_column(String(100))
@@ -119,6 +120,7 @@ class AuditLog(Base):
 class AgentRun(Base):
     __tablename__ = "agent_runs"
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("auth_users.id"), index=True, nullable=False)
     mode: Mapped[str] = mapped_column(String(50), index=True)
     trigger: Mapped[str] = mapped_column(String(150))
     status: Mapped[str] = mapped_column(String(30), default="RUNNING")
