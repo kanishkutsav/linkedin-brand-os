@@ -351,7 +351,7 @@ useEffect(() => {
   const requireBrand = (actionLabel: string) => {
     if (brand.ready) return true;
     go('Settings');
-    setError('Brand DNA is not set up yet. Before ' + actionLabel + ', connect LinkedIn and build Brand DNA. Previous posts are optional; you can add 3–10 for stronger voice calibration.');
+    setError('Brand DNA is not set up yet. Before ' + actionLabel + ', connect LinkedIn and build Brand DNA. Add 3–10 previous LinkedIn posts to calibrate your Brand DNA and writing voice.');
     return false;
   };
 
@@ -472,26 +472,20 @@ useEffect(() => {
     if (!token) return;
     const blocks = historicalPostEntries.map((body) => body.trim()).filter(Boolean);
 
-    // Historical posts are optional. If a user chooses to provide them, require
-    // the full 3–10 range so we never silently analyze an incomplete sample.
-    if (blocks.length > 0 && blocks.length < 3) {
-      setError('Previous posts are optional. Leave them empty, or add at least 3 and up to 10 posts.');
+    // Brand DNA requires a meaningful historical sample. Enforce the same
+    // 3–10 contract in the UI that the API enforces server-side.
+    if (blocks.length < 3) {
+      setError('Add at least 3 and up to 10 previous LinkedIn posts to build your Brand DNA.');
       return;
     }
 
     setIsBuildingBrand(true); setError(null); setNoticeTtl(4500); setNotice(null);
     try {
-      const endpoint = blocks.length ? '/api/brand/onboard' : '/api/brand/initialize';
-      const body = blocks.length
-        ? {
-            display_name: profile.display_name,
-            posts: blocks.map((body) => ({ body })),
-          }
-        : {
-            display_name: profile.display_name,
-            professional_title: brandTitle || null,
-            industry: brandIndustry || null,
-          };
+      const endpoint = '/api/brand/onboard';
+      const body = {
+        display_name: profile.display_name,
+        posts: blocks.map((body) => ({ body })),
+      };
 
       const res = await fetch(API_BASE + endpoint, {
         method: 'POST',
@@ -506,7 +500,7 @@ useEffect(() => {
       setNotice(
         blocks.length
           ? 'Brand Intelligence updated using your LinkedIn profile plus ' + blocks.length + ' imported posts.'
-          : 'Brand Intelligence is ready using your LinkedIn profile. You can add previous posts later to strengthen voice calibration.'
+          : 'Brand Intelligence updated using your LinkedIn profile and imported posts.'
       );
       await fetchData();
       setBrandEditing(false);
@@ -1124,8 +1118,8 @@ function SettingsView(props: any) {
           <section className="panel settings-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <div>
-                <h2 className="settings-title">Optional voice calibration</h2>
-                <p className="settings-copy">Add 3–10 previous LinkedIn posts if you want stronger evidence of your writing style. You can also skip this completely.</p>
+                <h2 className="settings-title">Voice calibration</h2>
+                <p className="settings-copy">Add 3–10 previous LinkedIn posts so Brand OS has enough evidence to build your writing style and Brand DNA.</p>
               </div>
               <span className={"status-pill " + (count >= 3 ? 'approved' : 'edited')}>{count}/10 posts</span>
             </div>
@@ -1144,14 +1138,14 @@ function SettingsView(props: any) {
 
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginTop: 12, flexWrap: 'wrap' }}>
               <button className="button" onClick={addPost} disabled={posts.length >= 10}><Plus size={14}/>{posts.length >= 10 ? 'Maximum reached' : 'Add another post'}</button>
-              <button className="button primary" onClick={onBuild} disabled={building || count === 1 || count === 2}>
+              <button className="button primary" onClick={onBuild} disabled={building || count < 3}>
                 <RefreshCw size={14}/>
                 {building ? 'Building…' : brand.ready ? 'Refresh Brand Intelligence' : 'Build Brand DNA'}
               </button>
             </div>
-            {(count === 1 || count === 2) && (
+            {count < 3 && (
               <div style={{ marginTop: 10, color: '#b42318', fontSize: 10 }}>
-                Add one more post to reach 3, or remove the partial sample and build without historical posts.
+                Add {3 - count} more {3 - count === 1 ? 'post' : 'posts'} to build Brand DNA. You can provide up to 10.
               </div>
             )}
           </section>
@@ -1182,7 +1176,7 @@ function SettingsView(props: any) {
 
           <section className="panel settings-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14 }}>
-              <div><h2 className="settings-title">Voice calibration</h2><p className="settings-copy">Previous posts are optional. Brand OS can keep learning from approved and published content.</p></div>
+              <div><h2 className="settings-title">Voice calibration</h2><p className="settings-copy">These imported posts are the source evidence used to calibrate your writing style. Brand OS can continue learning from approved and published content afterward.</p></div>
               <span className="status-pill approved">● {count} SAVED</span>
             </div>
             {count ? (
@@ -1197,7 +1191,7 @@ function SettingsView(props: any) {
             ) : (
               <div className="empty-state" style={{ minHeight: 120 }}>
                 <strong>No historical posts imported</strong>
-                <span>That is okay. Brand OS will learn from content you approve and publish.</span>
+                <span>Import 3–10 previous LinkedIn posts to calibrate your writing style. Approved and published content can strengthen the model afterward.</span>
               </div>
             )}
           </section>
