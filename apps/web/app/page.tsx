@@ -74,7 +74,7 @@ export default function Home() {
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeTtl, setNoticeTtl] = useState(4500);
   const [isBusy, setIsBusy] = useState(false);
-  const [busyAction, setBusyAction] = useState<'approve' | 'edit' | 'reject' | 'regenerate' | null>(null);
+  const [busyAction, setBusyAction] = useState<'approve' | 'edit' | 'reject' | 'regenerate' | 'publish' | null>(null);
   const [operationProgress, setOperationProgress] = useState(0);
   const [operationStage, setOperationStage] = useState('');
   const [tab, setTab] = useState<Tab>('Dashboard');
