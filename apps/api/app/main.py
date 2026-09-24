@@ -223,7 +223,17 @@ async def linkedin_oauth_start(
     if browser_nonce and len(browser_nonce) > 200:
         raise HTTPException(status_code=400, detail="Invalid OAuth browser nonce.")
     url, state = await build_authorization_url(session, browser_nonce=browser_nonce)
-    return RedirectResponse(url=url, status_code=302)
+    response = RedirectResponse(url=url, status_code=302)
+    response.set_cookie(
+        key="brand_os_oauth_state",
+        value=state,
+        max_age=600,
+        httponly=True,
+        secure=bool(settings.is_production),
+        samesite="lax",
+        path="/api/auth/linkedin",
+    )
+    return response
 
 
 @app.get("/api/auth/linkedin/callback")
@@ -231,18 +241,30 @@ async def linkedin_oauth_callback(
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ):
     if error:
-        raise HTTPException(status_code=400, detail=f"LinkedIn authorization was not completed: {error}")
+        response = RedirectResponse(
+            url=f"{(settings.frontend_url or 'http://localhost:3000').rstrip('/')}/?linkedin_error=authorization_denied",
+            status_code=302,
+        )
+        response.delete_cookie("brand_os_oauth_state", path="/api/auth/linkedin")
+        return response
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing LinkedIn OAuth code or state.")
+
+    expected_state = request.cookies.get("brand_os_oauth_state")
+    if not expected_state or not secrets.compare_digest(expected_state, state):
+        raise HTTPException(status_code=400, detail="Invalid LinkedIn OAuth state.")
 
     browser_nonce = state.split(".", 1)[0] if "." in state else None
     exchange = await handle_callback(session, code, state)
     frontend = (settings.frontend_url or "http://localhost:3000").rstrip("/")
     nonce_suffix = f"&oauth_nonce={browser_nonce}" if browser_nonce else ""
-    return RedirectResponse(url=f"{frontend}/?linkedin_code={exchange}{nonce_suffix}", status_code=302)
+    response = RedirectResponse(url=f"{frontend}/?linkedin_code={exchange}{nonce_suffix}", status_code=302)
+    response.delete_cookie("brand_os_oauth_state", path="/api/auth/linkedin")
+    return response
 
 
 @app.post("/api/auth/linkedin/exchange")
