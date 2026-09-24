@@ -434,6 +434,7 @@ async def brand_source_posts(
     session: AsyncSession = Depends(get_session),
     current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
+    profile = await AuthService.get_or_create_profile(session, current_user)
     result = await session.execute(
         select(HistoricalPost)
         .where(HistoricalPost.profile_id == int(profile.id), HistoricalPost.source == "user_import")
@@ -472,7 +473,7 @@ async def brand_onboard(
     # user-imported set on refresh; keep Brand OS published posts as durable evidence.
     await session.execute(
         delete(HistoricalPost).where(
-            HistoricalPost.profile_id == int(current_user.id),
+            HistoricalPost.profile_id == int(profile.id),
             HistoricalPost.source == "user_import",
         )
     )
