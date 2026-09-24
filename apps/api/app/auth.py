@@ -4,21 +4,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.database import get_session
-from app.services.auth_service import AuthService
+from app.services.auth_service import AppUser, AuthService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-async def _resolve_role(request: Request, credentials: HTTPAuthorizationCredentials | None, session: AsyncSession) -> str | None:
+async def _resolve_user(request: Request, credentials: HTTPAuthorizationCredentials | None, session: AsyncSession) -> AppUser | None:
     if credentials and credentials.credentials:
         token = credentials.credentials.strip()
         user = await AuthService.get_user_from_token(session, token)
         if user:
-            return user.role.lower()
+            return user
 
     header_role = request.headers.get("x-user-role")
     if header_role:
-        return header_role.strip().lower()
+        normalized = header_role.strip().lower()
+        if normalized in {"owner", "admin", "reviewer", "user"}:
+            return AppUser(id=normalized, email=f"{normalized}@local.test", role=normalized)
 
     auth_header = request.headers.get("authorization")
     if auth_header and auth_header.lower().startswith("bearer "):
@@ -37,10 +39,12 @@ def require_roles(*allowed_roles: str):
         request: Request,
         credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
         session: AsyncSession = Depends(get_session),
-    ) -> str:
+    ) -> AppUser:
         role = await _resolve_role(request, credentials, session)
 
-        if role is None:
+        user = await _resolve_user(request, credentials, session)
+
+        if user is None:
             if settings.is_production:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -49,6 +53,7 @@ def require_roles(*allowed_roles: str):
                 )
             return "owner"
 
+        role = user.role.lower()
         if role not in {"owner", "admin", "reviewer", "user"}:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -61,6 +66,6 @@ def require_roles(*allowed_roles: str):
                 detail="Insufficient role permissions",
             )
 
-        return role
+        return user
 
     return dependency
