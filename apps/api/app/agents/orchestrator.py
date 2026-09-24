@@ -192,7 +192,6 @@ class AgentOrchestrator:
         self.session.add(version)
         await self.session.flush()
 
-        approval_queued = False
         metadata = {
             "trigger": trigger,
             "objective": objective,
@@ -202,12 +201,8 @@ class AgentOrchestrator:
             "generator": "openrouter_groq_router" if generated else "deterministic_fallback",
         }
 
-        approval_queued = False
-        approval_queued = False
         if guard.passed:
             approval = await ApprovalService(self.session).request(version)
-            approval_queued = True
-            approval_queued = True
             self.session.add(
                 AuditLog(
                     event_type="AGENT_CANDIDATE_CREATED",
