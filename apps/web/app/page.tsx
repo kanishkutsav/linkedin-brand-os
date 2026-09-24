@@ -644,6 +644,7 @@ function MiniStat({ icon: Icon, label, value }: any) {
   return <div className="score-item"><div className="score-name" style={{ display: 'flex', gap: 5, alignItems: 'center' }}><Icon size={11}/>{label}</div><div className="score-value" style={{ fontSize: 11, lineHeight: 1.35 }}>{value}</div></div>;
 }
 
+// Production copy sync marker: ensure latest UI copy is included in deployment.
 function ApprovalWorkspace(props: any) {
   const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction } = props;
   return (
