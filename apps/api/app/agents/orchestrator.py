@@ -399,7 +399,6 @@ class AgentOrchestrator:
         guard = run_content_guards(body)
         duplicate_blocked = guard.passed and await self._is_duplicate_body(body)
         if duplicate_blocked:
-            await self.session.rollback()
             return {
                 "mode": "manual_content",
                 "trigger": trigger,
