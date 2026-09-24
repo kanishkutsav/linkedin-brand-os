@@ -74,7 +74,7 @@ export default function Home() {
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeTtl, setNoticeTtl] = useState(4500);
   const [isBusy, setIsBusy] = useState(false);
-  const [busyAction, setBusyAction] = useState<'approve' | 'edit' | 'reject' | 'regenerate' | 'publish' | null>(null);
+  const [busyAction, setBusyAction] = useState<'approve' | 'edit' | 'reject' | 'regenerate' | null>(null);
   const [operationProgress, setOperationProgress] = useState(0);
   const [operationStage, setOperationStage] = useState('');
   const [tab, setTab] = useState<Tab>('Dashboard');
@@ -271,7 +271,7 @@ export default function Home() {
     return false;
   };
 
-  const runApprovalAction = async (action: 'approve' | 'edit' | 'reject' | 'regenerate' | 'publish', payload?: Record<string, string>) => {
+  const runApprovalAction = async (action: 'approve' | 'edit' | 'reject' | 'regenerate', payload?: Record<string, string>) => {
     if (!selectedApproval || !token) return;
     if (action === 'regenerate' && !requireBrand('regenerating content')) return;
     if (action === 'regenerate' && !reviewNote.trim()) {
@@ -284,16 +284,15 @@ export default function Home() {
       setOperationStage('Authorizing publication…');
     }
     try {
-      const endpoint = action === 'publish' ? 'execute' : action;
-      const res = await fetch(`${API_BASE}/api/approvals/${selectedApproval.id}/${endpoint}`, {
+      const res = await fetch(`${API_BASE}/api/approvals/${selectedApproval.id}/${action}`, {
         method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, `Action failed: ${action}`));
-      if ((action === 'approve' || action === 'publish') && (data.published === false || data.success === false)) {
-        throw new Error(data.message || 'Approval is saved, but LinkedIn publication failed. You can retry publication.');
+      if (action === 'approve' && data.published === false) {
+        throw new Error(data.message || 'Approval was recorded, but LinkedIn publication failed.');
       }
-      setOperationProgress(action === 'approve' || action === 'publish' ? 82 : 88);
+      setOperationProgress(action === 'approve' ? 82 : 88);
       setOperationStage(action === 'regenerate' ? 'Refreshing the approval queue…' : 'Refreshing the workspace…');
       await fetchData();
       setOperationProgress(100);
@@ -303,12 +302,40 @@ export default function Home() {
       setNotice(
         action === 'regenerate'
           ? 'Regenerated successfully.'
-          : action === 'approve' || action === 'publish'
+          : action === 'approve'
             ? 'Approved and published to your connected LinkedIn account.'
             : 'Action completed successfully.'
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Approval action failed');
+    } finally {
+      setIsBusy(false);
+      setBusyAction(null);
+    }
+  };
+
+  const publishApprovedPost = async () => {
+    if (!selectedApproval || !token) return;
+    setIsBusy(true); setBusyAction('approve'); setError(null); setNotice(null);
+    setOperationProgress(20);
+    setOperationStage('Publishing to LinkedIn…');
+    try {
+      const res = await fetch(API_BASE + '/api/approvals/' + selectedApproval.id + '/execute', {
+        method: 'POST', headers: headers(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        throw new Error(getApiError(data, data.message || 'LinkedIn publication failed. Please reconnect LinkedIn and retry.'));
+      }
+      setOperationProgress(82);
+      setOperationStage('Refreshing the workspace…');
+      await fetchData();
+      setOperationProgress(100);
+      setOperationStage('Published');
+      setNoticeTtl(4500);
+      setNotice('Published successfully to your connected LinkedIn account.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'LinkedIn publication failed');
     } finally {
       setIsBusy(false);
       setBusyAction(null);
@@ -646,7 +673,7 @@ function ApprovalWorkspace(props: any) {
                   </div>
                 </>
               ) : (
-                <div className={`notice ${selected.status === 'EXECUTED' ? 'success' : selected.status === 'APPROVED' ? 'error' : 'success'}`} style={{ marginTop: 10 }}>
+                <div className={'notice ' + (selected.status === 'EXECUTED' ? 'success' : selected.status === 'APPROVED' ? 'error' : 'success')} style={{ marginTop: 10 }}>
                   {selected.status === 'EXECUTED' ? <CircleCheck size={15}/> : <X size={15}/>}
                   <span>
                     {selected.status === 'EXECUTED'
@@ -659,9 +686,9 @@ function ApprovalWorkspace(props: any) {
               )}
               {selected.status === 'APPROVED' && (
                 <div className="review-actions review-actions-publish">
-                  <button className="button success progress-button publish-retry-button" disabled={isBusy} onClick={() => onAction('publish')}>
-                    <span className="button-content"><LinkedInMark size={14}/>{busyAction === 'publish' ? operationStage || 'Publishing…' : 'Publish to LinkedIn'}</span>
-                    {busyAction === 'publish' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
+                  <button className="button success progress-button publish-retry-button" disabled={isBusy} onClick={publishApprovedPost}>
+                    <span className="button-content"><LinkedInMark size={14}/>{busyAction === 'approve' && operationStage ? operationStage : 'Publish to LinkedIn'}</span>
+                    {busyAction === 'approve' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
                   </button>
                 </div>
               )}}
