@@ -19,7 +19,7 @@ function getApiError(data: any, fallback: string) {
 }
 
 type ApprovalStatus = 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'REJECTED' | 'EXECUTED';
-type ApprovalItem = { id: number; status: ApprovalStatus; action_type: string; reason: string | null; content: string };
+type ApprovalItem = { id: number; status: ApprovalStatus; action_type: string; reason: string | null; content: string; title?: string; topic?: string; approved_at?: string | null; created_at?: string };
 type Profile = { display_name: string; role?: string };
 type LinkedInStatus = { connected: boolean; name?: string | null; email?: string | null; expires_at?: string | null };
 type BrandStatus = {
@@ -34,12 +34,13 @@ type Opportunity = {
   evidence?: { summary?: string; why_now?: string; source_hints?: string[]; grounding_queries?: string[] };
   source_ids?: number[]; sources?: { title?: string; url?: string; domain?: string }[];
 };
-type Tab = 'Dashboard' | 'Research' | 'Content' | 'Analytics' | 'Settings';
+type Tab = 'Dashboard' | 'Research' | 'Content' | 'LinkedIn Posts' | 'Analytics' | 'Settings';
 
 const nav = [
   ['Dashboard', LayoutDashboard, 'Command center'],
   ['Research', Search, 'Find opportunities'],
   ['Content', FileText, 'Draft & refine'],
+  ['LinkedIn Posts', ExternalLink, 'Approved & published'],
   ['Analytics', BarChart3, 'Performance'],
   ['Settings', Settings, 'Brand DNA'],
 ] as const;
@@ -65,7 +66,7 @@ export default function Home() {
   const [isBuildingBrand, setIsBuildingBrand] = useState(false);
   const [queue, setQueue] = useState<ApprovalItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'PENDING' | 'EDITED' | 'REGENERATED'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'EXECUTED' | 'REJECTED'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [editedBody, setEditedBody] = useState('');
   const [reviewNote, setReviewNote] = useState('');
@@ -199,6 +200,7 @@ export default function Home() {
 
       const nextQueue: ApprovalItem[] = (approvalsJson.pending_approvals || []).map((item: any) => ({
         id: item.id, status: item.status, action_type: item.action_type, reason: item.reason, content: item.content || '',
+        title: item.title || '', topic: item.topic || '', approved_at: item.approved_at || null, created_at: item.created_at,
       }));
       setQueue(nextQueue);
       if (nextQueue.length && !nextQueue.some((i) => i.id === selectedId)) setSelectedId(nextQueue[0].id);
@@ -522,6 +524,7 @@ export default function Home() {
 
           {tab === 'Research' && <ResearchView opportunities={opportunities} isResearching={isResearching} onResearch={discoverResearch} />}
           {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} />}
+          {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'APPROVED' || item.status === 'EXECUTED')} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
           {tab === 'Settings' && (
             <SettingsView
@@ -583,7 +586,7 @@ function ApprovalWorkspace(props: any) {
         <div className="queue-tools">
           <div className="searchbox"><Search size={13}/><input className="input" placeholder="Search drafts…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
           <div className="filter-row">
-            {(['all','PENDING','EDITED','REGENERATED'] as const).map((x) => <button key={x} className={`filter-chip ${statusFilter === x ? 'active' : ''}`} onClick={() => setStatusFilter(x)}>{x === 'all' ? 'All' : x[0] + x.slice(1).toLowerCase()}</button>)}
+            {(['all','PENDING','EDITED','REGENERATED','APPROVED','EXECUTED','REJECTED'] as const).map((x) => <button key={x} className={`filter-chip ${statusFilter === x ? 'active' : ''}`} onClick={() => setStatusFilter(x)}>{x === 'all' ? 'All' : x[0] + x.slice(1).toLowerCase()}</button>)}
           </div>
         </div>
         <div className="queue-items">
@@ -605,23 +608,32 @@ function ApprovalWorkspace(props: any) {
               <textarea className="textarea" value={editedBody} onChange={(e) => setEditedBody(e.target.value)} />
               <div className="review-label" style={{ marginTop: 10, marginBottom: 7 }}>Feedback for regeneration <span className="form-help">(optional)</span></div>
               <textarea className="textarea" style={{ minHeight: 82, marginTop: 0 }} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Tell Brand OS what to change, add, remove, or make more personal. Example: “Make the opening less polished and add the point about stakeholder alignment.”" />
-              <div className="review-actions">
-                <button className="button success" disabled={isBusy} onClick={() => onAction('approve')}><Check size={14}/> Approve</button>
-                <button className="button" disabled={isBusy} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>
-                <button
-                  className="button progress-button"
-                  disabled={isBusy || !reviewNote.trim()}
-                  title={!reviewNote.trim() ? 'Add feedback before regenerating.' : 'Regenerate using your feedback'}
-                  onClick={() => onAction('regenerate', { reason: reviewNote.trim() })}
-                >
-                  <span className="button-content"><RotateCcw size={14}/> {busyAction === 'regenerate' ? operationStage || 'Regenerating…' : 'Regenerate'}</span>
-                  {busyAction === 'regenerate' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
-                </button>
-                <button className="button danger" disabled={isBusy} onClick={() => onAction('reject', { reason: reviewNote || 'Rejected by reviewer.' })}><X size={14}/> Reject</button>
-              </div>
-              <div className="form-help" style={{ marginTop: 8 }}>
-                {reviewNote.trim() ? 'Regenerate will use this feedback and keep the new version behind the approval gate.' : 'Add feedback above to enable Regenerate.'}
-              </div>
+              {['PENDING','EDITED','REGENERATED'].includes(selected.status) ? (
+                <>
+                  <div className="review-actions">
+                    <button className="button success" disabled={isBusy} onClick={() => onAction('approve')}><Check size={14}/> Approve</button>
+                    <button className="button" disabled={isBusy} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>
+                    <button
+                      className="button progress-button"
+                      disabled={isBusy || !reviewNote.trim()}
+                      title={!reviewNote.trim() ? 'Add feedback before regenerating.' : 'Regenerate using your feedback'}
+                      onClick={() => onAction('regenerate', { reason: reviewNote.trim() })}
+                    >
+                      <span className="button-content"><RotateCcw size={14}/> {busyAction === 'regenerate' ? operationStage || 'Regenerating…' : 'Regenerate'}</span>
+                      {busyAction === 'regenerate' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
+                    </button>
+                    <button className="button danger" disabled={isBusy} onClick={() => onAction('reject', { reason: reviewNote || 'Rejected by reviewer.' })}><X size={14}/> Reject</button>
+                  </div>
+                  <div className="form-help" style={{ marginTop: 8 }}>
+                    {reviewNote.trim() ? 'Regenerate will use this feedback and keep the new version behind the approval gate.' : 'Add feedback above to enable Regenerate.'}
+                  </div>
+                </>
+              ) : (
+                <div className="notice success" style={{ marginTop: 10 }}>
+                  <CircleCheck size={15}/>
+                  <span>{selected.status === 'EXECUTED' ? 'Published through the approved LinkedIn workflow.' : selected.status === 'APPROVED' ? 'Approved and ready for LinkedIn execution.' : 'This post is no longer awaiting a decision.'}</span>
+                </div>
+              )}
             </div>
             <div style={{ marginTop: 17 }}>
               <div className="review-label" style={{ marginBottom: 9 }}>Safety rail</div>
@@ -639,6 +651,39 @@ function ApprovalWorkspace(props: any) {
 function StatusPill({ status }: { status: string }) {
   const cls = status.toLowerCase();
   return <span className={`status-pill ${cls}`}><span>●</span>{status}</span>;
+}
+
+function LinkedInPostsView({ posts }: { posts: ApprovalItem[] }) {
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <div className="page-kicker"><ExternalLink size={13}/> LinkedIn content</div>
+          <h1 className="page-title">Your approved LinkedIn posts.</h1>
+          <p className="page-description">Approved content stays visible here even after it leaves the review queue. Published posts are marked separately.</p>
+        </div>
+      </div>
+      <section className="panel">
+        <div className="panel-head">
+          <div><div className="panel-title">Approved posts</div><div className="panel-subtitle">{posts.length} post{posts.length === 1 ? '' : 's'} in the workflow</div></div>
+        </div>
+        <div className="post-stack">
+          {posts.length ? posts.map((post) => (
+            <article className="post-entry" key={post.id}>
+              <div className="post-entry-head">
+                <span className="post-index">POST #{post.id}</span>
+                <StatusPill status={post.status}/>
+              </div>
+              {post.title ? <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 7 }}>{post.title}</div> : null}
+              {post.topic ? <div className="form-help" style={{ marginBottom: 9 }}>{post.topic}</div> : null}
+              <div style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.7, color: '#344054' }}>{post.content}</div>
+              {post.approved_at ? <div className="form-help" style={{ marginTop: 10 }}>Approved {new Date(post.approved_at).toLocaleString()}</div> : null}
+            </article>
+          )) : <EmptyState icon={ExternalLink} title="No approved posts yet" text="Approve a post from the editorial queue and it will appear here automatically." />}
+        </div>
+      </section>
+    </>
+  );
 }
 
 function ResearchView({ opportunities, isResearching, onResearch }: { opportunities: Opportunity[]; isResearching: boolean; onResearch: () => void }) {
