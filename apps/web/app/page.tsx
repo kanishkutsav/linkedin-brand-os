@@ -650,3 +650,132 @@ function AnalyticsView({ analytics }: { analytics: any }) {
   );
 }
 
+
+
+function SettingsView(props: any) {
+  const {
+    brand, profile, brandTitle, setBrandTitle, brandIndustry, setBrandIndustry,
+    brandAudience, setBrandAudience, brandPositioning, setBrandPositioning,
+    brandTone, setBrandTone, brandGoals, setBrandGoals, posts, updatePost,
+    addPost, removePost, building, onBuild, linkedin, onConnect, editing,
+    setEditing, onCancel
+  } = props;
+  const count = posts.filter((x: string) => x.trim()).length;
+
+  const profileFields = [
+    ['Professional title', brandTitle], ['Industry', brandIndustry],
+    ['Audience', brandAudience], ['Goals', brandGoals],
+    ['Desired tone', brandTone], ['Positioning', brandPositioning],
+  ];
+
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <div className="page-kicker"><BrainCircuit size={13}/> Brand intelligence</div>
+          <h1 className="page-title">Your brand memory.</h1>
+          <p className="page-description">Your saved profile and source posts stay frozen until you explicitly choose Edit Brand DNA.</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span className={`status-pill ${brand.ready ? 'approved' : 'edited'}`}>{brand.ready ? '● ACTIVE' : '● SETUP NEEDED'}</span>
+          {brand.ready && !editing && <button className="button" onClick={() => setEditing(true)}><Pencil size={14}/> Edit Brand DNA</button>}
+        </div>
+      </div>
+
+      {!brand.ready || editing ? (
+        <div className="settings-stack">
+          <section className="panel settings-card">
+            <div className="panel-head" style={{ padding: 0, border: 0 }}>
+              <div>
+                <h2 className="settings-title">{brand.ready ? 'Edit Brand DNA' : 'Build your Brand DNA'}</h2>
+                <p className="settings-copy">{brand.ready ? 'Change the inputs, then refresh Brand Intelligence. Until you do, the saved memory remains unchanged.' : 'Add your factual profile and 3–5 previous posts. Brand OS does not invent identity or experience.'}</p>
+              </div>
+              {brand.ready && <button className="button" onClick={onCancel}><X size={14}/> Cancel</button>}
+            </div>
+            <div className="profile-grid" style={{ marginTop: 16 }}>
+              <Field label="Professional title" value={brandTitle} setValue={setBrandTitle} placeholder="Your role / title" />
+              <Field label="Industry" value={brandIndustry} setValue={setBrandIndustry} placeholder="Your industry" />
+              <Field label="Who you want to reach" value={brandAudience} setValue={setBrandAudience} placeholder="Audience" />
+              <Field label="Goals" value={brandGoals} setValue={setBrandGoals} placeholder="Comma separated goals" />
+              <Field label="Desired tone" value={brandTone} setValue={setBrandTone} placeholder="Optional tone guidance" />
+              <Field label="How you want to be known" value={brandPositioning} setValue={setBrandPositioning} placeholder="Positioning statement" />
+            </div>
+          </section>
+
+          <section className="panel settings-card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div><h2 className="settings-title">Source posts</h2><p className="settings-copy">Edit the source material used for voice calibration.</p></div>
+              <span className={`status-pill ${count >= 3 ? 'approved' : 'edited'}`}>{count}/5 posts</span>
+            </div>
+            <div className="post-stack">
+              {posts.map((post: string, index: number) => (
+                <div className="post-entry" key={index}>
+                  <div className="post-entry-head"><span className="post-index">SOURCE POST {String(index + 1).padStart(2,'0')}</span>{posts.length > 1 && <button className="link-button" onClick={() => removePost(index)}>Remove</button>}</div>
+                  <textarea className="textarea" style={{ minHeight: 125 }} value={post} onChange={(e) => updatePost(index, e.target.value)} placeholder={`Paste the complete text of LinkedIn post ${index + 1}…`} />
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginTop: 12, flexWrap: 'wrap' }}>
+              <button className="button" onClick={addPost} disabled={posts.length >= 5}><Plus size={14}/>{posts.length >= 5 ? 'Maximum reached' : 'Add another post'}</button>
+              <button className="button primary" onClick={onBuild} disabled={building || count < 3}><RefreshCw size={14}/>{building ? 'Refreshing…' : brand.ready ? 'Refresh Brand Intelligence' : 'Build Brand Intelligence'}</button>
+            </div>
+          </section>
+        </div>
+      ) : (
+        <div className="settings-stack">
+          <section className="panel settings-card">
+            <div className="panel-head" style={{ padding: 0, border: 0 }}>
+              <div><h2 className="settings-title">Saved Brand DNA</h2><p className="settings-copy">Read-only view of exactly what you last saved.</p></div>
+              <span className="tag"><ShieldCheck size={10}/> Frozen</span>
+            </div>
+            <div className="profile-grid" style={{ marginTop: 16 }}>
+              {profileFields.map(([label, value]) => <div className="form-group" key={label as string}><span className="form-label">{label}</span><div className="readonly-field">{value || 'Not provided'}</div></div>)}
+            </div>
+          </section>
+          <section className="panel settings-card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14 }}>
+              <div><h2 className="settings-title">Source posts</h2><p className="settings-copy">The exact previous posts used to calibrate your voice are shown here.</p></div>
+              <span className="status-pill approved">● {count} SAVED</span>
+            </div>
+            <div className="post-stack" style={{ marginTop: 14 }}>
+              {posts.filter((x: string) => x.trim()).map((post: string, index: number) => (
+                <div className="post-entry" key={index}>
+                  <div className="post-entry-head"><span className="post-index">SOURCE POST {String(index + 1).padStart(2,'0')}</span></div>
+                  <textarea className="textarea readonly-textarea" readOnly value={post} />
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className="panel settings-card">
+            <h2 className="settings-title">Brand Intelligence status</h2>
+            <p className="settings-copy">{brand.summary || 'Brand Intelligence is active and ready to shape content.'}</p>
+            <div className="learning-flow">
+              <div className="flow-step"><BrainCircuit size={15} color="#6d5dfc"/><b>Identity</b><span>{brand.profile?.professional_title || 'Profile baseline'}</span></div>
+              <div className="flow-step"><Target size={15} color="#6d5dfc"/><b>Audience</b><span>{brand.profile?.audience || 'Audience signal'}</span></div>
+              <div className="flow-step"><Sparkles size={15} color="#6d5dfc"/><b>Voice</b><span>{brand.profile?.tone || 'Learned from posts'}</span></div>
+              <div className="flow-step"><Activity size={15} color="#6d5dfc"/><b>Memory</b><span>{brand.current_post_count ?? brand.source_post_count} signals · continuous</span></div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      <section className="panel settings-card" style={{ marginTop: 16 }}>
+        <h2 className="settings-title">LinkedIn connection</h2>
+        <p className="settings-copy">Signed in as <b>{profile.display_name}</b>. {linkedin.connected ? 'The official connection is active.' : 'Connect LinkedIn to enable supported API actions.'}</p>
+        <button className="button" onClick={onConnect}><Link2 size={14}/>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
+      </section>
+    </>
+  );
+}
+
+function Field({ label, value, setValue, placeholder }: any) {
+  return <label className="form-group" style={{ marginBottom: 0 }}><span className="form-label">{label}</span><input className="input" value={value} onChange={(e) => setValue(e.target.value)} placeholder={placeholder}/></label>;
+}
+
+function EmptyState({ icon: Icon, title, text, action, onAction }: any) {
+  return <div className="empty-state"><div className="empty-icon"><Icon size={19}/></div><strong>{title}</strong><span>{text}</span>{action && <div style={{ marginTop: 14 }}><button className="button primary" onClick={onAction}>{action}<ChevronRight size={13}/></button></div>}</div>;
+}
+
+function LinkedInMark({ size = 18, color }: { size?: number; color?: string }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill={color || 'currentColor'} aria-hidden="true"><path d="M6.5 8.2H3.2V20h3.3V8.2ZM4.85 3A1.95 1.95 0 1 0 4.85 6.9 1.95 1.95 0 0 0 4.85 6.9ZM20.8 13.25c0-3.52-1.88-5.16-4.4-5.16-2.02 0-2.92 1.11-3.43 1.89V8.2H9.67V20h3.3v-5.84c0-1.54.29-3.03 2.2-3.03 1.88 0 1.91 1.76 1.91 3.13V20h3.3l.02-6.75Z"/></svg>;
+}
