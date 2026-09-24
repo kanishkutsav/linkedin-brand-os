@@ -68,6 +68,10 @@ async def build_authorization_url(session: AsyncSession) -> str:
     )
     await session.commit()
 
+    scopes = ["openid", "profile", "email", "w_member_social"]
+    if settings.linkedin_analytics_oauth_enabled:
+        scopes.extend(["r_member_postAnalytics", "r_member_profileAnalytics"])
+
     params = {
         "response_type": "code",
         "client_id": settings.linkedin_client_id,
