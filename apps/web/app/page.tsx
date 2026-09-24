@@ -18,7 +18,7 @@ function getApiError(data: any, fallback: string) {
   return fallback;
 }
 
-type ApprovalStatus = 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'REJECTED' | 'EXECUTED';
+type ApprovalStatus = 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'FAILED';
 type ApprovalItem = { id: number; status: ApprovalStatus; action_type: string; reason: string | null; content: string };
 type Profile = { display_name: string; role?: string };
 type LinkedInStatus = { connected: boolean; name?: string | null; email?: string | null; expires_at?: string | null };
@@ -65,7 +65,7 @@ export default function Home() {
   const [isBuildingBrand, setIsBuildingBrand] = useState(false);
   const [queue, setQueue] = useState<ApprovalItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'PENDING' | 'EDITED' | 'REGENERATED'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'EXECUTED'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [editedBody, setEditedBody] = useState('');
   const [reviewNote, setReviewNote] = useState('');
@@ -73,7 +73,7 @@ export default function Home() {
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeTtl, setNoticeTtl] = useState(4500);
   const [isBusy, setIsBusy] = useState(false);
-  const [busyAction, setBusyAction] = useState<'approve' | 'edit' | 'reject' | 'regenerate' | null>(null);
+  const [busyAction, setBusyAction] = useState<'approve' | 'edit' | 'reject' | 'regenerate' | 'execute' | null>(null);
   const [operationProgress, setOperationProgress] = useState(0);
   const [operationStage, setOperationStage] = useState('');
   const [tab, setTab] = useState<Tab>('Dashboard');
@@ -128,10 +128,22 @@ export default function Home() {
       return;
     }
     setOperationProgress(12);
-    setOperationStage(busyAction === 'regenerate' ? 'Regenerating with your feedback…' : 'Processing your request…');
+    setOperationStage(
+      busyAction === 'regenerate'
+        ? 'Regenerating with your feedback…'
+        : busyAction === 'execute'
+          ? 'Publishing to LinkedIn…'
+          : 'Processing your request…'
+    );
     const timer = window.setTimeout(() => {
       setOperationProgress(62);
-      setOperationStage(busyAction === 'regenerate' ? 'Running guardrails and creating the new version…' : 'Applying the change…');
+      setOperationStage(
+        busyAction === 'regenerate'
+          ? 'Running guardrails and creating the new version…'
+          : busyAction === 'execute'
+            ? 'Sending the approved post to LinkedIn…'
+            : 'Applying the change…'
+      );
     }, 900);
     return () => window.clearTimeout(timer);
   }, [busyAction]);
@@ -269,7 +281,7 @@ export default function Home() {
     return false;
   };
 
-  const runApprovalAction = async (action: 'approve' | 'edit' | 'reject' | 'regenerate', payload?: Record<string, string>) => {
+  const runApprovalAction = async (action: 'approve' | 'edit' | 'reject' | 'regenerate' | 'execute', payload?: Record<string, string>) => {
     if (!selectedApproval || !token) return;
     if (action === 'regenerate' && !requireBrand('regenerating content')) return;
     if (action === 'regenerate' && !reviewNote.trim()) {
@@ -290,7 +302,13 @@ export default function Home() {
       setOperationStage('Done');
       setReviewNote('');
       setNoticeTtl(action === 'regenerate' ? 1800 : 4500);
-      setNotice(action === 'regenerate' ? 'Regenerated successfully.' : 'Action completed successfully.');
+      setNotice(
+        action === 'regenerate'
+          ? 'Regenerated successfully.'
+          : action === 'execute'
+            ? 'Published successfully to LinkedIn.'
+            : 'Action completed successfully.'
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Approval action failed');
     } finally {
@@ -514,7 +532,7 @@ export default function Home() {
                   editedBody={editedBody} setEditedBody={setEditedBody}
                   reviewNote={reviewNote} setReviewNote={setReviewNote}
                   isBusy={isBusy} busyAction={busyAction} operationProgress={operationProgress} operationStage={operationStage}
-                  onAction={runApprovalAction}
+                  linkedin={linkedin} onAction={runApprovalAction}
                 />
               </section>
             </>
@@ -576,14 +594,14 @@ function MiniStat({ icon: Icon, label, value }: any) {
 }
 
 function ApprovalWorkspace(props: any) {
-  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction } = props;
+  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, linkedin, onAction } = props;
   return (
     <div className="queue-layout">
       <div className="queue-list">
         <div className="queue-tools">
           <div className="searchbox"><Search size={13}/><input className="input" placeholder="Search drafts…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
           <div className="filter-row">
-            {(['all','PENDING','EDITED','REGENERATED'] as const).map((x) => <button key={x} className={`filter-chip ${statusFilter === x ? 'active' : ''}`} onClick={() => setStatusFilter(x)}>{x === 'all' ? 'All' : x[0] + x.slice(1).toLowerCase()}</button>)}
+            {(['all','PENDING','EDITED','REGENERATED','APPROVED','EXECUTED'] as const).map((x) => <button key={x} className={`filter-chip ${statusFilter === x ? 'active' : ''}`} onClick={() => setStatusFilter(x)}>{x === 'all' ? 'All' : x[0] + x.slice(1).toLowerCase()}</button>)}
           </div>
         </div>
         <div className="queue-items">
@@ -606,8 +624,19 @@ function ApprovalWorkspace(props: any) {
               <div className="review-label" style={{ marginTop: 10, marginBottom: 7 }}>Feedback for regeneration <span className="form-help">(optional)</span></div>
               <textarea className="textarea" style={{ minHeight: 82, marginTop: 0 }} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Tell Brand OS what to change, add, remove, or make more personal. Example: “Make the opening less polished and add the point about stakeholder alignment.”" />
               <div className="review-actions">
-                <button className="button success" disabled={isBusy} onClick={() => onAction('approve')}><Check size={14}/> Approve</button>
-                <button className="button" disabled={isBusy} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>
+                {selected.status === 'APPROVED' || selected.status === 'EXECUTED' ? (
+                  <button
+                    className="button success"
+                    disabled={isBusy || selected.status === 'EXECUTED' || !linkedin.connected}
+                    title={!linkedin.connected ? 'Connect LinkedIn before publishing.' : selected.status === 'EXECUTED' ? 'Already published.' : 'Publish the approved post to LinkedIn.'}
+                    onClick={() => onAction('execute')}
+                  >
+                    <ExternalLink size={14}/> {selected.status === 'EXECUTED' ? 'Published' : 'Publish to LinkedIn'}
+                  </button>
+                ) : (
+                  <button className="button success" disabled={isBusy} onClick={() => onAction('approve')}><Check size={14}/> Approve</button>
+                )}
+                <button className="button" disabled={isBusy || selected.status === 'EXECUTED'} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>
                 <button
                   className="button progress-button"
                   disabled={isBusy || !reviewNote.trim()}

@@ -29,7 +29,7 @@ class ApprovalService:
     async def list_pending(self):
         result = await self.session.execute(
             select(ApprovalRequest).where(
-                ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED"]),
+                ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED", "APPROVED", "EXECUTED"]),
                 (ApprovalRequest.expires_at.is_(None)) | (ApprovalRequest.expires_at > datetime.now(timezone.utc)),
             )
         )
