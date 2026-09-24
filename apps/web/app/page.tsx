@@ -320,7 +320,18 @@ useEffect(() => {
       setToken(null); setQueue([]); setLinkedin({ connected: false }); setLinkedinProfileSynced(false); closeSidebar();
     }
   };
-  const go = (next: Tab) => { setTab(next); closeSidebar(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const go = (next: Tab) => {
+    if (!brand.ready && next !== 'Settings') {
+      setTab('Settings');
+      closeSidebar();
+      setNotice('Before using the workspace, complete your Brand DNA setup once.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setTab(next);
+    closeSidebar();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const requireBrand = (actionLabel: string) => {
     if (brand.ready) return true;
