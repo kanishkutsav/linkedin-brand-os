@@ -30,14 +30,15 @@ class AgentOrchestrator:
     It cannot publish, comment, like, DM, connect or otherwise act externally.
     """
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, profile_id: int):
         self.session = session
+        self.profile_id = int(profile_id)
 
     async def _profile(self) -> UserProfile:
-        profile = await self.session.get(UserProfile, 1)
+        profile = await self.session.get(UserProfile, self.profile_id)
         if profile is None:
             profile = UserProfile(
-                id=1,
+                id=self.profile_id,
                 display_name="User",
                 professional_title="Technical Project Manager",
                 industry="Technology",
@@ -52,7 +53,10 @@ class AgentOrchestrator:
         return profile
 
     async def _voice(self) -> dict:
-        memory = (await self.session.execute(select(VoiceMemory).limit(1))).scalar_one_or_none()
+        profile = await self._profile()
+        memory = (await self.session.execute(
+            select(VoiceMemory).where(VoiceMemory.profile_id == profile.id).limit(1)
+        )).scalar_one_or_none()
         if memory is not None:
             return {
                 "tone": memory.tone,
@@ -78,7 +82,10 @@ class AgentOrchestrator:
 
     async def _is_duplicate_topic(self, topic: str) -> bool:
         result = await self.session.execute(
-            select(ContentItem).where(ContentItem.topic == topic).limit(1)
+            select(ContentItem).where(
+                ContentItem.profile_id == self.profile_id,
+                ContentItem.topic == topic,
+            ).limit(1)
         )
         return result.scalar_one_or_none() is not None
 
@@ -177,6 +184,7 @@ class AgentOrchestrator:
 
         guard = run_content_guards(body)
         item = ContentItem(
+            profile_id=profile.id,
             title=final_title,
             topic=topic,
             pillar=pillar,
@@ -359,6 +367,7 @@ class AgentOrchestrator:
 
         guard = run_content_guards(body)
         item = ContentItem(
+            profile_id=profile.id,
             title=final_title,
             topic=topic[:500],
             pillar="Professional insights",
