@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import ApprovalRequest, ContentVersion, ContentItem, UserProfile, VoiceMemory, AuditLog, SystemFlag, FeedbackEntry, HistoricalPost
 from app.core.config import settings
+from app.integrations.linkedin import PublishResult
 from app.services.brand_intelligence import BrandIntelligenceService
 from app.services.gemini_service import ModelRouterService
 from app.guards.guardrails import normalize_human_style, run_content_guards
@@ -277,11 +278,11 @@ class ApprovalService:
         # A successful publication is terminal and idempotent. Never send the
         # same approved content to LinkedIn twice.
         if approval.status == "EXECUTED":
-            return type("PublishResult", (), {
-                "success": True,
-                "external_id": approval.published_external_id,
-                "message": "This post was already published to LinkedIn.",
-            })()
+            return PublishResult(
+                success=True,
+                external_id=approval.published_external_id,
+                message="This post was already published to LinkedIn.",
+            )
 
         # A concurrent request may already own the publication attempt.
         # LinkedIn calls are bounded to the adapter timeout, so stale PUBLISHING
