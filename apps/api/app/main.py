@@ -411,9 +411,9 @@ async def brand_status(
         },
         "source_posts": [
             {"id": post.id, "body": post.body, "published_at": post.published_at, "source": post.source}
-            for post in posts[:5]
+            for post in posts
             if post.source == "user_import"
-        ],
+        ][:5],
     }
 
 
