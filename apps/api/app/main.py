@@ -25,7 +25,7 @@ from app.services.brand_intelligence import BrandIntelligenceService
 from app.guards.guardrails import run_content_guards
 from app.integrations.linkedin import MockLinkedInAdapter, OfficialLinkedInAdapter
 from app.models.base import Base
-from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LinkedInConnection, UserProfile, VoiceMemory, AgentRun
+from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LinkedInConnection, UserProfile, VoiceMemory, AgentRun, AuthSession
 from app.services.approval import ApprovalService
 from app.services.auth_service import AuthService
 from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback
@@ -313,6 +313,21 @@ async def auth_me(
         "linkedin_url": user.linkedin_url,
     }
 
+
+@app.post("/api/auth/logout")
+async def auth_logout(
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+    session: AsyncSession = Depends(get_session),
+):
+    token = credentials.credentials if credentials else None
+    if token:
+        token_hash = AuthService.hash_token(token)
+        result = await session.execute(select(AuthSession).where(AuthSession.token_hash == token_hash))
+        session_row = result.scalar_one_or_none()
+        if session_row is not None:
+            await session.delete(session_row)
+            await session.commit()
+    return {"success": True}
 
 @app.get("/api/profile")
 async def get_profile(
