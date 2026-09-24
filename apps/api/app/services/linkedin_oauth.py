@@ -259,6 +259,70 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
     return exchange_code
 
 
+async def sync_linkedin_profile(session: AsyncSession, user_id: int) -> dict:
+    """Refresh the connected member's LinkedIn-backed Brand DNA profile."""
+    connection_result = await session.execute(
+        select(LinkedInConnection).where(LinkedInConnection.user_id == user_id)
+    )
+    connection = connection_result.scalar_one_or_none()
+    if connection is None:
+        raise HTTPException(status_code=404, detail="LinkedIn account is not connected.")
+
+    user = await session.get(AuthUser, user_id)
+    if user is None or not user.is_active or not user.is_whitelisted:
+        raise HTTPException(status_code=403, detail="Brand OS user is no longer active or whitelisted.")
+
+    userinfo = await asyncio.to_thread(
+        _request_json,
+        LINKEDIN_USERINFO_URL,
+        headers={"Authorization": f"Bearer {connection.access_token}"},
+    )
+    profile_data = await asyncio.to_thread(_best_effort_profile, connection.access_token, userinfo)
+
+    display_name = profile_data.get("name") or user.display_name or "LinkedIn Member"
+    professional_title = (
+        profile_data.get("headline")
+        or profile_data.get("localizedHeadline")
+        or _localized_value(profile_data.get("headline"))
+    )
+    industry = (
+        profile_data.get("industryName")
+        or profile_data.get("localizedIndustry")
+        or _localized_value(profile_data.get("industry"))
+    )
+    vanity_name = profile_data.get("vanityName")
+    profile_url = (
+        "https://www.linkedin.com/in/" + str(vanity_name).strip()
+        if vanity_name and str(vanity_name).strip()
+        else user.linkedin_url
+    )
+
+    user.display_name = str(display_name)[:150]
+    if profile_url:
+        user.linkedin_url = str(profile_url)[:255]
+
+    profile = await session.get(UserProfile, 1)
+    if profile is None:
+        profile = UserProfile(id=1, display_name=str(display_name)[:150], role="owner")
+        session.add(profile)
+    else:
+        profile.display_name = str(display_name)[:150]
+
+    if professional_title:
+        profile.professional_title = str(professional_title)[:200]
+    if industry:
+        profile.industry = str(industry)[:200]
+
+    await session.commit()
+    return {
+        "display_name": profile.display_name,
+        "professional_title": profile.professional_title,
+        "industry": profile.industry,
+        "linkedin_url": user.linkedin_url,
+        "source": "linkedin",
+    }
+
+
 async def exchange_code(session: AsyncSession, code: str) -> dict:
     result = await session.execute(
         select(LinkedInOAuthExchange).where(
