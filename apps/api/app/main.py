@@ -867,6 +867,28 @@ async def create_draft(
         raise HTTPException(status_code=400, detail="Complete Brand DNA setup before creating content.")
 
     guard = run_content_guards(req.body)
+    digest = hashlib.sha256(req.body.strip().encode("utf-8")).hexdigest()
+    existing_content = await session.execute(
+        select(ContentVersion.id)
+        .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+        .where(
+            ContentItem.profile_id == profile.id,
+            ContentVersion.content_hash == digest,
+        )
+        .limit(1)
+    )
+    if existing_content.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="This exact content already exists in your brand memory.")
+
+    existing_historical = await session.execute(
+        select(HistoricalPost.id).where(
+            HistoricalPost.profile_id == profile.id,
+            HistoricalPost.content_hash == digest,
+        ).limit(1)
+    )
+    if existing_historical.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="This exact content already exists in your brand memory.")
+
     item = ContentItem(
         profile_id=profile.id,
         title=req.title,
