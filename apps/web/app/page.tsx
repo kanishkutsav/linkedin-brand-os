@@ -70,12 +70,18 @@ export default function Home() {
   const [reviewNote, setReviewNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeTtl, setNoticeTtl] = useState(4500);
   const [isBusy, setIsBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<'approve' | 'edit' | 'reject' | 'regenerate' | null>(null);
+  const [operationProgress, setOperationProgress] = useState(0);
+  const [operationStage, setOperationStage] = useState('');
   const [tab, setTab] = useState<Tab>('Dashboard');
   const [draftTitle, setDraftTitle] = useState('');
   const [draftTopic, setDraftTopic] = useState('');
   const [draftBody, setDraftBody] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState(0);
+  const [generationStage, setGenerationStage] = useState('');
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [isResearching, setIsResearching] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -85,9 +91,39 @@ export default function Home() {
 
   useEffect(() => {
     if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(null), 4500);
+    const timer = window.setTimeout(() => setNotice(null), noticeTtl);
     return () => window.clearTimeout(timer);
-  }, [notice]);
+  }, [notice, noticeTtl]);
+
+  useEffect(() => {
+    if (!isGenerating) {
+      setGenerationProgress(0);
+      setGenerationStage('');
+      return;
+    }
+    setGenerationProgress(10);
+    setGenerationStage('Preparing your Brand DNA…');
+    const timers = [
+      window.setTimeout(() => { setGenerationProgress(28); setGenerationStage('Generating with AI…'); }, 450),
+      window.setTimeout(() => { setGenerationProgress(62); setGenerationStage('Shaping the draft around your voice…'); }, 1800),
+    ];
+    return () => timers.forEach(window.clearTimeout);
+  }, [isGenerating]);
+
+  useEffect(() => {
+    if (!busyAction) {
+      setOperationProgress(0);
+      setOperationStage('');
+      return;
+    }
+    setOperationProgress(12);
+    setOperationStage(busyAction === 'regenerate' ? 'Regenerating with your feedback…' : 'Processing your request…');
+    const timer = window.setTimeout(() => {
+      setOperationProgress(62);
+      setOperationStage(busyAction === 'regenerate' ? 'Running guardrails and creating the new version…' : 'Applying the change…');
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [busyAction]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -215,33 +251,62 @@ export default function Home() {
   };
   const go = (next: Tab) => { setTab(next); closeSidebar(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
 
+  const requireBrand = (actionLabel: string) => {
+    if (brand.ready) return true;
+    go('Settings');
+    setError('Brand DNA is not set up yet. Before ' + actionLabel + ', add your professional profile and 3–5 previous LinkedIn posts in Settings.');
+    return false;
+  };
+
   const runApprovalAction = async (action: 'approve' | 'edit' | 'reject' | 'regenerate', payload?: Record<string, string>) => {
     if (!selectedApproval || !token) return;
-    setIsBusy(true); setError(null); setNotice(null);
+    if (action === 'regenerate' && !requireBrand('regenerating content')) return;
+    if (action === 'regenerate' && !reviewNote.trim()) {
+      setError('Add feedback for the regeneration first. The Regenerate button will stay disabled until you do.');
+      return;
+    }
+    setIsBusy(true); setBusyAction(action); setError(null); setNotice(null);
     try {
       const res = await fetch(`${API_BASE}/api/approvals/${selectedApproval.id}/${action}`, {
         method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, `Action failed: ${action}`));
-      await fetchData(); setReviewNote('');
-      setNotice(`${action.charAt(0).toUpperCase() + action.slice(1)} completed.`);
-    } catch (e) { setError(e instanceof Error ? e.message : 'Approval action failed'); }
-    finally { setIsBusy(false); }
+      setOperationProgress(88);
+      setOperationStage(action === 'regenerate' ? 'Refreshing the approval queue…' : 'Refreshing the workspace…');
+      await fetchData();
+      setOperationProgress(100);
+      setOperationStage('Done');
+      setReviewNote('');
+      setNoticeTtl(action === 'regenerate' ? 1800 : 4500);
+      setNotice(action === 'regenerate' ? 'Regenerated successfully.' : 'Action completed successfully.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Approval action failed');
+    } finally {
+      setIsBusy(false);
+      setBusyAction(null);
+    }
   };
 
   const generateContent = async () => {
     if (!token) return;
-    if (!brand.ready) { go('Settings'); setError('Complete Brand Intelligence setup first.'); return; }
+    if (!requireBrand('generating content')) return;
     setIsGenerating(true); setError(null); setNotice(null);
     try {
+      setGenerationProgress(34);
+      setGenerationStage('Generating with AI…');
       const res = await fetch(API_BASE + '/api/agent/events', {
         method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ event_type: 'manual_generate_content', payload: { objective: 'Generate a fresh LinkedIn content opportunity for human review.' } }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, 'Content generation failed'));
-      await fetchData(); go('Dashboard');
+      setGenerationProgress(84);
+      setGenerationStage('Refreshing the approval queue…');
+      await fetchData();
+      setGenerationProgress(100);
+      setGenerationStage('Done');
+      go('Dashboard');
       setNotice(
         data.approval_queued
           ? 'New content suggestion generated and added to the approval queue.'
@@ -255,7 +320,7 @@ export default function Home() {
 
   const discoverResearch = async () => {
     if (!token) return;
-    if (!brand.ready) { go('Settings'); setError('Complete Brand Intelligence setup before running live research.'); return; }
+    if (!requireBrand('running live research')) return;
     setIsResearching(true); setError(null); setNotice(null);
     try {
       const res = await fetch(API_BASE + '/api/research/discover', {
@@ -302,6 +367,7 @@ export default function Home() {
 
   const improveDraft = async () => {
     if (!token || !draftBody.trim()) { setError('Write a draft first, then ask Brand OS to polish it.'); return; }
+    if (!requireBrand('polishing content')) return;
     setIsImproving(true); setError(null); setNotice(null);
     try {
       const res = await fetch(API_BASE + '/api/content/improve', {
@@ -324,6 +390,7 @@ export default function Home() {
     if (!token || !draftTitle.trim() || !draftTopic.trim() || !draftBody.trim()) {
       setError('Title, topic and draft body are required.'); return;
     }
+    if (!requireBrand('sending content to approval')) return;
     setIsBusy(true); setError(null); setNotice(null);
     try {
       const res = await fetch(`${API_BASE}/api/content/drafts`, {
@@ -398,7 +465,10 @@ export default function Home() {
                     <h1>Turn your expertise into a recognizable point of view.</h1>
                     <p>Research, content strategy, drafting and review — orchestrated around your brand voice, with you always in control of what reaches LinkedIn.</p>
                     <div className="hero-actions">
-                      <button className="button primary" onClick={generateContent} disabled={isGenerating}><WandSparkles size={15} /> {isGenerating ? 'Generating…' : 'Generate content'}</button>
+                      <button className="button primary progress-button" onClick={generateContent} disabled={isGenerating}>
+                        <span className="button-content"><WandSparkles size={15} /> {isGenerating ? generationStage || 'Generating…' : 'Generate content'}</span>
+                        {isGenerating && <span className="button-progress-track"><span style={{ width: generationProgress + '%' }} /></span>}
+                      </button>
                       <button className="button ghost-dark" onClick={() => go('Research')}><Search size={15} /> Discover opportunities</button>
                     </div>
                   </div>
@@ -414,50 +484,24 @@ export default function Home() {
                 <Metric icon={CircleCheck} label="Approved" value={summary.reviewed} meta="Ready for execution" />
                 <Metric icon={TrendingUp} label="Published" value={summary.executed} meta="Tracked by Brand OS" />
                 <Metric icon={ShieldCheck} label="Guardrail status" value="ON" meta="Claims · voice · duplicate · action" />
+                <Metric icon={BrainCircuit} label="Brand DNA" value={brand.ready ? 'ACTIVE' : 'INACTIVE'} meta={brand.ready ? ((brand.current_post_count ?? brand.source_post_count) + ' signals in memory') : 'Set up before AI actions'} />
               </div>
 
-              <div className="section-grid">
-                <section className="panel">
-                  <div className="panel-head">
-                    <div><div className="panel-title">Approval queue</div><div className="panel-subtitle">Your editorial desk — review the exact content before anything external happens.</div></div>
-                    <button className="button" onClick={() => go('Content')}><Plus size={14} /> New draft</button>
-                  </div>
-                  <ApprovalWorkspace
-                    queue={filteredQueue} selected={selectedApproval} selectedId={selectedId}
-                    setSelectedId={setSelectedId} searchTerm={searchTerm} setSearchTerm={setSearchTerm}
-                    statusFilter={statusFilter} setStatusFilter={setStatusFilter}
-                    editedBody={editedBody} setEditedBody={setEditedBody}
-                    reviewNote={reviewNote} setReviewNote={setReviewNote}
-                    isBusy={isBusy} onAction={runApprovalAction}
-                  />
-                </section>
-
-                <section className="panel">
-                  <div className="panel-head">
-                    <div><div className="panel-title">Brand pulse</div><div className="panel-subtitle">What the system currently knows about your positioning.</div></div>
-                    <button className="icon-button" onClick={() => go('Settings')}><ArrowUpRight size={14} /></button>
-                  </div>
-                  <div className="panel-body">
-                    {brand.ready ? (
-                      <>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 13, borderRadius: 13, background: '#f8f7ff', border: '1px solid #ebe8ff' }}>
-                          <div className="metric-icon"><BrainCircuit size={16} /></div>
-                          <div><div style={{ fontSize: 12, fontWeight: 800 }}>Brand DNA active</div><div style={{ color: '#667085', fontSize: 10, marginTop: 2 }}>{brand.current_post_count ?? brand.source_post_count} content signals in memory</div></div>
-                        </div>
-                        <div style={{ marginTop: 14, color: '#475467', fontSize: 12, lineHeight: 1.6 }}>{brand.summary || 'Your brand memory is ready to shape new content.'}</div>
-                        <div className="score-grid" style={{ marginTop: 14 }}>
-                          <MiniStat icon={Target} label="Audience" value={brand.profile?.audience || 'Defined in profile'} />
-                          <MiniStat icon={Gauge} label="Tone" value={brand.profile?.tone || 'Learned from content'} />
-                          <MiniStat icon={Globe2} label="Industry" value={brand.profile?.industry || 'Defined in profile'} />
-                          <MiniStat icon={Activity} label="Learning" value={brand.continuous_learning ? 'Continuous' : 'Snapshot'} />
-                        </div>
-                      </>
-                    ) : (
-                      <EmptyState icon={BrainCircuit} title="Brand DNA needs a starting signal" text="Add your professional profile and at least three previous posts in Settings." action="Set up Brand Intelligence" onAction={() => go('Settings')} />
-                    )}
-                  </div>
-                </section>
-              </div>
+              <section className="panel approval-panel">
+                <div className="panel-head">
+                  <div><div className="panel-title">Approval queue</div><div className="panel-subtitle">Your editorial desk — review the exact content before anything external happens.</div></div>
+                  <button className="button" onClick={() => go('Content')}><Plus size={14} /> New draft</button>
+                </div>
+                <ApprovalWorkspace
+                  queue={filteredQueue} selected={selectedApproval} selectedId={selectedId}
+                  setSelectedId={setSelectedId} searchTerm={searchTerm} setSearchTerm={setSearchTerm}
+                  statusFilter={statusFilter} setStatusFilter={setStatusFilter}
+                  editedBody={editedBody} setEditedBody={setEditedBody}
+                  reviewNote={reviewNote} setReviewNote={setReviewNote}
+                  isBusy={isBusy} busyAction={busyAction} operationProgress={operationProgress} operationStage={operationStage}
+                  onAction={runApprovalAction}
+                />
+              </section>
             </>
           )}
 
@@ -517,7 +561,7 @@ function MiniStat({ icon: Icon, label, value }: any) {
 }
 
 function ApprovalWorkspace(props: any) {
-  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, onAction } = props;
+  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction } = props;
   return (
     <div className="queue-layout">
       <div className="queue-list">
@@ -549,8 +593,19 @@ function ApprovalWorkspace(props: any) {
               <div className="review-actions">
                 <button className="button success" disabled={isBusy} onClick={() => onAction('approve')}><Check size={14}/> Approve</button>
                 <button className="button" disabled={isBusy} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>
-                <button className="button" disabled={isBusy} onClick={() => onAction('regenerate', { reason: reviewNote || 'Regenerated after review.' })}><RotateCcw size={14}/> Regenerate</button>
+                <button
+                  className="button progress-button"
+                  disabled={isBusy || !reviewNote.trim()}
+                  title={!reviewNote.trim() ? 'Add feedback before regenerating.' : 'Regenerate using your feedback'}
+                  onClick={() => onAction('regenerate', { reason: reviewNote.trim() })}
+                >
+                  <span className="button-content"><RotateCcw size={14}/> {busyAction === 'regenerate' ? operationStage || 'Regenerating…' : 'Regenerate'}</span>
+                  {busyAction === 'regenerate' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
+                </button>
                 <button className="button danger" disabled={isBusy} onClick={() => onAction('reject', { reason: reviewNote || 'Rejected by reviewer.' })}><X size={14}/> Reject</button>
+              </div>
+              <div className="form-help" style={{ marginTop: 8 }}>
+                {reviewNote.trim() ? 'Regenerate will use this feedback and keep the new version behind the approval gate.' : 'Add feedback above to enable Regenerate.'}
               </div>
             </div>
             <div style={{ marginTop: 17 }}>
