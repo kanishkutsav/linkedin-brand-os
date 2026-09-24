@@ -56,7 +56,7 @@ export default function Home() {
   const [brandPositioning, setBrandPositioning] = useState('');
   const [brandTone, setBrandTone] = useState('');
   const [brandGoals, setBrandGoals] = useState('');
-  const [historicalPostEntries, setHistoricalPostEntries] = useState<string[]>(['']);
+  const [historicalPostEntries, setHistoricalPostEntries] = useState<string[]>([]);
   const [brandEditing, setBrandEditing] = useState(false);
   const [analytics, setAnalytics] = useState<any>(null);
   const [draftLanguage, setDraftLanguage] = useState('');
@@ -418,7 +418,7 @@ useEffect(() => {
   const addHistoricalPost = () =>
     setHistoricalPostEntries((current) => current.length >= 10 ? current : [...current, '']);
   const removeHistoricalPost = (index: number) =>
-    setHistoricalPostEntries((current) => current.length <= 1 ? current : current.filter((_, i) => i !== index));
+    setHistoricalPostEntries((current) => current.filter((_, i) => i !== index));
 
   const buildBrand = async () => {
     if (!token) return;
