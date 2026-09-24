@@ -111,7 +111,7 @@ class ResearchService:
     async def research_and_rank(
         self,
         *,
-        profile_id: int = 1,
+        profile_id: int,
         requested_topic: str | None = None,
         candidate_limit: int = 8,
     ) -> list[dict]:
@@ -126,7 +126,10 @@ class ResearchService:
         context = await brand.generation_context(profile_id)
         historical = await brand.get_posts(profile_id, limit=12)
         recent_content_result = await self.session.execute(
-            select(ContentItem.topic, ContentItem.created_at).order_by(ContentItem.created_at.desc()).limit(20)
+            select(ContentItem.topic, ContentItem.created_at)
+            .where(ContentItem.profile_id == profile_id)
+            .order_by(ContentItem.created_at.desc())
+            .limit(20)
         )
         recent_content = [{"topic": row[0], "created_at": row[1].isoformat() if row[1] else None} for row in recent_content_result.all()]
 
@@ -303,7 +306,7 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
         created.sort(key=lambda item: item["total_score"], reverse=True)
         return created
 
-    async def list_opportunities(self, profile_id: int = 1, limit: int = 20) -> list[dict]:
+    async def list_opportunities(self, profile_id: int, limit: int = 20) -> list[dict]:
         if self.session is None:
             raise ValueError("A database session is required.")
         result = await self.session.execute(
