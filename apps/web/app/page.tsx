@@ -821,39 +821,102 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
 function AnalyticsView({ analytics }: { analytics: any }) {
   const p = analytics?.pipeline || {};
   const live = analytics?.linkedin_performance || {};
+  const totals = live.totals || {};
+  const trend = Array.isArray(live.trend) ? live.trend : [];
   const cards = [
     ['Historical posts', p.historical_posts ?? 0, 'User-provided brand evidence'],
     ['Content created', p.content_items ?? 0, 'Drafts generated in Brand OS'],
     ['Awaiting approval', p.pending_approval ?? 0, 'Needs your decision'],
     ['Published', p.published_via_brand_os ?? 0, 'Published through approved workflow'],
   ];
+  const maxImpressions = Math.max(1, ...trend.map((row: any) => Number(row.IMPRESSION || 0)));
+
   return (
     <>
       <div className="page-header">
-        <div><div className="page-kicker"><BarChart3 size={13}/> Performance intelligence</div><h1 className="page-title">Know what the system is doing.</h1><p className="page-description">Operational analytics are available now. LinkedIn performance metrics are shown only when the official analytics capability is connected.</p></div>
+        <div>
+          <div className="page-kicker"><BarChart3 size={13}/> Performance intelligence</div>
+          <h1 className="page-title">Know what the system is doing.</h1>
+          <p className="page-description">Operational analytics are available now. LinkedIn performance uses official LinkedIn member analytics only when the required permissions are granted.</p>
+        </div>
       </div>
-      <div className="metrics">{cards.map(([label, value, meta]) => <Metric key={label as string} icon={BarChart3} label={label} value={value} meta={meta} />)}</div>
+
+      <div className="metrics">
+        {cards.map(([label, value, meta]) => <Metric key={label as string} icon={BarChart3} label={label} value={value} meta={meta} />)}
+      </div>
+
       <section className="panel" style={{ marginTop: 16 }}>
-        <div className="panel-head"><div><div className="panel-title">LinkedIn performance</div><div className="panel-subtitle">{live.available ? 'Official LinkedIn metrics are connected.' : 'No fabricated reach, impressions or engagement numbers.'}</div></div><span className="status-pill edited">● {live.available ? 'CONNECTED' : 'NOT CONNECTED'}</span></div>
-        <div className="panel-body">
-          <div className="empty-state" style={{ minHeight: 180 }}>
-            <div className="empty-icon"><TrendingUp size={19}/></div>
-            <strong>{live.available ? 'Metrics available' : 'Official performance data is not connected yet'}</strong>
-            <span>{live.message || 'Connect the official LinkedIn analytics capability to populate post-level reach, reactions, comments and other supported metrics.'}</span>
+        <div className="panel-head">
+          <div>
+            <div className="panel-title">LinkedIn performance</div>
+            <div className="panel-subtitle">
+              {live.available ? `Official LinkedIn data · last ${live.window_days || 30} days` : 'Waiting for official LinkedIn analytics access'}
+            </div>
           </div>
+          <span className={`status-pill ${live.available ? 'approved' : 'edited'}`}>● {live.available ? 'CONNECTED' : 'NOT CONNECTED'}</span>
+        </div>
+
+        <div className="panel-body">
+          {live.available ? (
+            <>
+              <div className="metrics" style={{ gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', marginBottom: 18 }}>
+                <Metric icon={TrendingUp} label="Impressions" value={totals.IMPRESSION ?? 0} meta="Lifetime within selected window" />
+                <Metric icon={Target} label="Reach" value={totals.MEMBERS_REACHED ?? 0} meta="Members reached" />
+                <Metric icon={CircleCheck} label="Reactions" value={totals.REACTION ?? 0} meta="Total reactions" />
+                <Metric icon={Activity} label="Comments" value={totals.COMMENT ?? 0} meta="Total comments" />
+                <Metric icon={Zap} label="Engagement rate" value={`${live.engagement_rate ?? 0}%`} meta="Reactions + comments + reshares / impressions" />
+              </div>
+
+              <div className="panel" style={{ border: '1px solid #eaecf0', boxShadow: 'none' }}>
+                <div className="panel-head">
+                  <div><div className="panel-title">Daily trend</div><div className="panel-subtitle">Impressions and engagement reported by LinkedIn.</div></div>
+                </div>
+                <div className="panel-body">
+                  {trend.length ? (
+                    <div style={{ display: 'grid', gap: 9 }}>
+                      {trend.slice(-14).map((row: any) => (
+                        <div key={row.date} style={{ display: 'grid', gridTemplateColumns: '72px 1fr 70px', gap: 9, alignItems: 'center', fontSize: 10 }}>
+                          <span style={{ color: '#667085' }}>{new Date(row.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                          <div style={{ height: 8, background: '#f2f4f7', borderRadius: 99, overflow: 'hidden' }}>
+                            <div style={{ width: `${Math.max(2, Math.round((Number(row.IMPRESSION || 0) / maxImpressions) * 100))}%`, height: '100%', background: '#5145cd', borderRadius: 99 }} />
+                          </div>
+                          <span style={{ textAlign: 'right', color: '#344054' }}>{Number(row.IMPRESSION || 0).toLocaleString()} imp.</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-state" style={{ minHeight: 120 }}>
+                      <strong>No daily activity returned yet</strong>
+                      <span>LinkedIn may need more time to report analytics for newly published posts.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="empty-state" style={{ minHeight: 210 }}>
+              <div className="empty-icon"><TrendingUp size={19}/></div>
+              <strong>Official LinkedIn performance data is not connected yet</strong>
+              <span>{live.message || 'The app needs LinkedIn Community Management member analytics access before it can show impressions, reach and engagement.'}</span>
+              {live.authorization_required ? (
+                <div style={{ maxWidth: 620, fontSize: 10, lineHeight: 1.6, color: '#667085', marginTop: 6 }}>
+                  Required permissions: <b>r_member_postAnalytics</b> for post performance and <b>r_member_profileAnalytics</b> for follower/profile trends. After those permissions are enabled for the LinkedIn developer app, reconnect the LinkedIn account so the new consent is issued.
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
       </section>
+
       <section className="panel" style={{ marginTop: 16 }}>
-        <div className="panel-head"><div><div className="panel-title">How to use this section</div><div className="panel-subtitle">Analytics is for learning, not inventing conclusions.</div></div></div>
+        <div className="panel-head"><div><div className="panel-title">What will appear here</div><div className="panel-subtitle">Only observed LinkedIn data is used.</div></div></div>
         <div className="panel-body" style={{ color: '#667085', fontSize: 11, lineHeight: 1.7 }}>
-          Brand OS currently measures the content pipeline: what you imported, what was created, what is waiting for approval and what was actually published through the product. When official LinkedIn post analytics are available, those observed metrics can be added without using scraping or unsupported APIs.
+          Once analytics access is active, this view will show post impressions, reach, reactions, comments, reshares and engagement trends from LinkedIn's official member analytics API. Brand OS will not scrape LinkedIn or fabricate performance numbers.
         </div>
       </section>
     </>
   );
 }
-
-
 
 function SettingsView(props: any) {
   const {
