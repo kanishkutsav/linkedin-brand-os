@@ -215,7 +215,7 @@ useEffect(() => {
       const sourcePosts = (brandJson.source_posts || [])
         .map((item: any) => item.body)
         .filter((body: any) => typeof body === 'string' && body.trim());
-      if (sourcePosts.length) setHistoricalPostEntries(sourcePosts.slice(0, 5));
+      if (sourcePosts.length) setHistoricalPostEntries(sourcePosts.slice(0, 10));
 
       const nextQueue: ApprovalItem[] = (approvalsJson.pending_approvals || []).map((item: any) => ({
         id: item.id, status: item.status, action_type: item.action_type, reason: item.reason, content: item.content || '',
@@ -305,7 +305,7 @@ useEffect(() => {
   const requireBrand = (actionLabel: string) => {
     if (brand.ready) return true;
     go('Settings');
-    setError('Brand DNA is not set up yet. Before ' + actionLabel + ', add your professional profile and 3–5 previous LinkedIn posts in Settings.');
+    setError('Brand DNA is not set up yet. Before ' + actionLabel + ', add your professional profile and 3–10 previous LinkedIn posts in Settings.');
     return false;
   };
 
@@ -416,7 +416,7 @@ useEffect(() => {
   const updateHistoricalPost = (index: number, value: string) =>
     setHistoricalPostEntries((current) => current.map((post, i) => i === index ? value : post));
   const addHistoricalPost = () =>
-    setHistoricalPostEntries((current) => current.length >= 5 ? current : [...current, '']);
+    setHistoricalPostEntries((current) => current.length >= 10 ? current : [...current, '']);
   const removeHistoricalPost = (index: number) =>
     setHistoricalPostEntries((current) => current.length <= 1 ? current : current.filter((_, i) => i !== index));
 
@@ -546,7 +546,7 @@ useEffect(() => {
                     <h1>{brand.ready ? 'Turn your expertise into a recognizable point of view.' : 'Start by teaching Brand OS your voice.'}</h1>
                     <p>{brand.ready
                       ? 'Research, content strategy, drafting and review — orchestrated around your brand voice, with you always in control of what reaches LinkedIn.'
-                      : 'Your workspace is ready, but AI actions stay paused until you add your professional profile and 3–5 previous LinkedIn posts in Settings.'}</p>
+                      : 'Your workspace is ready, but AI actions stay paused until you add your professional profile and 3–10 previous LinkedIn posts in Settings.'}</p>
                     <div className="hero-actions">
                       <button className="button primary progress-button" onClick={generateContent} disabled={isGenerating}>
                         <span className="button-content"><WandSparkles size={15} /> {isGenerating ? generationStage || 'Generating…' : 'Generate content'}</span>
@@ -1006,7 +1006,7 @@ function SettingsView(props: any) {
             <div className="panel-head" style={{ padding: 0, border: 0 }}>
               <div>
                 <h2 className="settings-title">{brand.ready ? 'Edit Brand DNA' : 'Build your Brand DNA'}</h2>
-                <p className="settings-copy">{brand.ready ? 'Change the inputs, then refresh Brand Intelligence. Until you do, the saved memory remains unchanged.' : 'Add your factual profile and 3–5 previous posts. Brand OS does not invent identity or experience.'}</p>
+                <p className="settings-copy">{brand.ready ? 'Change the inputs, then refresh Brand Intelligence. Until you do, the saved memory remains unchanged.' : 'Add your factual profile and 3–10 previous posts. Brand OS does not invent identity or experience.'}</p>
               </div>
               {brand.ready && <button className="button" onClick={onCancel}><X size={14}/> Cancel</button>}
             </div>
@@ -1023,7 +1023,7 @@ function SettingsView(props: any) {
           <section className="panel settings-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <div><h2 className="settings-title">Source posts</h2><p className="settings-copy">Edit the source material used for voice calibration.</p></div>
-              <span className={`status-pill ${count >= 3 ? 'approved' : 'edited'}`}>{count}/5 posts</span>
+              <span className={`status-pill ${count >= 3 ? 'approved' : 'edited'}`}>{count}/10 posts</span>
             </div>
             <div className="post-stack">
               {posts.map((post: string, index: number) => (
@@ -1034,7 +1034,7 @@ function SettingsView(props: any) {
               ))}
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginTop: 12, flexWrap: 'wrap' }}>
-              <button className="button" onClick={addPost} disabled={posts.length >= 5}><Plus size={14}/>{posts.length >= 5 ? 'Maximum reached' : 'Add another post'}</button>
+              <button className="button" onClick={addPost} disabled={posts.length >= 10}><Plus size={14}/>{posts.length >= 10 ? 'Maximum reached' : 'Add another post'}</button>
               <button className="button primary" onClick={onBuild} disabled={building || count < 3}><RefreshCw size={14}/>{building ? 'Refreshing…' : brand.ready ? 'Refresh Brand Intelligence' : 'Build Brand Intelligence'}</button>
             </div>
           </section>
