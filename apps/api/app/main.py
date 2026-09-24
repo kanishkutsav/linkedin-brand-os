@@ -417,6 +417,7 @@ async def brand_status(
 ):
     service = BrandIntelligenceService(session)
     profile = await AuthService.get_or_create_profile(session, current_user)
+    await session.commit()
     memory = await service.get_memory(profile.id)
     posts = await service.get_posts(profile.id, limit=100)
     return {
@@ -488,14 +489,20 @@ async def brand_onboard(
 
     profile = await AuthService.get_or_create_profile(session, current_user)
 
-    profile.display_name = req.display_name.strip() or "User"
-    profile.professional_title = req.professional_title
-    profile.industry = req.industry
-    profile.audience = req.audience
-    profile.goals = ",".join(req.goals or [])
-    profile.brand_positioning = req.brand_positioning
-    profile.tone = req.tone
-    profile.role = profile.role or "owner"
+    profile.display_name = req.display_name.strip() or profile.display_name or current_user.display_name or "User"
+    if req.professional_title is not None:
+        profile.professional_title = req.professional_title
+    if req.industry is not None:
+        profile.industry = req.industry
+    if req.audience is not None:
+        profile.audience = req.audience
+    if req.goals:
+        profile.goals = ",".join(req.goals)
+    if req.brand_positioning is not None:
+        profile.brand_positioning = req.brand_positioning
+    if req.tone is not None:
+        profile.tone = req.tone
+    profile.role = profile.role or current_user.role or "user"
     await session.commit()
 
     # The editable 3–10 source posts are a current snapshot. Replace only the
