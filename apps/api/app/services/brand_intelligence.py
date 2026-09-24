@@ -235,14 +235,14 @@ Return:
             await self.analyze(profile_id)
             memory = await self.get_memory(profile_id)
 
-        posts = await self.get_posts(profile_id, limit=8)
+        posts = await self.get_posts(profile_id, limit=5)
         return {
             "brand_memory": self.serialize(memory),
             "historical_examples": [
                 {
                     "published_at": p.published_at.isoformat() if p.published_at else None,
                     "source": p.source,
-                    "body": p.body[:1800],
+                    "body": p.body[:1400],
                 }
                 for p in posts
             ],
