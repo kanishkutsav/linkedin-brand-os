@@ -15,6 +15,7 @@ from app.models.models import (
     ContentItem,
     ContentVersion,
     FeedbackEntry,
+    HistoricalPost,
     UserProfile,
     VoiceMemory,
 )
