@@ -228,13 +228,21 @@ export default function Home() {
   useEffect(() => { fetchData(token); }, [token]);
   useEffect(() => {
     const selected = queue.find((item) => item.id === selectedId);
-    if (selected) { setEditedBody(selected.content || ''); setReviewNote(selected.reason || ''); }
+    if (!selected) return;
+    setEditedBody(selected.content || '');
+    const savedFeedback = window.localStorage.getItem(`brand-os-regeneration-feedback:${selected.id}`);
+    setReviewNote(savedFeedback || '');
   }, [selectedId, queue]);
 
   const filteredQueue = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
     return queue.filter((item) => {
-      const statusMatch = statusFilter === 'all' || item.status === statusFilter;
+      const pendingStatuses = ['PENDING', 'REGENERATED', 'EDITED'];
+      const statusMatch = statusFilter === 'all'
+        ? true
+        : statusFilter === 'PENDING'
+          ? pendingStatuses.includes(item.status)
+          : item.status === statusFilter;
       const haystack = `${item.action_type} ${item.content} ${item.reason || ''}`.toLowerCase();
       return statusMatch && (!query || haystack.includes(query));
     });
@@ -297,7 +305,10 @@ export default function Home() {
       await fetchData();
       setOperationProgress(100);
       setOperationStage('Done');
-      setReviewNote('');
+      if (action === 'regenerate') {
+        window.localStorage.removeItem(`brand-os-regeneration-feedback:${selectedApproval.id}`);
+        setReviewNote('');
+      }
       setNoticeTtl(action === 'regenerate' ? 1800 : 4500);
       setNotice(
         action === 'regenerate'
@@ -620,7 +631,21 @@ function ApprovalWorkspace(props: any) {
               <div className="editor-toolbar"><span>Exact content bound to approval</span><span>{editedBody.length} chars</span></div>
               <textarea className="textarea" value={editedBody} onChange={(e) => setEditedBody(e.target.value)} />
               <div className="review-label" style={{ marginTop: 10, marginBottom: 7 }}>Feedback for regeneration <span className="form-help">(optional)</span></div>
-              <textarea className="textarea" style={{ minHeight: 82, marginTop: 0 }} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Tell Brand OS what to change, add, remove, or make more personal. Example: “Make the opening less polished and add the point about stakeholder alignment.”" />
+              <textarea
+                className="textarea"
+                style={{ minHeight: 82, marginTop: 0 }}
+                value={reviewNote}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setReviewNote(value);
+                  if (selected?.id) {
+                    const key = `brand-os-regeneration-feedback:${selected.id}`;
+                    if (value.trim()) window.localStorage.setItem(key, value);
+                    else window.localStorage.removeItem(key);
+                  }
+                }}
+                placeholder="Tell Brand OS what to change, add, remove, or make more personal. Example: “Make the opening less polished and add the point about stakeholder alignment.”"
+              />
               {['PENDING','EDITED','REGENERATED'].includes(selected.status) ? (
                 <>
                   <div className="review-actions">
