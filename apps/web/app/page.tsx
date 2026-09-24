@@ -169,6 +169,7 @@ export default function Home() {
   const initials = (profile.display_name || 'User').split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase();
   const closeSidebar = () => setSidebarOpen(false);
   const connectLinkedIn = () => { window.location.href = '/api/auth/linkedin/start'; };
+  const cancelBrandEdit = async () => { await fetchData(); setBrandEditing(false); };
   const logout = () => {
     window.localStorage.removeItem(STORAGE_KEY);
     setToken(null); setQueue([]); setLinkedin({ connected: false }); closeSidebar();
