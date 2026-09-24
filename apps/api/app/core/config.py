@@ -21,6 +21,20 @@ class Settings(BaseSettings):
     linkedin_api_base_url: str | None = None
     api_base_url: str | None = None
 
+    # LLM provider routing
+    # OpenRouter is the primary free-inference provider.
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = "openrouter/free"
+
+    # Groq is the callback provider. GPT-OSS 120B is currently available on
+    # Groq's free tier with rate limits; paid usage begins only after upgrading.
+    groq_api_key: str | None = None
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_model: str = "openai/gpt-oss-120b"
+
+    # Retained only for current web-grounded research until research is moved
+    # to the same provider router.
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.8-flash"
 

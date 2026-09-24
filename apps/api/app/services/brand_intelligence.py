@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import BrandMemory, HistoricalPost, UserProfile, VoiceMemory
-from app.services.gemini_service import GeminiService
+from app.services.gemini_service import ModelRouterService
 
 
 def _json(value) -> str:
@@ -100,7 +100,7 @@ class BrandIntelligenceService:
         )
         total_post_count = int(count_result.scalar_one() or 0)
 
-        service = GeminiService()
+        service = ModelRouterService()
         examples = [
             {
                 "id": post.id,

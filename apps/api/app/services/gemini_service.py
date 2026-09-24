@@ -2,25 +2,28 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
+import httpx
 from google import genai
 from google.genai import types
 
 from app.core.config import settings
 
 
-class GeminiService:
-    """Provider wrapper for safe content generation.
+class ModelRouterService:
+    """OpenRouter-first LLM router with Groq fallback.
 
-    Gemini can generate ideas, angles and drafts, but it never has permission
-    to publish or perform any external LinkedIn action.
+    Normal generation uses OpenRouter's free-model router first. If the request
+    fails, Groq's free-tier GPT-OSS 120B is used as the callback provider.
+    No provider is allowed to perform external LinkedIn actions.
     """
 
     def __init__(self) -> None:
-        if not settings.gemini_api_key:
-            raise RuntimeError("GEMINI_API_KEY is not configured.")
-        self.client = genai.Client(api_key=settings.gemini_api_key)
-        self.model = settings.gemini_model
+        if not settings.openrouter_api_key and not settings.groq_api_key:
+            raise RuntimeError(
+                "Neither OPENROUTER_API_KEY nor GROQ_API_KEY is configured."
+            )
 
     async def generate_json(
         self,
@@ -29,84 +32,134 @@ class GeminiService:
         *,
         max_output_tokens: int = 1800,
     ) -> dict:
-        last_error: Exception | None = None
-        for attempt in range(3):
+        errors: list[str] = []
+
+        if settings.openrouter_api_key:
             try:
-                response = await self.client.aio.models.generate_content(
-                    model=self.model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json",
-                        max_output_tokens=max_output_tokens,
-                    ),
+                return await self._openrouter_json(
+                    system_instruction,
+                    prompt,
+                    max_output_tokens=max_output_tokens,
                 )
-                break
             except Exception as exc:
-                last_error = exc
-                message = str(exc)
-                if "503" not in message and "UNAVAILABLE" not in message:
-                    raise
-                if attempt == 2:
-                    raise
-                await asyncio.sleep(2 ** (attempt + 1))
-        else:
-            raise last_error or RuntimeError("Gemini request failed.")
-        text = getattr(response, "text", None)
-        if not text:
-            raise RuntimeError("Gemini returned an empty response.")
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("Gemini returned invalid JSON.") from exc
+                errors.append(f"openrouter: {exc}")
 
+        if settings.groq_api_key:
+            try:
+                return await self._groq_json(
+                    system_instruction,
+                    prompt,
+                    max_output_tokens=max_output_tokens,
+                )
+            except Exception as exc:
+                errors.append(f"groq: {exc}")
 
-    async def research_json(self, system_instruction: str, prompt: str) -> tuple[dict, dict]:
-        """Run a web-grounded Gemini request and preserve citation metadata.
-
-        Google Search grounding lets Gemini search current public web content and
-        returns grounding chunks/queries alongside the model response.
-        """
-        response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json",
-                max_output_tokens=2600,
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-            ),
+        raise RuntimeError(
+            "All configured LLM providers failed. " + " | ".join(errors)
         )
-        text = getattr(response, "text", None)
-        if not text:
-            raise RuntimeError("Gemini research returned an empty response.")
 
+    async def _openrouter_json(
+        self,
+        system_instruction: str,
+        prompt: str,
+        *,
+        max_output_tokens: int,
+    ) -> dict:
+        payload = {
+            "model": settings.openrouter_model,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "max_tokens": max_output_tokens,
+        }
+        headers = {
+            "Authorization": f"Bearer {settings.openrouter_api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": settings.frontend_url or "",
+            "X-Title": settings.app_name,
+        }
+
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            response = await client.post(
+                settings.openrouter_base_url.rstrip("/") + "/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"HTTP {response.status_code}: {response.text[:500]}"
+            )
+
+        data = response.json()
+        content = self._extract_content(data)
+        return self._parse_json(content, "OpenRouter")
+
+    async def _groq_json(
+        self,
+        system_instruction: str,
+        prompt: str,
+        *,
+        max_output_tokens: int,
+    ) -> dict:
+        payload = {
+            "model": settings.groq_model,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "max_tokens": max_output_tokens,
+        }
+        headers = {
+            "Authorization": f"Bearer {settings.groq_api_key}",
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            response = await client.post(
+                settings.groq_base_url.rstrip("/") + "/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"HTTP {response.status_code}: {response.text[:500]}"
+            )
+
+        data = response.json()
+        content = self._extract_content(data)
+        return self._parse_json(content, "Groq")
+
+    @staticmethod
+    def _extract_content(data: dict[str, Any]) -> str:
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError("Provider returned no choices.")
+        message = choices[0].get("message") or {}
+        content = message.get("content")
+        if not content:
+            raise RuntimeError("Provider returned an empty response.")
+        if isinstance(content, list):
+            content = "".join(
+                str(part.get("text") or "")
+                for part in content
+                if isinstance(part, dict)
+            )
+        return str(content)
+
+    @staticmethod
+    def _parse_json(content: str, provider: str) -> dict:
         try:
-            parsed = json.loads(text)
+            parsed = json.loads(content)
         except json.JSONDecodeError as exc:
-            raise RuntimeError("Gemini research returned invalid JSON.") from exc
-
-        metadata: dict = {"queries": [], "sources": []}
-        try:
-            candidate = response.candidates[0]
-            grounding = getattr(candidate, "grounding_metadata", None)
-            if grounding:
-                metadata["queries"] = list(getattr(grounding, "web_search_queries", None) or [])
-                for chunk in list(getattr(grounding, "grounding_chunks", None) or []):
-                    web = getattr(chunk, "web", None)
-                    if web:
-                        metadata["sources"].append(
-                            {
-                                "title": getattr(web, "title", None),
-                                "url": getattr(web, "uri", None),
-                            }
-                        )
-        except Exception:
-            # A valid model response should remain usable even if SDK metadata
-            # shape changes; citation metadata is additive, not the sole output.
-            pass
-
-        return parsed, metadata
+            raise RuntimeError(f"{provider} returned invalid JSON.") from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError(f"{provider} returned JSON that is not an object.")
+        return parsed
 
     async def create_post(
         self,
@@ -144,10 +197,10 @@ Hard rules:
                 "evidence": evidence,
                 "voice": voice,
                 "generation_rules": {
-                    "use_brand_memory": true,
-                    "use_historical_examples_as_style_reference_only": true,
-                    "never_copy_historical_sentences": true,
-                    "never_invent_personal_experience": true,
+                    "use_brand_memory": True,
+                    "use_historical_examples_as_style_reference_only": True,
+                    "never_copy_historical_sentences": True,
+                    "never_invent_personal_experience": True,
                 },
                 "output_schema": {
                     "title": "short internal title",
@@ -164,4 +217,62 @@ Hard rules:
             },
             ensure_ascii=False,
         )
-        return await self.generate_json(system, prompt)
+        return await self.generate_json(system, prompt, max_output_tokens=1800)
+
+
+class GeminiService:
+    """Legacy Gemini wrapper retained for web-grounded research.
+
+    Gemini Search grounding remains separate because OpenRouter's web-search
+    plugin is a paid add-on rather than part of its free inference allowance.
+    """
+
+    def __init__(self) -> None:
+        if not settings.gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY is not configured.")
+        self.client = genai.Client(api_key=settings.gemini_api_key)
+        self.model = settings.gemini_model
+
+    async def research_json(self, system_instruction: str, prompt: str) -> tuple[dict, dict]:
+        response = await self.client.aio.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
+                max_output_tokens=2600,
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+            ),
+        )
+        text = getattr(response, "text", None)
+        if not text:
+            raise RuntimeError("Gemini research returned an empty response.")
+
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Gemini research returned invalid JSON.") from exc
+
+        metadata: dict = {"queries": [], "sources": []}
+        try:
+            candidate = response.candidates[0]
+            grounding = getattr(candidate, "grounding_metadata", None)
+            if grounding:
+                metadata["queries"] = list(
+                    getattr(grounding, "web_search_queries", None) or []
+                )
+                for chunk in list(
+                    getattr(grounding, "grounding_chunks", None) or []
+                ):
+                    web = getattr(chunk, "web", None)
+                    if web:
+                        metadata["sources"].append(
+                            {
+                                "title": getattr(web, "title", None),
+                                "url": getattr(web, "uri", None),
+                            }
+                        )
+        except Exception:
+            pass
+
+        return parsed, metadata
