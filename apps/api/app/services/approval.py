@@ -135,16 +135,22 @@ class ApprovalService:
         if not version:
             raise ValueError("Content version not found")
         new_hash = hashlib.sha256(edited_body.encode("utf-8")).hexdigest()
-        version.body = edited_body
-        version.content_hash = new_hash
-        version.version_number += 1
+        new_version = ContentVersion(
+            content_id=version.content_id,
+            body=edited_body,
+            content_hash=new_hash,
+            version_number=version.version_number + 1,
+        )
+        self.session.add(new_version)
+        await self.session.flush()
+        approval.content_version_id = new_version.id
         approval.status = "EDITED"
         approval.edited_body = edited_body
         approval.reason = reason or "Content was edited by the human reviewer."
         self.session.add(
             FeedbackEntry(
                 approval_id=approval.id,
-                content_version_id=version.id,
+                content_version_id=new_version.id,
                 action="EDITED",
                 reason=approval.reason,
                 payload=edited_body,
@@ -246,16 +252,22 @@ class ApprovalService:
         if not guard.passed:
             raise ValueError("Regenerated content blocked by guardrails: " + "; ".join(guard.issues))
 
-        version.body = new_body
-        version.content_hash = hashlib.sha256(new_body.encode("utf-8")).hexdigest()
-        version.version_number += 1
+        new_version = ContentVersion(
+            content_id=version.content_id,
+            body=new_body,
+            content_hash=hashlib.sha256(new_body.encode("utf-8")).hexdigest(),
+            version_number=version.version_number + 1,
+        )
+        self.session.add(new_version)
+        await self.session.flush()
+        approval.content_version_id = new_version.id
         approval.status = "REGENERATED"
         approval.reason = (feedback or "").strip() or "Regenerated using the saved Brand DNA."
 
         self.session.add(
             FeedbackEntry(
                 approval_id=approval.id,
-                content_version_id=approval.content_version_id,
+                content_version_id=new_version.id,
                 action="REGENERATED",
                 reason=approval.reason,
                 payload=new_body,
