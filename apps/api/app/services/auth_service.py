@@ -192,9 +192,6 @@ class AuthService:
         if not normalized:
             return None
 
-        if normalized in {"owner", "admin", "reviewer"}:
-            return AppUser(id=normalized, email=f"{normalized}@local.test", role=normalized)
-
         token_hash = AuthService.hash_token(normalized)
         result = await session.execute(
             select(AuthSession, AuthUser)
