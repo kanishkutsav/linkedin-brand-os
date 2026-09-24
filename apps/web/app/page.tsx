@@ -271,7 +271,7 @@ export default function Home() {
     return false;
   };
 
-  const runApprovalAction = async (action: 'approve' | 'edit' | 'reject' | 'regenerate', payload?: Record<string, string>) => {
+  const runApprovalAction = async (action: 'approve' | 'edit' | 'reject' | 'regenerate' | 'publish', payload?: Record<string, string>) => {
     if (!selectedApproval || !token) return;
     if (action === 'regenerate' && !requireBrand('regenerating content')) return;
     if (action === 'regenerate' && !reviewNote.trim()) {
@@ -284,15 +284,16 @@ export default function Home() {
       setOperationStage('Authorizing publication…');
     }
     try {
-      const res = await fetch(`${API_BASE}/api/approvals/${selectedApproval.id}/${action}`, {
+      const endpoint = action === 'publish' ? 'execute' : action;
+      const res = await fetch(`${API_BASE}/api/approvals/${selectedApproval.id}/${endpoint}`, {
         method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, `Action failed: ${action}`));
-      if (action === 'approve' && data.published === false) {
-        throw new Error(data.message || 'Approval was recorded, but LinkedIn publication failed.');
+      if ((action === 'approve' || action === 'publish') && (data.published === false || data.success === false)) {
+        throw new Error(data.message || 'Approval is saved, but LinkedIn publication failed. You can retry publication.');
       }
-      setOperationProgress(action === 'approve' ? 82 : 88);
+      setOperationProgress(action === 'approve' || action === 'publish' ? 82 : 88);
       setOperationStage(action === 'regenerate' ? 'Refreshing the approval queue…' : 'Refreshing the workspace…');
       await fetchData();
       setOperationProgress(100);
@@ -302,7 +303,7 @@ export default function Home() {
       setNotice(
         action === 'regenerate'
           ? 'Regenerated successfully.'
-          : action === 'approve'
+          : action === 'approve' || action === 'publish'
             ? 'Approved and published to your connected LinkedIn account.'
             : 'Action completed successfully.'
       );
@@ -645,11 +646,25 @@ function ApprovalWorkspace(props: any) {
                   </div>
                 </>
               ) : (
-                <div className="notice success" style={{ marginTop: 10 }}>
-                  <CircleCheck size={15}/>
-                  <span>{selected.status === 'EXECUTED' ? 'Approved and published to LinkedIn through the official API.' : selected.status === 'APPROVED' ? 'Approved, but publication did not complete. Reconnect LinkedIn and retry from the approval workflow.' : 'This post is no longer awaiting a decision.'}</span>
+                <div className={`notice ${selected.status === 'EXECUTED' ? 'success' : selected.status === 'APPROVED' ? 'error' : 'success'}`} style={{ marginTop: 10 }}>
+                  {selected.status === 'EXECUTED' ? <CircleCheck size={15}/> : <X size={15}/>}
+                  <span>
+                    {selected.status === 'EXECUTED'
+                      ? 'Approved and published to LinkedIn through the official API.'
+                      : selected.status === 'APPROVED'
+                        ? (selected.reason || 'Approval is saved, but publication did not complete. You can retry publication below.')
+                        : 'This post is no longer awaiting a decision.'}
+                  </span>
                 </div>
               )}
+              {selected.status === 'APPROVED' && (
+                <div className="review-actions review-actions-publish">
+                  <button className="button success progress-button publish-retry-button" disabled={isBusy} onClick={() => onAction('publish')}>
+                    <span className="button-content"><LinkedInMark size={14}/>{busyAction === 'publish' ? operationStage || 'Publishing…' : 'Publish to LinkedIn'}</span>
+                    {busyAction === 'publish' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
+                  </button>
+                </div>
+              )}}
             </div>
             <div style={{ marginTop: 17 }}>
               <div className="review-label" style={{ marginBottom: 9 }}>Safety rail</div>
