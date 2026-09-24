@@ -890,6 +890,8 @@ function AnalyticsView({ analytics }: { analytics: any }) {
         {cards.map(([label, value, meta]) => <Metric key={label as string} icon={BarChart3} label={label} value={value} meta={meta} />)}
       </div>
 
+{/* Temporarily hidden until LinkedIn Community Management analytics access is available. Code intentionally retained. */}
+      {false && (
       <section className="panel" style={{ marginTop: 16 }}>
         <div className="panel-head">
           <div>
@@ -952,13 +954,17 @@ function AnalyticsView({ analytics }: { analytics: any }) {
           )}
         </div>
       </section>
+      )}
 
+{/* Temporarily hidden until LinkedIn Community Management analytics access is available. Code intentionally retained. */}
+      {false && (
       <section className="panel" style={{ marginTop: 16 }}>
         <div className="panel-head"><div><div className="panel-title">What will appear here</div><div className="panel-subtitle">Only observed LinkedIn data is used.</div></div></div>
         <div className="panel-body" style={{ color: '#667085', fontSize: 11, lineHeight: 1.7 }}>
           Once analytics access is active, this view will show post impressions, reach, reactions, comments, reshares and engagement trends from LinkedIn's official member analytics API. Brand OS will not scrape LinkedIn or fabricate performance numbers.
         </div>
       </section>
+      )}
     </>
   );
 }
