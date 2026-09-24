@@ -26,10 +26,11 @@ from app.services.brand_intelligence import BrandIntelligenceService
 from app.guards.guardrails import run_content_guards
 from app.integrations.linkedin import MockLinkedInAdapter, OfficialLinkedInAdapter
 from app.models.base import Base
-from app.models.models import ContentItem, ContentVersion, LinkedInConnection, UserProfile, VoiceMemory, AgentRun
+from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LinkedInConnection, UserProfile, VoiceMemory, AgentRun
 from app.services.approval import ApprovalService
 from app.services.auth_service import AuthService
 from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback
+from app.services.gemini_service import ModelRouterService
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,15 @@ class DraftRequest(BaseModel):
     topic: str
     pillar: str = "Expertise"
     body: str
+
+
+class ImproveContentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = ""
+    topic: str = ""
+    body: str
+    language: str | None = None
 
 
 class StrategyRequest(BaseModel):
@@ -391,6 +401,7 @@ async def brand_status(
             "audience": profile.audience if profile else None,
             "brand_positioning": profile.brand_positioning if profile else None,
             "tone": profile.tone if profile else None,
+            "goals": (profile.goals.split(",") if profile and profile.goals else []),
         },
     }
 
@@ -402,6 +413,23 @@ async def brand_memory(
 ):
     service = BrandIntelligenceService(session)
     return service.serialize(await service.get_memory(1))
+
+
+@app.get("/api/brand/source-posts")
+async def brand_source_posts(
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+):
+    result = await session.execute(
+        select(HistoricalPost)
+        .where(HistoricalPost.profile_id == 1)
+        .order_by(HistoricalPost.created_at.asc())
+        .limit(5)
+    )
+    return {"posts": [
+        {"id": post.id, "body": post.body, "published_at": post.published_at, "source": post.source}
+        for post in result.scalars().all()
+    ]}
 
 
 @app.post("/api/brand/onboard")
@@ -607,7 +635,8 @@ async def research_discover(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Live research failed. Check the Gemini configuration and try again.") from exc
+        logger.exception("Live research failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Live research failed. The public source feed or configured LLM provider was unavailable. Please try again.") from exc
 
 
 @app.get("/api/research/opportunities")
@@ -634,6 +663,100 @@ async def build_research_evidence(
 @app.post("/api/voice/profile")
 async def build_voice_profile(req: VoiceRequest):
     return VoiceProfileBuilder().learn(req.approved_examples)
+
+
+@app.post("/api/content/improve")
+async def improve_content(
+    req: ImproveContentRequest,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+):
+    if not req.body.strip():
+        raise HTTPException(status_code=400, detail="Enter a draft before asking Brand OS to improve it.")
+    profile = await session.get(UserProfile, 1)
+    if profile is None:
+        raise HTTPException(status_code=400, detail="Complete Brand Intelligence setup first.")
+
+    brand_context = await BrandIntelligenceService(session).generation_context(1)
+    voice_result = await session.execute(select(VoiceMemory).limit(1))
+    voice = voice_result.scalar_one_or_none()
+    voice_context = {
+        "tone": voice.tone if voice else profile.tone,
+        "sentence_style": voice.sentence_style if voice else "clear and grounded",
+        "preferred_phrases": voice.preferred_phrases if voice else "",
+        "avoid_phrases": voice.avoid_phrases if voice else "",
+        "technical_depth": voice.technical_depth if voice else "moderate",
+    }
+
+    system = """You are the polishing editor inside a human-controlled LinkedIn personal-brand product.
+Improve the user's own draft without changing what they mean.
+
+Rules:
+- Preserve the user's facts, intent, language and personal claims. Never invent experience, metrics, credentials, clients or opinions.
+- If the draft is in Hindi, Hinglish or another language, keep that language unless a change is necessary for clarity.
+- Improve hook, structure, readability, specificity and professional tone.
+- Remove filler, generic AI language and repetition.
+- Do not make the post sound artificially corporate.
+- Do not add unsupported facts.
+- Return JSON only:
+{"title":"","topic":"","body":"","changes":[""],"claims":[{"text":"","support":"user_draft"}]}
+"""
+    prompt = json.dumps({
+        "profile": {
+            "title": profile.professional_title,
+            "industry": profile.industry,
+            "audience": profile.audience,
+            "positioning": profile.brand_positioning,
+        },
+        "brand_intelligence": brand_context,
+        "voice": voice_context,
+        "user_language": req.language,
+        "title": req.title,
+        "topic": req.topic,
+        "draft": req.body,
+    }, ensure_ascii=False)
+
+    try:
+        improved = await ModelRouterService().generate_json(system, prompt, max_output_tokens=2200)
+    except Exception as exc:
+        logger.exception("Content improvement failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Content improvement failed. Please try again.") from exc
+
+    body = str(improved.get("body") or "").strip()
+    if not body:
+        raise HTTPException(status_code=502, detail="The configured LLM provider returned an empty polished draft.")
+    guard = run_content_guards(body)
+    return {
+        "title": str(improved.get("title") or req.title).strip(),
+        "topic": str(improved.get("topic") or req.topic).strip(),
+        "body": body,
+        "changes": improved.get("changes") or [],
+        "claims": improved.get("claims") or [],
+        "guard": guard.__dict__,
+    }
+
+
+@app.get("/api/analytics/overview")
+async def analytics_overview(
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+):
+    async def count(query):
+        return len((await session.execute(query)).scalars().all())
+
+    return {
+        "pipeline": {
+            "historical_posts": await count(select(HistoricalPost.id).where(HistoricalPost.profile_id == 1)),
+            "content_items": await count(select(ContentItem.id)),
+            "pending_approval": await count(select(ApprovalRequest.id).where(ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED"]))),
+            "approved": await count(select(ApprovalRequest.id).where(ApprovalRequest.status == "APPROVED")),
+            "published_via_brand_os": await count(select(ApprovalRequest.id).where(ApprovalRequest.status == "EXECUTED")),
+        },
+        "linkedin_performance": {
+            "available": False,
+            "message": "Live LinkedIn post analytics are not currently connected to this workspace. No performance numbers are fabricated.",
+        },
+    }
 
 
 @app.post("/api/content/drafts")
