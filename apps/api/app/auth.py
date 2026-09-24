@@ -17,7 +17,7 @@ async def _resolve_user(request: Request, credentials: HTTPAuthorizationCredenti
             return user
 
     header_role = request.headers.get("x-user-role")
-    if header_role:
+    if header_role and not settings.is_production:
         normalized = header_role.strip().lower()
         if normalized in {"owner", "admin", "reviewer", "user"}:
             return AppUser(id=normalized, email=f"{normalized}@local.test", role=normalized)
