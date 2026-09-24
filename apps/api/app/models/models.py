@@ -31,7 +31,7 @@ class AuthSession(Base):
 
 class UserProfile(Base):
     __tablename__ = "user_profiles"
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(ForeignKey("auth_users.id"), primary_key=True)
     display_name: Mapped[str] = mapped_column(String(150), default="User")
     professional_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     industry: Mapped[str | None] = mapped_column(String(200), nullable=True)
