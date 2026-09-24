@@ -60,6 +60,7 @@ export default function Home() {
   const [analytics, setAnalytics] = useState<any>(null);
   const [draftLanguage, setDraftLanguage] = useState('');
   const [isImproving, setIsImproving] = useState(false);
+  const [improvementProgress, setImprovementProgress] = useState(0);
   const [improvementNotes, setImprovementNotes] = useState<string[]>([]);
   const [isBuildingBrand, setIsBuildingBrand] = useState(false);
   const [queue, setQueue] = useState<ApprovalItem[]>([]);
@@ -109,6 +110,16 @@ export default function Home() {
     ];
     return () => timers.forEach(window.clearTimeout);
   }, [isGenerating]);
+
+  useEffect(() => {
+    if (!isImproving) {
+      setImprovementProgress(0);
+      return;
+    }
+    setImprovementProgress(12);
+    const timer = window.setTimeout(() => setImprovementProgress(58), 700);
+    return () => window.clearTimeout(timer);
+  }, [isImproving]);
 
   useEffect(() => {
     if (!busyAction) {
@@ -488,7 +499,7 @@ export default function Home() {
                 <Metric icon={CircleCheck} label="Approved" value={summary.reviewed} meta="Ready for execution" />
                 <Metric icon={TrendingUp} label="Published" value={summary.executed} meta="Tracked by Brand OS" />
                 <Metric icon={ShieldCheck} label="Guardrail status" value="ON" meta="Claims · voice · duplicate · action" />
-                <Metric icon={BrainCircuit} label="Brand DNA" value={brand.ready ? 'ACTIVE' : 'INACTIVE'} meta={brand.ready ? ((brand.current_post_count ?? brand.source_post_count) + ' signals in memory') : 'Set up before AI actions'} />
+                <Metric icon={BrainCircuit} label="Brand Pulse" value={brand.ready ? 'ACTIVE' : 'INACTIVE'} meta={brand.ready ? ((brand.current_post_count ?? brand.source_post_count) + ' signals in memory') : 'Set up before AI actions'} />
               </div>
 
               <section className="panel approval-panel">
@@ -688,7 +699,10 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
             <textarea className="textarea" style={{ minHeight: 270 }} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write naturally. Do not worry about formatting — Brand OS will preserve your meaning and improve the presentation." />
           </div>
           <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button className="button primary" disabled={improving || !body.trim()} onClick={onImprove}><WandSparkles size={14}/>{improving ? 'Polishing…' : 'Improvise / polish with Brand OS'}</button>
+            <button className="button primary progress-button" disabled={improving || !body.trim()} onClick={onImprove}>
+              <span className="button-content"><WandSparkles size={14}/>{improving ? 'Polishing…' : 'Improvise / polish with Brand OS'}</span>
+              {improving && <span className="button-progress-track"><span style={{ width: improvementProgress + '%' }} /></span>}
+            </button>
             <button className="button dark" disabled={busy || !body.trim()} onClick={onSubmit}><ShieldCheck size={14}/>{busy ? 'Sending…' : 'Send this version to approval'}</button>
           </div>
           {improvementNotes?.length ? <div style={{ marginTop: 12, padding: 11, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.5 }}><b style={{ color: '#5145cd' }}>What changed:</b> {improvementNotes.join(' · ')}</div> : null}
