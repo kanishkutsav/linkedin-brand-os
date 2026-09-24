@@ -377,3 +377,104 @@ a { color: inherit; }
   border-color: #e7eaf0 !important;
   cursor: default;
 }
+
+/* Mobile editorial workspace: keep review content inside the viewport and make
+   approval/publish actions easy to tap without horizontal scrolling. */
+.review-editor, .review-pane, .queue-layout, .queue-list { min-width: 0; }
+.review-editor .textarea { width: 100%; max-width: 100%; overflow-x: hidden; overflow-wrap: anywhere; }
+.review-actions-publish { margin-top: 10px; }
+.publish-retry-button { min-width: 190px; }
+
+@media (max-width: 760px) {
+  .approval-panel .panel-head {
+    flex-direction: column;
+    gap: 11px;
+  }
+  .approval-panel .panel-head > .button { width: 100%; }
+  .approval-panel .queue-list {
+    padding: 10px;
+  }
+  .approval-panel .filter-row {
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .approval-panel .filter-row::-webkit-scrollbar { display: none; }
+  .approval-panel .filter-chip {
+    flex: 0 0 auto;
+    min-width: 74px;
+    min-height: 34px;
+    padding: 8px 10px;
+  }
+  .approval-panel .queue-items {
+    grid-template-columns: 1fr;
+    max-height: 300px;
+  }
+  .approval-panel .review-pane {
+    padding: 12px;
+    overflow: hidden;
+  }
+  .approval-panel .review-head {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .approval-panel .review-title {
+    font-size: 18px;
+    overflow-wrap: anywhere;
+  }
+  .approval-panel .review-editor {
+    margin-top: 12px;
+    padding: 11px;
+    border-radius: 12px;
+  }
+  .approval-panel .editor-toolbar {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .approval-panel .review-editor .textarea {
+    min-height: 250px;
+    font-size: 14px;
+    line-height: 1.55;
+    padding: 12px;
+  }
+  .approval-panel .review-editor .textarea[style*="min-height: 82px"] {
+    min-height: 90px !important;
+  }
+  .approval-panel .review-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .approval-panel .review-actions .button {
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 8px;
+    white-space: normal;
+  }
+  .approval-panel .review-actions .publish-retry-button,
+  .approval-panel .review-actions-publish {
+    grid-column: 1 / -1;
+  }
+  .approval-panel .notice {
+    margin-top: 12px;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 480px) {
+  .topbar { padding: 0 12px; }
+  .page { padding-left: 10px; padding-right: 10px; }
+  .approval-panel { border-radius: 15px; }
+  .approval-panel .review-pane { padding: 10px; }
+  .approval-panel .review-editor { padding: 9px; }
+  .approval-panel .review-actions {
+    grid-template-columns: 1fr;
+  }
+  .approval-panel .review-actions .button,
+  .approval-panel .review-actions-publish {
+    grid-column: 1;
+  }
+  .approval-panel .review-actions-publish { display: block; }
+  .approval-panel .publish-retry-button { width: 100%; }
+}
