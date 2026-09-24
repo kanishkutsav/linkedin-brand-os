@@ -9,14 +9,13 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.research import ResearchService
 from app.agents.orchestrator import AgentOrchestrator
 from app.agents.strategy import ContentStrategyService
-from app.agents.research import ResearchService
 from app.agents.voice import VoiceProfileBuilder
 from app.auth import require_roles
 from app.core.config import settings
@@ -24,9 +23,9 @@ from app.db.database import engine, get_session, SessionLocal
 from app.services.agent_scheduler import AgentScheduler
 from app.services.brand_intelligence import BrandIntelligenceService
 from app.guards.guardrails import run_content_guards
-from app.integrations.linkedin import MockLinkedInAdapter, OfficialLinkedInAdapter
+from app.integrations.linkedin import OfficialLinkedInAdapter
 from app.models.base import Base
-from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LinkedInConnection, UserProfile, VoiceMemory, AgentRun
+from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LinkedInConnection, UserProfile, VoiceMemory, AgentRun, AuthSession
 from app.services.approval import ApprovalService
 from app.services.auth_service import AuthService
 from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback
@@ -110,7 +109,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-adapter = MockLinkedInAdapter()
 
 
 class DraftRequest(BaseModel):
@@ -143,7 +141,7 @@ class ResearchRequest(BaseModel):
 
     topic: str | None = None
     audience: str | None = None
-    sources: list[dict[str, str]] = []
+    sources: list[dict[str, str]] = Field(default_factory=list)
 
 
 class VoiceRequest(BaseModel):
@@ -180,10 +178,10 @@ class BrandOnboardingRequest(BaseModel):
     professional_title: str | None = None
     industry: str | None = None
     audience: str | None = None
-    goals: list[str] = []
+    goals: list[str] = Field(default_factory=list)
     brand_positioning: str | None = None
     tone: str | None = None
-    posts: list[BrandOnboardingPost] = []
+    posts: list[BrandOnboardingPost] = Field(default_factory=list)
 
 
 class ApprovalEditRequest(BaseModel):
@@ -315,8 +313,26 @@ async def auth_me(
     }
 
 
+@app.post("/api/auth/logout")
+async def auth_logout(
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+    session: AsyncSession = Depends(get_session),
+):
+    token = credentials.credentials if credentials else None
+    if token:
+        token_hash = AuthService.hash_token(token)
+        result = await session.execute(select(AuthSession).where(AuthSession.token_hash == token_hash))
+        session_row = result.scalar_one_or_none()
+        if session_row is not None:
+            await session.delete(session_row)
+            await session.commit()
+    return {"success": True}
+
 @app.get("/api/profile")
-async def get_profile(session: AsyncSession = Depends(get_session)):
+async def get_profile(
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+):
     profile = await session.get(UserProfile, 1)
     if profile is None:
         return {"id": 1, "display_name": "User", "tone": "practical", "role": "owner"}
@@ -333,7 +349,11 @@ async def get_profile(session: AsyncSession = Depends(get_session)):
 
 
 @app.post("/api/profile")
-async def upsert_profile(req: ProfileRequest, session: AsyncSession = Depends(get_session)):
+async def upsert_profile(
+    req: ProfileRequest,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner")),
+):
     profile = await session.get(UserProfile, 1)
     if profile is None:
         profile = UserProfile(
@@ -405,9 +425,9 @@ async def brand_status(
         },
         "source_posts": [
             {"id": post.id, "body": post.body, "published_at": post.published_at, "source": post.source}
-            for post in posts[:5]
+            for post in posts
             if post.source == "user_import"
-        ],
+        ][:5],
     }
 
 
@@ -634,7 +654,10 @@ async def trigger_agent_event(
 
 
 @app.post("/api/strategy/recommend")
-async def recommend_strategy(req: StrategyRequest):
+async def recommend_strategy(
+    req: StrategyRequest,
+    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+):
     return ContentStrategyService().recommend(req.goal, req.audience)
 
 
@@ -680,7 +703,10 @@ async def build_research_evidence(
 
 
 @app.post("/api/voice/profile")
-async def build_voice_profile(req: VoiceRequest):
+async def build_voice_profile(
+    req: VoiceRequest,
+    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+):
     return VoiceProfileBuilder().learn(req.approved_examples)
 
 
@@ -779,7 +805,11 @@ async def analytics_overview(
 
 
 @app.post("/api/content/drafts")
-async def create_draft(req: DraftRequest, session: AsyncSession = Depends(get_session)):
+async def create_draft(
+    req: DraftRequest,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+):
     guard = run_content_guards(req.body)
     item = ContentItem(
         title=req.title,
@@ -900,11 +930,11 @@ async def execute(
             select(LinkedInConnection).where(LinkedInConnection.user_id == int(user.id))
         )
         connection = connection_result.scalar_one_or_none()
-        publish_adapter = (
-            OfficialLinkedInAdapter(connection.access_token, connection.member_sub)
-            if connection is not None
-            else adapter
-        )
+        if connection is None:
+            raise ValueError("Connect your LinkedIn account before publishing.")
+        if connection.token_expires_at and connection.token_expires_at <= datetime.now(timezone.utc):
+            raise ValueError("Your LinkedIn connection has expired. Reconnect LinkedIn before publishing.")
+        publish_adapter = OfficialLinkedInAdapter(connection.access_token, connection.member_sub)
         result = await ApprovalService(session).execute(approval_id, publish_adapter)
         return {
             "success": result.success,

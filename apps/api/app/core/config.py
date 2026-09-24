@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     linkedin_client_id: str | None = None
     linkedin_client_secret: str | None = None
     linkedin_api_base_url: str | None = None
+    linkedin_api_version: str = "202609"
     api_base_url: str | None = None
     linkedin_redirect_uri: str | None = None
 
@@ -58,8 +59,9 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
-        if self.render_external_url and self.render_external_url not in origins:
-            origins.append(self.render_external_url)
+        for origin in (self.render_external_url, self.frontend_url):
+            if origin and origin.rstrip("/") not in {item.rstrip("/") for item in origins}:
+                origins.append(origin.rstrip("/"))
         return origins
 
     @property

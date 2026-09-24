@@ -51,6 +51,48 @@ class ResearchService:
                     items.append({"title": title, "url": link, "published_at": pub, "source": source_name, "query": query})
         return items[:20]
 
+    async def _gdelt_sources(self, profile: UserProfile, requested_topic: str | None) -> list[dict]:
+        queries: list[str] = []
+        if requested_topic:
+            queries.append(requested_topic)
+        if profile.industry:
+            queries.append(f"{profile.industry} technology business")
+        if profile.brand_positioning:
+            queries.append(profile.brand_positioning)
+        if not queries:
+            queries = ["technology business leadership AI"]
+
+        items: list[dict] = []
+        seen: set[str] = set()
+        async with httpx.AsyncClient(
+            timeout=20.0,
+            follow_redirects=True,
+            headers={"User-Agent": "BrandOS/1.0"},
+        ) as client:
+            for query in queries[:3]:
+                url = (
+                    "https://api.gdeltproject.org/api/v2/doc/doc?"
+                    + "query=" + quote_plus(query)
+                    + "&mode=artlist&maxrecords=10&timespan=7d&sort=datedesc&format=json"
+                )
+                response = await client.get(url)
+                response.raise_for_status()
+                data = response.json()
+                for article in (data.get("articles") or [])[:10]:
+                    link = str(article.get("url") or "").strip()
+                    title = str(article.get("title") or "").strip()
+                    if not link.startswith(("https://", "http://")) or not title or link in seen:
+                        continue
+                    seen.add(link)
+                    items.append({
+                        "title": title,
+                        "url": link,
+                        "published_at": str(article.get("seendate") or ""),
+                        "source": str(article.get("domain") or ""),
+                        "query": query,
+                    })
+        return items[:20]
+
     async def research_and_rank(
         self,
         *,
@@ -73,12 +115,22 @@ class ResearchService:
         )
         recent_content = [{"topic": row[0], "created_at": row[1].isoformat() if row[1] else None} for row in recent_content_result.all()]
 
+        source_errors: list[str] = []
         try:
             live_sources = await self._live_sources(profile, requested_topic)
         except Exception as exc:
-            raise RuntimeError(f"Live source discovery failed: {exc}") from exc
+            source_errors.append(f"Google News RSS: {exc}")
+            live_sources = []
+
         if not live_sources:
-            raise RuntimeError("No live public sources were found.")
+            try:
+                live_sources = await self._gdelt_sources(profile, requested_topic)
+            except Exception as exc:
+                source_errors.append(f"GDELT: {exc}")
+                live_sources = []
+
+        if not live_sources:
+            raise RuntimeError("Live source discovery failed. " + " | ".join(source_errors))
 
         prompt = json.dumps({
             "date": datetime.now(timezone.utc).date().isoformat(),
@@ -230,7 +282,7 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
             "rationale": item.rationale,
             "evidence": json.loads(item.evidence_json or "{}"),
             "source_ids": json.loads(item.research_source_ids_json or "[]"),
-            "created_at": item.created_at,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
         }
 
     def build_evidence_pack(self, topic: str, audience: str, sources: list[dict]) -> dict:

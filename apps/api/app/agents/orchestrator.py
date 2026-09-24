@@ -327,9 +327,13 @@ class AgentOrchestrator:
             if text:
                 recent_topics.append(text[:220])
 
-        topic = f"{positioning} — a practical perspective not already covered in the saved posts"
+        topic = f"{positioning} — a fresh practical perspective"
         title = "A practical perspective from your work"
-        objective = "Generate a fresh LinkedIn post grounded in the user's Brand DNA and distinct from saved historical posts."
+        avoid_text = "; ".join(recent_topics[:8]) or "No prior post topics are available."
+        objective = (
+            "Generate a fresh LinkedIn post grounded in the user's Brand DNA and distinct from saved historical posts. "
+            "Avoid repeating the following recent post excerpts or angles: " + avoid_text
+        )
 
         generated = await self._generate_with_gemini(
             profile=profile,
@@ -377,10 +381,13 @@ class AgentOrchestrator:
             "confidence": generated.get("confidence") or "medium",
             "generator": "openrouter_groq_router",
             "research_dependency": False,
+            "blocked_by_guardrails": not guard.passed,
         }
 
+        approval_queued = False
         if guard.passed:
             approval = await ApprovalService(self.session).request(version)
+            approval_queued = True
             self.session.add(
                 AuditLog(
                     event_type="AGENT_CANDIDATE_CREATED",
@@ -411,6 +418,8 @@ class AgentOrchestrator:
             "created_count": 1,
             "content_id": item.id,
             "title": final_title,
+            "approval_queued": approval_queued,
+            "blocked_by_guardrails": not guard.passed,
         }
 
     async def run_event(self, event_type: str, payload: dict | None = None) -> dict:
