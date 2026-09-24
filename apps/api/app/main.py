@@ -233,7 +233,7 @@ async def linkedin_oauth_start(
         httponly=True,
         secure=bool(settings.environment == "production"),
         samesite="lax",
-        path="/",
+        path="/api",
     )
     return response
 
@@ -286,7 +286,7 @@ async def linkedin_oauth_exchange(
         raise HTTPException(status_code=400, detail="LinkedIn exchange browser verification failed.")
     result = await exchange_code(session, req.code)
     response = JSONResponse(result)
-    response.delete_cookie("brand_os_oauth_state", path="/")
+    response.delete_cookie("brand_os_oauth_state", path="/api")
     return response
 
 
