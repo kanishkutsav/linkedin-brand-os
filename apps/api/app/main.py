@@ -429,7 +429,7 @@ async def brand_status(
             {"id": post.id, "body": post.body, "published_at": post.published_at, "source": post.source}
             for post in posts
             if post.source == "user_import"
-        ][:5],
+        ][:10],
     }
 
 
@@ -451,7 +451,7 @@ async def brand_source_posts(
         select(HistoricalPost)
         .where(HistoricalPost.profile_id == 1, HistoricalPost.source == "user_import")
         .order_by(HistoricalPost.created_at.asc())
-        .limit(5)
+        .limit(10)
     )
     return {"posts": [
         {"id": post.id, "body": post.body, "published_at": post.published_at, "source": post.source}
@@ -468,8 +468,8 @@ async def brand_onboard(
 
     if len(req.posts) < 3:
         raise HTTPException(status_code=400, detail="At least 3 previous posts are required to build Brand Intelligence.")
-    if len(req.posts) > 5:
-        raise HTTPException(status_code=400, detail="You can import a maximum of 5 previous posts.")
+    if len(req.posts) > 10:
+        raise HTTPException(status_code=400, detail="You can import a maximum of 10 previous posts.")
     if any(not post.body.strip() for post in req.posts):
         raise HTTPException(status_code=400, detail="Every imported post must contain content.")
 
@@ -488,7 +488,7 @@ async def brand_onboard(
     profile.role = profile.role or "owner"
     await session.commit()
 
-    # The editable 3–5 source posts are a current snapshot. Replace only the
+    # The editable 3–10 source posts are a current snapshot. Replace only the
     # user-imported set on refresh; keep Brand OS published posts as durable evidence.
     await session.execute(
         delete(HistoricalPost).where(
