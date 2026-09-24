@@ -300,6 +300,114 @@ class AgentOrchestrator:
             "created_count": len(created),
         }
 
+    async def run_manual_content_generation(self, trigger: str = "manual_generate_content") -> dict:
+        """Generate a fresh draft without making live research a prerequisite.
+
+        Manual content generation is intentionally independent from the live
+        research feed. Research can enrich opportunities, but a user clicking
+        Generate Content should still receive a draft from their Brand DNA
+        when the public-news feed or research provider is unavailable.
+        """
+        profile = await self._profile()
+        brand = BrandIntelligenceService(self.session)
+        context = await brand.generation_context(profile.id)
+        historical = await brand.get_posts(profile.id, limit=8)
+
+        # Build a deterministic, brand-grounded topic seed from persisted
+        # positioning and recent source posts. The LLM then turns it into the
+        # actual post; no unsupported personal facts are introduced.
+        positioning = profile.brand_positioning or "practical technology and leadership insights"
+        recent_topics = []
+        for post in historical:
+            text = (post.body or "").strip().replace("\n", " ")
+            if text:
+                recent_topics.append(text[:220])
+
+        topic = f"{positioning} — a practical perspective not already covered in the saved posts"
+        title = "A practical perspective from your work"
+        objective = "Generate a fresh LinkedIn post grounded in the user's Brand DNA and distinct from saved historical posts."
+
+        generated = await self._generate_with_gemini(
+            profile=profile,
+            title=title,
+            topic=topic,
+            pillar="Professional insights",
+            objective=objective,
+            evidence=[],
+        )
+
+        if not generated:
+            raise ValueError("The configured content model did not return a usable draft.")
+
+        final_title = str(generated.get("title") or title)[:200]
+        body = str(generated.get("body") or "").strip()
+        if not body:
+            raise ValueError("The configured content model did not return a usable draft.")
+
+        guard = run_content_guards(body)
+        item = ContentItem(
+            title=final_title,
+            topic=topic[:500],
+            pillar="Professional insights",
+            status="AWAITING_APPROVAL" if guard.passed else "EDIT_REQUIRED",
+        )
+        self.session.add(item)
+        await self.session.flush()
+
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        version = ContentVersion(
+            content_id=item.id,
+            body=body,
+            content_hash=digest,
+            version_number=1,
+        )
+        self.session.add(version)
+        await self.session.flush()
+
+        metadata = {
+            "trigger": trigger,
+            "objective": objective,
+            "angle": generated.get("angle") or "",
+            "claims": generated.get("claims") or [],
+            "confidence": generated.get("confidence") or "medium",
+            "generator": "openrouter_groq_router",
+            "research_dependency": False,
+        }
+
+        if guard.passed:
+            approval = await ApprovalService(self.session).request(version)
+            self.session.add(
+                AuditLog(
+                    event_type="AGENT_CANDIDATE_CREATED",
+                    actor="agent-orchestrator",
+                    payload=json.dumps(
+                        {"approval": approval.id, "content": item.id, "topic": topic, "metadata": metadata},
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+        else:
+            self.session.add(
+                AuditLog(
+                    event_type="AGENT_CANDIDATE_BLOCKED",
+                    actor="agent-orchestrator",
+                    payload=json.dumps(
+                        {"content": item.id, "topic": topic, "issues": guard.issues, "metadata": metadata},
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+
+        await self.session.commit()
+        return {
+            "mode": "manual_content",
+            "trigger": trigger,
+            "created_content_ids": [item.id],
+            "created_count": 1,
+            "content_id": item.id,
+            "title": final_title,
+        }
+
     async def run_event(self, event_type: str, payload: dict | None = None) -> dict:
         payload = payload or {}
         profile = await self._profile()
