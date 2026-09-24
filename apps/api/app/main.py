@@ -875,7 +875,11 @@ async def approve(
     _: str = Depends(require_roles("admin", "reviewer", "owner")),
 ):
     try:
-        approval = await ApprovalService(session).approve(approval_id)
+        existing = await session.get(ApprovalRequest, approval_id)
+        if existing and existing.status == "APPROVED":
+            approval = existing
+        else:
+            approval = await ApprovalService(session).approve(approval_id)
 
         # Approval is the explicit human authorization. Once granted, publish
         # immediately through the connected official LinkedIn API so the UI
