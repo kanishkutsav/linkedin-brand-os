@@ -29,7 +29,7 @@ from app.models.base import Base
 from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LinkedInConnection, UserProfile, VoiceMemory, AgentRun, AuthSession
 from app.services.approval import ApprovalService
 from app.services.auth_service import AuthService
-from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback
+from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback, sync_linkedin_profile
 from app.services.linkedin_analytics import LinkedInAnalyticsService
 from app.services.gemini_service import ModelRouterService
 
@@ -253,6 +253,17 @@ async def linkedin_oauth_exchange(
     return await exchange_code(session, req.code)
 
 
+@app.post("/api/linkedin/sync-profile")
+async def linkedin_sync_profile(
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+    session: AsyncSession = Depends(get_session),
+):
+    user = await AuthService.get_user_from_token(session, credentials.credentials if credentials else None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return await sync_linkedin_profile(session, int(user.id))
+
+
 @app.get("/api/linkedin/status")
 async def linkedin_status(
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
@@ -333,7 +344,7 @@ async def auth_logout(
 @app.get("/api/profile")
 async def get_profile(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     profile = await session.get(UserProfile, 1)
     if profile is None:
@@ -354,7 +365,7 @@ async def get_profile(
 async def upsert_profile(
     req: ProfileRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner")),
+    _: str = Depends(require_roles("admin", "owner", "user")),
 ):
     profile = await session.get(UserProfile, 1)
     if profile is None:
@@ -401,7 +412,7 @@ async def upsert_profile(
 @app.get("/api/brand/status")
 async def brand_status(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     service = BrandIntelligenceService(session)
     memory = await service.get_memory(1)
@@ -436,7 +447,7 @@ async def brand_status(
 @app.get("/api/brand/memory")
 async def brand_memory(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     service = BrandIntelligenceService(session)
     return service.serialize(await service.get_memory(1))
@@ -445,7 +456,7 @@ async def brand_memory(
 @app.get("/api/brand/source-posts")
 async def brand_source_posts(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     result = await session.execute(
         select(HistoricalPost)
@@ -463,7 +474,7 @@ async def brand_source_posts(
 async def brand_onboard(
     req: BrandOnboardingRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner")),
+    _: str = Depends(require_roles("admin", "owner", "user")),
 ):
 
     if len(req.posts) < 3:
@@ -527,7 +538,7 @@ async def brand_onboard(
 async def brand_initialize(
     req: ProfileRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner")),
+    _: str = Depends(require_roles("admin", "owner", "user")),
 ):
     profile = await session.get(UserProfile, 1)
     if profile is None:
@@ -555,7 +566,7 @@ async def brand_initialize(
 @app.post("/api/brand/rebuild")
 async def rebuild_brand(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner")),
+    _: str = Depends(require_roles("admin", "owner", "user")),
 ):
     service = BrandIntelligenceService(session)
     try:
@@ -569,7 +580,7 @@ async def rebuild_brand(
 @app.get("/api/dashboard/approvals")
 async def dashboard_approvals(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "reviewer", "owner")),
+    _: str = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
     approvals = await ApprovalService(session).list_dashboard()
     records = []
@@ -595,7 +606,7 @@ async def dashboard_approvals(
 @app.get("/api/agent/status")
 async def agent_status(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "reviewer", "owner")),
+    _: str = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
     result = await session.execute(
         select(AgentRun).order_by(AgentRun.started_at.desc()).limit(10)
@@ -635,7 +646,7 @@ class AgentEventRequest(BaseModel):
 async def trigger_agent_event(
     req: AgentEventRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner")),
+    _: str = Depends(require_roles("admin", "owner", "user")),
 ):
     run = AgentRun(mode="event", trigger=f"event:{req.event_type}", status="RUNNING")
     session.add(run)
@@ -663,7 +674,7 @@ async def trigger_agent_event(
 @app.post("/api/strategy/recommend")
 async def recommend_strategy(
     req: StrategyRequest,
-    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     return ContentStrategyService().recommend(req.goal, req.audience)
 
@@ -672,7 +683,7 @@ async def recommend_strategy(
 async def research_discover(
     req: ResearchRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     try:
         opportunities = await ResearchService(session).research_and_rank(
@@ -691,7 +702,7 @@ async def research_discover(
 @app.get("/api/research/opportunities")
 async def research_opportunities(
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     return {"opportunities": await ResearchService(session).list_opportunities(1, 20)}
 
@@ -700,7 +711,7 @@ async def research_opportunities(
 async def build_research_evidence(
     req: ResearchRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     return ResearchService(session).build_evidence_pack(
         req.topic or "",
@@ -712,7 +723,7 @@ async def build_research_evidence(
 @app.post("/api/voice/profile")
 async def build_voice_profile(
     req: VoiceRequest,
-    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     return VoiceProfileBuilder().learn(req.approved_examples)
 
@@ -721,7 +732,7 @@ async def build_voice_profile(
 async def improve_content(
     req: ImproveContentRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     if not req.body.strip():
         raise HTTPException(status_code=400, detail="Enter a draft before asking Brand OS to improve it.")
@@ -815,7 +826,7 @@ Rules:
 async def analytics_overview(
     session: AsyncSession = Depends(get_session),
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
-    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     async def count(query):
         return len((await session.execute(query)).scalars().all())
@@ -882,7 +893,7 @@ async def analytics_overview(
 async def create_draft(
     req: DraftRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner", "reviewer")),
+    _: str = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     guard = run_content_guards(req.body)
     item = ContentItem(
@@ -917,7 +928,7 @@ async def approve(
     approval_id: int,
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "reviewer", "owner")),
+    _: str = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
     try:
         existing = await session.get(ApprovalRequest, approval_id)
@@ -965,7 +976,7 @@ async def edit_approval(
     approval_id: int,
     req: ApprovalEditRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "reviewer", "owner")),
+    _: str = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
     try:
         approval = await ApprovalService(session).edit(approval_id, req.edited_body, req.reason)
@@ -984,7 +995,7 @@ async def reject_approval(
     approval_id: int,
     req: ApprovalDecisionRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "reviewer", "owner")),
+    _: str = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
     try:
         approval = await ApprovalService(session).reject(approval_id, req.reason)
@@ -1002,7 +1013,7 @@ async def regenerate_approval(
     approval_id: int,
     req: ApprovalDecisionRequest,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "reviewer", "owner")),
+    _: str = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
     try:
         approval = await ApprovalService(session).regenerate(approval_id, req.reason)
@@ -1020,7 +1031,7 @@ async def execute(
     approval_id: int,
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_roles("admin", "owner")),
+    _: str = Depends(require_roles("admin", "owner", "user")),
 ):
     try:
         user = await AuthService.get_user_from_token(

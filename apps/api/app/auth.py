@@ -49,7 +49,7 @@ def require_roles(*allowed_roles: str):
                 )
             return "owner"
 
-        if role not in {"owner", "admin", "reviewer"}:
+        if role not in {"owner", "admin", "reviewer", "user"}:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient role permissions",
