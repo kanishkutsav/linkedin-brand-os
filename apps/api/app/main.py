@@ -870,6 +870,7 @@ async def create_draft(
 @app.post("/api/approvals/{approval_id}/approve")
 async def approve(
     approval_id: int,
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     session: AsyncSession = Depends(get_session),
     _: str = Depends(require_roles("admin", "reviewer", "owner")),
 ):
