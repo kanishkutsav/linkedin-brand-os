@@ -570,20 +570,25 @@ async def dashboard_approvals(
     session: AsyncSession = Depends(get_session),
     _: str = Depends(require_roles("admin", "reviewer", "owner")),
 ):
-    approvals = await ApprovalService(session).list_pending()
-    pending = []
+    approvals = await ApprovalService(session).list_dashboard()
+    records = []
     for item in approvals:
         version = await session.get(ContentVersion, item.content_version_id)
-        pending.append(
+        content_item = await session.get(ContentItem, version.content_id) if version else None
+        records.append(
             {
                 "id": item.id,
                 "status": item.status,
                 "action_type": item.action_type,
                 "reason": item.reason,
                 "content": version.body if version else "",
+                "title": content_item.title if content_item else "",
+                "topic": content_item.topic if content_item else "",
+                "approved_at": item.approved_at,
+                "created_at": item.created_at,
             }
         )
-    return {"pending_approvals": pending}
+    return {"pending_approvals": records}
 
 
 @app.get("/api/agent/status")
