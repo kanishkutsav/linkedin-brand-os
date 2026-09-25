@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from sqlalchemy import String, Text, DateTime, Boolean, Integer, ForeignKey, Float
 from sqlalchemy.orm import Mapped, mapped_column
+from pgvector.sqlalchemy import Vector
 from .base import Base
 
 
@@ -242,3 +243,38 @@ class ContentOpportunity(Base):
     research_source_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     evidence_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class LearningEvent(Base):
+    __tablename__ = "learning_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id", ondelete="CASCADE"), index=True, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(60), index=True)
+    source_type: Mapped[str] = mapped_column(String(60))
+    source_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    content: Mapped[str] = mapped_column(Text)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="PENDING", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class LearningMemory(Base):
+    __tablename__ = "learning_memories"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id", ondelete="CASCADE"), index=True, nullable=False)
+    memory_key: Mapped[str] = mapped_column(String(180))
+    memory_type: Mapped[str] = mapped_column(String(50), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[str] = mapped_column(String(20), default="medium")
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    source_count: Mapped[int] = mapped_column(Integer, default=1)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    first_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

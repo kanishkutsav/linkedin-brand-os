@@ -215,6 +215,9 @@ Hard rules:
 - Never invent the user's experiences, achievements, credentials, metrics, clients, employers, opinions, or first-hand observations.
 - Do not present model knowledge as newly researched fact.
 - Treat brand_intelligence as durable instructions about the user's identity, expertise, themes and writing patterns.
+- Treat learning_memory as observed behavior, not absolute truth. Weight high-confidence repeated signals more than one-off events.
+- A research query signals interest, not belief. A personal thought signals a possible viewpoint, not a published position. Approved and published content is the strongest evidence.
+- Never reveal or mention the internal learning system in the post.
 - Use historical_examples to learn structure, specificity, pacing and voice; do not copy their sentences or pretend a historical example is a new experience.
 - Prefer the user's observed themes and real experience signals over generic technology commentary.
 - Do not force every post to mention AI, automation or technology unless the supplied brand context supports it.
@@ -243,6 +246,8 @@ Hard rules:
                 "generation_rules": {
 
                     "use_brand_memory": True,
+                    "use_learning_memory": True,
+                    "learning_is_observational_not_authoritative": True,
                     "use_historical_examples_as_style_reference_only": True,
                     "never_copy_historical_sentences": True,
                     "never_invent_personal_experience": True,

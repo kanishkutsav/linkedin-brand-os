@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.models.models import AgentRun, BrandMemory, UserProfile
 
 from app.agents.orchestrator import AgentOrchestrator
+from app.services.brand_learning import BrandLearningService
 from app.core.config import settings
 
 
@@ -66,6 +67,13 @@ class AgentScheduler:
                 ):
                     await self._run("calendar")
                     self._last_calendar_date = now.date().isoformat()
+
+            async with self.session_factory() as learning_session:
+                try:
+                    await BrandLearningService(learning_session).process_pending(limit=10)
+                except Exception as exc:
+                    # Learning is additive. A temporary embedding/LLM outage must never affect scheduled content generation.
+                    print(f"Brand learning cycle skipped: {exc}")
 
             await asyncio.sleep(30)
 

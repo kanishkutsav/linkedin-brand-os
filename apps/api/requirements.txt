@@ -9,3 +9,5 @@ asyncpg==0.30.0
 python-multipart==0.0.20
 httpx==0.28.1
 google-genai
+
+pgvector==0.5.0

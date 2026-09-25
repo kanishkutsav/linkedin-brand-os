@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # to the same provider router.
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.8-flash"
+    learning_embedding_model: str = "gemini-embedding-001"
 
     agent_enabled: bool = True
     agent_timezone: str = "Asia/Kolkata"

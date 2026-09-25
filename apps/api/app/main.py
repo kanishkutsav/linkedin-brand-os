@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.db.database import engine, get_session, SessionLocal
 from app.services.agent_scheduler import AgentScheduler
 from app.services.brand_intelligence import BrandIntelligenceService
+from app.services.brand_learning import BrandLearningService
 from app.guards.guardrails import normalize_human_style, run_content_guards
 from app.integrations.linkedin import OfficialLinkedInAdapter
 from app.models.base import Base
@@ -180,6 +181,13 @@ class ResearchRequest(BaseModel):
 
     topic: str | None = None
     sources: list[dict[str, str]] = Field(default_factory=list)
+
+
+class LearningThoughtRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content: str
+    topic: str | None = None
+    title: str | None = None
 
 
 class VoiceRequest(BaseModel):
@@ -714,6 +722,31 @@ async def build_research_evidence(
     )
 
 
+@app.post("/api/learning/thought")
+async def save_learning_thought(req: LearningThoughtRequest, session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
+    content = (req.content or "").strip()
+    if len(content) < 10:
+        raise HTTPException(status_code=400, detail="Write a little more so Brand OS has a useful idea to learn from.")
+    if len(content) > 20000:
+        raise HTTPException(status_code=400, detail="Thoughts are limited to 20,000 characters.")
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    event_id = await BrandLearningService(session).record_event(
+        profile_id=profile.id,
+        event_type="USER_THOUGHT",
+        source_type="manual_thought",
+        content=content,
+        metadata={"topic": (req.topic or "").strip()[:300], "title": (req.title or "").strip()[:200]},
+    )
+    await session.commit()
+    return {"saved": True, "event_id": event_id}
+
+
+@app.get("/api/learning/status")
+async def learning_status(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    return await BrandLearningService(session).summary(profile.id)
+
+
 @app.post("/api/voice/profile")
 async def build_voice_profile(
     req: VoiceRequest,
@@ -746,20 +779,11 @@ async def improve_content(
     if memory is None or memory.status != "READY":
         raise HTTPException(status_code=400, detail="Complete Brand Intelligence setup first.")
 
-    # Polishing should not trigger a hidden Brand DNA re-analysis. The user's
-    # saved Brand DNA is the source of truth and the editor should stay fast.
-    recent_posts = await brand_service.get_posts(profile.id, limit=3)
-    brand_context = {
-        "brand_memory": brand_service.serialize(memory),
-        "historical_examples": [
-            {
-                "published_at": post.published_at.isoformat() if post.published_at else None,
-                "source": post.source,
-                "body": post.body[:1200],
-            }
-            for post in recent_posts
-        ],
-    }
+    # Polishing stays fast and uses the saved Brand DNA plus relevant learning memory.
+    brand_context = await brand_service.generation_context(
+        profile.id,
+        query=f"{req.title} {req.topic}".strip(),
+    )
     voice_result = await session.execute(
         select(VoiceMemory).where(VoiceMemory.profile_id == profile.id).limit(1)
     )
@@ -946,6 +970,16 @@ async def create_draft(
     session.add(version)
     await session.commit()
     await session.refresh(version)
+
+    await BrandLearningService(session).record_event(
+        profile_id=profile.id,
+        event_type="CONTENT_DRAFT",
+        source_type="manual_content",
+        source_id=version.id,
+        content=req.body,
+        metadata={"title": req.title, "topic": req.topic, "guard_passed": guard.passed},
+    )
+    await session.commit()
 
     approval = None
     if guard.passed:

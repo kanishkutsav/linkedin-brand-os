@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import ContentItem, ContentOpportunity, ResearchSource, UserProfile
 from app.services.brand_intelligence import BrandIntelligenceService
 from app.services.gemini_service import ModelRouterService
+from app.services.brand_learning import BrandLearningService
 
 
 class ResearchService:
@@ -23,7 +24,7 @@ class ResearchService:
     def __init__(self, session: AsyncSession | None = None):
         self.session = session
 
-    async def _live_sources(self, profile: UserProfile, requested_topic: str | None) -> list[dict]:
+    async def _live_sources(self, profile: UserProfile, requested_topic: str | None, learned_queries: list[str] | None = None) -> list[dict]:
         queries = []
         if requested_topic:
             queries.append(requested_topic)
@@ -33,6 +34,9 @@ class ResearchService:
             queries.append(profile.professional_title)
         if profile.experience_years is not None:
             queries.append(f"{profile.industry or 'professional'} {profile.experience_years:g} years experience")
+        for learned in (learned_queries or [])[:2]:
+            if learned and learned not in queries:
+                queries.append(learned)
         if not queries:
             queries = ["technology business leadership AI"]
 
@@ -66,7 +70,7 @@ class ResearchService:
                     items.append(item)
         return items[:16]
 
-    async def _gdelt_sources(self, profile: UserProfile, requested_topic: str | None) -> list[dict]:
+    async def _gdelt_sources(self, profile: UserProfile, requested_topic: str | None, learned_queries: list[str] | None = None) -> list[dict]:
         queries: list[str] = []
         if requested_topic:
             queries.append(requested_topic)
@@ -76,6 +80,9 @@ class ResearchService:
             queries.append(profile.professional_title)
         if profile.experience_years is not None:
             queries.append(f"{profile.industry or 'professional'} {profile.experience_years:g} years experience")
+        for learned in (learned_queries or [])[:2]:
+            if learned and learned not in queries:
+                queries.append(learned)
         if not queries:
             queries = ["technology business leadership AI"]
 
@@ -193,8 +200,20 @@ class ResearchService:
             raise ValueError("Profile is not initialized.")
 
         brand = BrandIntelligenceService(self.session)
-        context = await brand.generation_context(profile_id)
+        context = await brand.generation_context(profile_id, query=requested_topic or "current topics relevant to my professional brand")
         historical = await brand.get_posts(profile_id, limit=12)
+        learning_memory = context.get("learning_memory") or {}
+        learned_queries = [
+            str(item.get("content") or "").strip()[:240]
+            for item in (learning_memory.get("memories") or [])
+            if item.get("type") in {"topic", "interest"} and str(item.get("content") or "").strip()
+        ][:2]
+        semantic_interest_queries = [
+            str(item.get("content") or "").strip()[:240]
+            for item in (learning_memory.get("semantic_matches") or {}).get("memories", [])
+            if str(item.get("content") or "").strip()
+        ][:2]
+        learned_queries = list(dict.fromkeys(learned_queries + semantic_interest_queries))[:3]
         recent_content_result = await self.session.execute(
             select(ContentItem.topic, ContentItem.created_at)
             .where(ContentItem.profile_id == profile_id)
@@ -204,8 +223,8 @@ class ResearchService:
         recent_content = [{"topic": row[0], "created_at": row[1].isoformat() if row[1] else None} for row in recent_content_result.all()]
 
         source_errors: list[str] = []
-        google_task = asyncio.create_task(self._live_sources(profile, requested_topic))
-        gdelt_task = asyncio.create_task(self._gdelt_sources(profile, requested_topic))
+        google_task = asyncio.create_task(self._live_sources(profile, requested_topic, learned_queries))
+        gdelt_task = asyncio.create_task(self._gdelt_sources(profile, requested_topic, learned_queries))
         google_result, gdelt_result = await asyncio.gather(google_task, gdelt_task, return_exceptions=True)
 
         live_sources: list[dict] = []
@@ -223,6 +242,16 @@ class ResearchService:
                 deduped_sources.append(source)
         live_sources = deduped_sources[:20]
         live_sources = await self._enrich_source_context(live_sources)
+
+        if requested_topic:
+            await BrandLearningService(self.session).record_event(
+                profile_id=profile_id,
+                event_type="RESEARCH_QUERY",
+                source_type="research",
+                source_id=f"{datetime.now(timezone.utc).date().isoformat()}:{requested_topic.strip().lower()[:220]}",
+                content=requested_topic.strip(),
+                metadata={"explicit_user_query": True},
+            )
 
         if not live_sources:
             # Do not turn a temporary public-feed outage into a hard Research failure.
@@ -259,6 +288,8 @@ Hard rules:
 - Never invent a personal experience, credential, client, employer, metric or opinion.
 - Do not recommend a topic merely because it is popular.
 - Prefer developments where the user's documented expertise gives them a useful lens.
+- Use learning_memory to understand recurring interests and avoid stale or repetitive suggestions.
+- A research query signals interest, not belief. Never turn research activity into a claimed opinion.
 - Penalize topics already covered in recent content or historical posts.
 - Distinguish facts from interpretation.
 - If evidence is weak, say so and lower evidence_strength.

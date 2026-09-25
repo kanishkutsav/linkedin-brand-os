@@ -97,6 +97,8 @@ export default function Home() {
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [learningStatus, setLearningStatus] = useState({ pending_events: 0, memory_count: 0 });
+  const [savingThought, setSavingThought] = useState(false);
 
   const headers = (authToken = token) => authToken ? { Authorization: `Bearer ${authToken}` } : {};
 
@@ -277,11 +279,13 @@ useEffect(() => {
       void Promise.all([
         fetch(`${API_BASE}/api/research/opportunities`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/analytics/overview`, { headers: headers(authToken) }),
-      ]).then(async ([opportunityRes, analyticsRes]) => {
+        fetch(`${API_BASE}/api/learning/status`, { headers: headers(authToken) }),
+      ]).then(async ([opportunityRes, analyticsRes, learningRes]) => {
         const opportunityJson = opportunityRes.ok ? await opportunityRes.json() : { opportunities: [] };
         setOpportunities(opportunityJson.opportunities || []);
         const analyticsJson = analyticsRes.ok ? await analyticsRes.json() : null;
         setAnalytics(analyticsJson);
+        if (learningRes.ok) setLearningStatus(await learningRes.json());
       }).catch(() => {
         // Optional panels are allowed to fail without affecting the core workspace.
       });
@@ -593,6 +597,29 @@ useEffect(() => {
     finally { setIsImproving(false); }
   };
 
+  const saveThought = async () => {
+    if (!token || !draftBody.trim()) {
+      setError('Write something first so Brand OS has a useful thought to learn from.');
+      return;
+    }
+    if (!requireBrand('saving a personal thought')) return;
+    setSavingThought(true); setError(null); setNotice(null);
+    try {
+      const res = await fetch(API_BASE + '/api/learning/thought', {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: draftBody, topic: draftTopic, title: draftTitle }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(getApiError(data, 'Could not save this thought'));
+      setNotice('Saved as a personal thought. Brand OS will learn from it without treating it as a published opinion.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save this thought');
+    } finally {
+      setSavingThought(false);
+    }
+  };
+
   const createDraft = async () => {
     if (!token || !draftTitle.trim() || !draftTopic.trim() || !draftBody.trim()) {
       setError('Title, topic and draft body are required.'); return;
@@ -727,7 +754,7 @@ useEffect(() => {
           )}
 
           {tab === 'Research' && <ResearchView opportunities={opportunities} researchFocus={researchFocus} setResearchFocus={setResearchFocus} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
-          {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} />}
+          {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
           {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'APPROVED' || item.status === 'EXECUTED')} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
           {tab === 'Brand DNA' && (
@@ -1023,7 +1050,7 @@ function ResearchView({ opportunities, researchFocus, setResearchFocus, isResear
   return (
     <>
       <div className="page-header">
-        <div><div className="page-kicker"><Search size={13}/> Intelligence layer</div><h1 className="page-title">Research & opportunities</h1><p className="page-description">{hasResearch ? 'Your latest research is below. Add a focus whenever you want Brand OS to explore a specific topic.' : 'Live evidence is combined with your Brand DNA before an idea reaches the drafting engine.'}</p></div>
+        <div><div className="page-kicker"><Search size={13}/> Intelligence layer</div><h1 className="page-title">Research & opportunities</h1><p className="page-description">{hasResearch ? 'Your latest research is below. Add a focus whenever you want Brand OS to explore a specific topic.' : 'Live evidence is combined with your Brand DNA, recent research interests and learned context before an idea reaches the drafting engine.'}</p></div>
         <button className="button primary progress-button" onClick={onResearch} disabled={isResearching}>
           <span className="button-content"><Search size={14}/>{isResearching ? researchStage || 'Researching…' : hasResearch ? 'Research now' : 'Run research'}</span>
           {isResearching && <span className="button-progress-track"><span style={{ width: researchProgress + '%' }} /></span>}
@@ -1033,7 +1060,7 @@ function ResearchView({ opportunities, researchFocus, setResearchFocus, isResear
       <section className="panel research-focus-panel">
         <div className="research-focus-copy">
           <div className="panel-title">Guide the research <span className="form-help">(optional)</span></div>
-          <div className="panel-subtitle">Tell Brand OS what you want to explore. Leave it blank to research from your Brand DNA.</div>
+          <div className="panel-subtitle">Tell Brand OS what you want to explore. Leave it blank and Brand OS will use your Brand DNA plus what it has learned from your research and content.</div>
         </div>
         <div className="research-focus-row">
           <div className="research-focus-input">
@@ -1110,7 +1137,7 @@ function ResearchCard({ item }: { item: Opportunity }) {
   );
 }
 
-function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBody, language, setLanguage, busy, improving, improvementProgress, improvementNotes, onImprove, onSubmit }: any) {
+function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBody, language, setLanguage, busy, improving, improvementProgress, improvementNotes, onImprove, onSubmit, savingThought, onSaveThought, learningStatus }: any) {
   return (
     <>
       <div className="page-header">
@@ -1118,6 +1145,7 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
           <div className="page-kicker"><WandSparkles size={13}/> Editorial studio</div>
           <h1 className="page-title">Write it your way. Let Brand OS polish it.</h1>
           <p className="page-description">Start with your own idea and wording in any language. Brand OS can improve structure and clarity using your Brand DNA, then you preview the exact version before it enters the approval queue.</p>
+          <div className="form-help" style={{ marginTop: 8 }}>Brand learning is active · {learningStatus?.memory_count ?? 0} learned signals · {learningStatus?.pending_events ?? 0} queued for processing</div>
         </div>
       </div>
       <section className="panel studio-grid">
@@ -1135,6 +1163,7 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
               {improving && <span className="button-progress-track"><span style={{ width: improvementProgress + '%' }} /></span>}
             </button>
             <button className="button dark" disabled={busy || !body.trim()} onClick={onSubmit}><ShieldCheck size={14}/>{busy ? 'Sending…' : 'Send this version to approval'}</button>
+            <button className="button" disabled={savingThought || !body.trim()} onClick={onSaveThought}>{savingThought ? 'Saving…' : 'Save as personal thought'}</button>
           </div>
           {improvementNotes?.length ? <div style={{ marginTop: 12, padding: 11, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.5 }}><b style={{ color: '#5145cd' }}>What changed:</b> {improvementNotes.join(' · ')}</div> : null}
         </div>

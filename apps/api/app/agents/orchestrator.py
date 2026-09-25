@@ -126,7 +126,7 @@ class AgentOrchestrator:
     ) -> dict:
         service = ModelRouterService()
         if brand_context is None:
-            brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id)
+            brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id, query=f"{topic} {objective}".strip())
         return await service.create_post(
             profile={
                 "name": profile.display_name,
@@ -161,7 +161,7 @@ class AgentOrchestrator:
         profile = await self._profile()
         # Do not produce generic drafts. Every autonomous draft must be grounded
         # in the user's initialized Brand DNA and historical content.
-        brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id)
+        brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id, query=f"{topic} {objective}".strip())
 
         generated = await self._generate_with_gemini(
             profile=profile,
@@ -343,7 +343,8 @@ class AgentOrchestrator:
         """
         profile = await self._profile()
         brand = BrandIntelligenceService(self.session)
-        context = await brand.generation_context(profile.id)
+        positioning = profile.professional_title or profile.industry or "professional expertise"
+        context = await brand.generation_context(profile.id, query=f"{positioning} fresh practical perspective".strip())
         historical = await brand.get_posts(profile.id, limit=5)
 
         # Build a deterministic, brand-grounded topic seed from persisted
