@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.8-flash"
     learning_embedding_model: str = "gemini-embedding-001"
+    published_post_retention_limit: int = 10
+    learning_event_retention_days: int = 30
 
     agent_enabled: bool = True
     agent_timezone: str = "Asia/Kolkata"
