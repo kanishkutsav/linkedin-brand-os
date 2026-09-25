@@ -71,9 +71,9 @@ class AgentScheduler:
             async with self.session_factory() as learning_session:
                 try:
                     await BrandLearningService(learning_session).process_pending(limit=10)
-                except Exception:
+                except Exception as exc:
                     # Learning is additive. A temporary embedding/LLM outage must never affect scheduled content generation.
-                    pass
+                    print(f"Brand learning cycle skipped: {exc}")
 
             await asyncio.sleep(30)
 
