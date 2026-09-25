@@ -30,7 +30,7 @@ from app.models.base import Base
 from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LinkedInConnection, UserProfile, VoiceMemory, AgentRun, AuthSession
 from app.services.approval import ApprovalService
 from app.services.auth_service import AppUser, AuthService
-from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback, sync_linkedin_profile
+from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback
 from app.services.linkedin_analytics import LinkedInAnalyticsService
 from app.services.gemini_service import ModelRouterService
 
@@ -287,17 +287,6 @@ async def linkedin_oauth_exchange(
     response = JSONResponse(result)
     response.delete_cookie("brand_os_oauth_state", path="/api")
     return response
-
-
-@app.post("/api/linkedin/sync-profile")
-async def linkedin_sync_profile(
-    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
-    session: AsyncSession = Depends(get_session),
-):
-    user = await AuthService.get_user_from_token(session, credentials.credentials if credentials else None)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    return await sync_linkedin_profile(session, int(user.id))
 
 
 @app.get("/api/linkedin/status")
