@@ -42,14 +42,9 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.8-flash"
 
+    # Scheduled generation is owned by Render Cron Jobs. This flag remains
+    # available as the application-level kill switch for scheduled entrypoints.
     agent_enabled: bool = True
-    agent_timezone: str = "Asia/Kolkata"
-    agent_daily_discovery_enabled: bool = True
-    agent_daily_discovery_hour: int = 9
-    agent_daily_discovery_minute: int = 0
-    agent_calendar_enabled: bool = True
-    agent_calendar_hour: int = 9
-    agent_calendar_minute: int = 15
 
     model_config = SettingsConfigDict(
         env_file=".env",
