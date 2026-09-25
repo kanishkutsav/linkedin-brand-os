@@ -223,7 +223,17 @@ Return:
     async def generation_context(self, profile_id: int) -> dict:
         memory = await self.get_memory(profile_id)
         if memory is None or memory.status != "READY":
-            raise ValueError("Brand Intelligence is not initialized. Complete the lightweight profile setup first.")
+            raise ValueError("Brand Intelligence is not initialized. Complete the Brand DNA setup first.")
+        profile = await self.session.get(UserProfile, profile_id)
+        if profile is None:
+            raise ValueError("Complete the Brand DNA setup first.")
+        if (
+            not profile.professional_title
+            or not profile.industry
+            or not profile.tone
+            or profile.experience_years is None
+        ):
+            raise ValueError("Complete Professional Title, Industry, Desired Tone and Years of Experience before generating content.")
 
         count_result = await self.session.execute(
             select(func.count(HistoricalPost.id)).where(HistoricalPost.profile_id == profile_id)
