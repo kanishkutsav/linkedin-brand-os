@@ -409,3 +409,5 @@ a { color: inherit; }
   .approval-panel .review-actions { grid-template-columns: 1fr; }
   .approval-panel .review-actions-publish { grid-column: 1; }
 }
+
+/* Production deployment marker: Brand DNA field alignment */
