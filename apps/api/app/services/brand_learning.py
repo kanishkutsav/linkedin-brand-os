@@ -111,6 +111,7 @@ class BrandLearningService:
             .where(LearningEvent.status == "PENDING")
             .order_by(LearningEvent.created_at.asc())
             .limit(max(1, min(limit, 50)))
+            .with_for_update(skip_locked=True)
         )
         events = list(result.scalars().all())
         if not events:
