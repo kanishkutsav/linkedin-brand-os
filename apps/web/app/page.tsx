@@ -83,6 +83,7 @@ export default function Home() {
   const [generationProgress, setGenerationProgress] = useState(0);
   const [generationStage, setGenerationStage] = useState('');
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [researchFocus, setResearchFocus] = useState('');
   const [isResearching, setIsResearching] = useState(false);
   const [researchProgress, setResearchProgress] = useState(0);
   const [researchStage, setResearchStage] = useState('');
@@ -440,7 +441,7 @@ useEffect(() => {
     setError(null); setNoticeTtl(4500); setNotice(null);
     try {
       const res = await fetch(API_BASE + '/api/research/discover', {
-        method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+        method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: researchFocus.trim() || null }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, 'Live research failed'));
@@ -908,43 +909,94 @@ function LinkedInPostsView({ posts }: { posts: ApprovalItem[] }) {
   );
 }
 
-function ResearchView({ opportunities, isResearching, researchProgress, researchStage, onResearch }: { opportunities: Opportunity[]; isResearching: boolean; researchProgress: number; researchStage: string; onResearch: () => void }) {
+function ResearchView({ opportunities, researchFocus, setResearchFocus, isResearching, researchProgress, researchStage, onResearch }: { opportunities: Opportunity[]; researchFocus: string; setResearchFocus: (value: string) => void; isResearching: boolean; researchProgress: number; researchStage: string; onResearch: () => void }) {
+  const hasResearch = opportunities.length > 0;
   return (
     <>
       <div className="page-header">
-        <div><div className="page-kicker"><Search size={13}/> Intelligence layer</div><h1 className="page-title">Research & opportunities</h1><p className="page-description">Live evidence is combined with your Brand DNA before an idea reaches the drafting engine.</p></div>
+        <div><div className="page-kicker"><Search size={13}/> Intelligence layer</div><h1 className="page-title">Research & opportunities</h1><p className="page-description">{hasResearch ? 'Your latest research is below. Add a focus whenever you want Brand OS to explore a specific topic.' : 'Live evidence is combined with your Brand DNA before an idea reaches the drafting engine.'}</p></div>
         <button className="button primary progress-button" onClick={onResearch} disabled={isResearching}>
-          <span className="button-content"><Search size={14}/>{isResearching ? researchStage || 'Researching…' : 'Research now'}</span>
+          <span className="button-content"><Search size={14}/>{isResearching ? researchStage || 'Researching…' : hasResearch ? 'Research now' : 'Run research'}</span>
           {isResearching && <span className="button-progress-track"><span style={{ width: researchProgress + '%' }} /></span>}
         </button>
       </div>
+
+      <section className="panel research-focus-panel">
+        <div className="research-focus-copy">
+          <div className="panel-title">Guide the research <span className="form-help">(optional)</span></div>
+          <div className="panel-subtitle">Tell Brand OS what you want to explore. Leave it blank to research from your Brand DNA.</div>
+        </div>
+        <div className="research-focus-row">
+          <div className="research-focus-input">
+            <Search size={15}/>
+            <input
+              className="input"
+              value={researchFocus}
+              onChange={(e) => setResearchFocus(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !isResearching) onResearch(); }}
+              placeholder="e.g. AI adoption in consulting, stakeholder management, project governance"
+              aria-label="Optional research focus"
+            />
+          </div>
+          <button className="button primary" onClick={onResearch} disabled={isResearching}>
+            <Search size={14}/>{isResearching ? 'Researching…' : hasResearch ? 'Research now' : 'Run research'}
+          </button>
+        </div>
+      </section>
+
       <div className="research-grid">
         {opportunities.length ? opportunities.map((item) => <ResearchCard key={item.id} item={item}/>) :
-          <section className="panel"><EmptyState icon={Search} title="No opportunities yet" text="Run live research to surface current topics, evidence and brand-fit angles." action="Run research" onAction={onResearch}/></section>}
+          <section className="panel"><EmptyState icon={Search} title="No research yet" text="Add an optional focus above, or let Brand OS discover current topics from your Brand DNA." action="Run research" onAction={onResearch}/></section>}
       </div>
     </>
   );
 }
 
 function ResearchCard({ item }: { item: Opportunity }) {
-  const scores = Object.entries(item.scores || {}).filter(([key]) => key !== 'risk').slice(0, 7);
+  const brandRelevance = Number(item.scores?.brand_fit ?? 0);
+  const evidenceStrength = Number(item.scores?.evidence_strength ?? 0);
   return (
     <article className="research-card">
       <div className="research-top">
         <div style={{ minWidth: 0 }}>
-          <div className="tag-row"><span className="tag">{item.pillar}</span><span className="tag">{item.format || 'Insight post'}</span><span className="tag"><Target size={10}/>{item.objective || 'Brand growth'}</span></div>
+          <div className="tag-row"><span className="tag">{item.pillar}</span><span className="tag">{item.format || 'Insight post'}</span></div>
           <div className="research-title">{item.title}</div>
           <p className="research-angle">{item.angle}</p>
         </div>
-        <div className="opportunity-score"><strong>{Math.round(item.total_score)}</strong><span>opportunity</span></div>
       </div>
-      <div className="score-grid" style={{ marginTop: 14 }}>
-        {scores.map(([key, value]) => <div className="score-item" key={key}><div className="score-name">{key.replaceAll('_',' ')}</div><div className="score-value">{Math.round(value)}</div><div className="score-bar"><span style={{ width: `${Math.min(100, Math.max(0, Number(value)))}%` }}/></div></div>)}
+
+      <div className="research-relevance-grid">
+        <div className="research-relevance-item">
+          <div className="score-name">Brand relevance</div>
+          <div className="research-relevance-value">{Math.round(brandRelevance)}%</div>
+          <div className="score-bar"><span style={{ width: `${Math.min(100, Math.max(0, brandRelevance))}%` }}/></div>
+        </div>
+        <div className="research-relevance-item">
+          <div className="score-name">Evidence strength</div>
+          <div className="research-relevance-value">{Math.round(evidenceStrength)}%</div>
+          <div className="score-bar"><span style={{ width: `${Math.min(100, Math.max(0, evidenceStrength))}%` }}/></div>
+        </div>
       </div>
-      {item.evidence?.summary && <div className="evidence-box"><b>Evidence:</b> {item.evidence.summary}</div>}
-      {item.evidence?.why_now && <p style={{ color: '#475467', fontSize: 11, lineHeight: 1.55, margin: '12px 0 0' }}><b>Why now:</b> {item.evidence.why_now}</p>}
-      {item.rationale && <p style={{ color: '#667085', fontSize: 10, lineHeight: 1.5, margin: '8px 0 0' }}><b>Selection logic:</b> {item.rationale}</p>}
-      {item.sources?.length ? <div className="source-row">{item.sources.slice(0,5).map((source, i) => source.url ? <a className="source-link" key={i} href={source.url} target="_blank" rel="noreferrer">{source.title || source.domain || 'Source'} <ExternalLink size={10}/></a> : null)}</div> : null}
+
+      {item.evidence?.summary && <div className="evidence-box"><b>What the source says:</b> {item.evidence.summary}</div>}
+      {item.evidence?.why_now && <p className="research-why"><b>Why it matters now:</b> {item.evidence.why_now}</p>}
+      {item.rationale && <p className="research-rationale">{item.rationale}</p>}
+      {item.sources?.length ? (
+        <div className="source-row">
+          {item.sources.slice(0, 3).map((source, i) => source.url ? (
+            <a className="source-link" key={i} href={source.url} target="_blank" rel="noreferrer">
+              {source.domain || source.title || 'Read source'} <ExternalLink size={10}/>
+            </a>
+          ) : null)}
+        </div>
+      ) : null}
+      {item.sources?.length ? (
+        <div className="research-read-more">
+          {item.sources.slice(0, 1).map((source, i) => source.url ? (
+            <a className="button" key={i} href={source.url} target="_blank" rel="noreferrer">Read more <ArrowUpRight size={13}/></a>
+          ) : null)}
+        </div>
+      ) : null}
     </article>
   );
 }
