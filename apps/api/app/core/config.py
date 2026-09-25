@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     agent_calendar_enabled: bool = True
     agent_calendar_hour: int = 9
     agent_calendar_minute: int = 15
+    agent_in_process_schedule_enabled: bool = True
+    scheduled_job_key: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
