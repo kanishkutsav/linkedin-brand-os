@@ -711,7 +711,14 @@ async def improve_content(
         raise HTTPException(status_code=400, detail="Enter a draft before asking Brand OS to improve it.")
     profile = await AuthService.get_or_create_profile(session, current_user)
     if profile is None:
-        raise HTTPException(status_code=400, detail="Complete Brand Intelligence setup first.")
+        raise HTTPException(status_code=400, detail="Complete Brand DNA setup first.")
+    if (
+        not profile.professional_title
+        or not profile.industry
+        or not profile.tone
+        or profile.experience_years is None
+    ):
+        raise HTTPException(status_code=400, detail="Complete Professional Title, Industry, Desired Tone and Years of Experience before improving content.")
 
     brand_service = BrandIntelligenceService(session)
     memory = await brand_service.get_memory(profile.id)
