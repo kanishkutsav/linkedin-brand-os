@@ -519,11 +519,38 @@ async def brand_onboard(
 
 
 @app.post("/api/brand/initialize")
-async def brand_initialize_legacy():
-    raise HTTPException(
-        status_code=410,
-        detail="Brand DNA initialization without historical posts is disabled. Submit 3–10 previous LinkedIn posts through the Brand DNA onboarding flow.",
-    )
+async def brand_initialize(
+    req: ProfileRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
+):
+    # Historical posts are optional. LinkedIn profile facts are the factual
+    # baseline, and Brand Intelligence can be initialized from that baseline
+    # alone. Keep this endpoint idempotent for first-time users.
+    profile = await AuthService.get_or_create_profile(session, current_user)
+
+    if req.display_name and req.display_name.strip():
+        profile.display_name = req.display_name.strip()[:150]
+    if req.professional_title is not None:
+        profile.professional_title = req.professional_title
+    if req.industry is not None:
+        profile.industry = req.industry
+
+    await session.commit()
+
+    service = BrandIntelligenceService(session)
+    try:
+        memory = await service.analyze(profile.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Brand DNA initialization failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Brand DNA initialization failed. Check the configured LLM providers and try again.",
+        ) from exc
+
+    return {"brand_memory": memory}
 
 
 @app.post("/api/brand/rebuild")
