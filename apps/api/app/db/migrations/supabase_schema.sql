@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS historical_posts (
     id SERIAL PRIMARY KEY,
     profile_id INTEGER NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
     external_id VARCHAR(255),
-    body TEXT NOT NULL,
+    body TEXT,
     content_hash VARCHAR(64) NOT NULL,
     published_at TIMESTAMPTZ,
     source VARCHAR(50) NOT NULL DEFAULT 'user_import',
