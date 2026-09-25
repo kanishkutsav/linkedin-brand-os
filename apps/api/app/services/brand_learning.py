@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.models import LearningEvent, LearningMemory
 from app.services.gemini_service import ModelRouterService
+from app.models.models import UserProfile
 
 
 def _utcnow() -> datetime:
@@ -240,6 +241,7 @@ Return:
                 await self.session.commit()
                 processed += len(profile_events)
             except Exception as exc:
+                await self.session.rollback()
                 for event in profile_events:
                     event.attempts = int(event.attempts or 0) + 1
                     event.last_error = str(exc)[:1000]
