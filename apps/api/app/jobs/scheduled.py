@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.agents.orchestrator import AgentOrchestrator
 from app.db.database import SessionLocal
 from app.models.models import AgentRun, BrandMemory, UserProfile
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,14 @@ async def _claim_run(session, *, profile_id: int, mode: str, scheduled_key: str)
 
 
 async def run_scheduled(mode: str) -> dict[str, object]:
+    if not settings.agent_enabled:
+        logger.info("Scheduled agent disabled by AGENT_ENABLED")
+        return {
+            "mode": mode,
+            "disabled": True,
+            "reason": "agent_enabled=false",
+        }
+
     if mode not in SCHEDULES:
         raise ValueError(f"Unsupported scheduled mode: {mode}")
 
