@@ -97,6 +97,7 @@ export default function Home() {
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [savingThought, setSavingThought] = useState(false);
 
   const headers = (authToken = token) => authToken ? { Authorization: `Bearer ${authToken}` } : {};
 
@@ -593,6 +594,29 @@ useEffect(() => {
     finally { setIsImproving(false); }
   };
 
+  const saveThought = async () => {
+    if (!token || !draftBody.trim()) {
+      setError('Write something first so Brand OS has a useful thought to learn from.');
+      return;
+    }
+    if (!requireBrand('saving a personal thought')) return;
+    setSavingThought(true); setError(null); setNotice(null);
+    try {
+      const res = await fetch(API_BASE + '/api/learning/thought', {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: draftBody, topic: draftTopic, title: draftTitle }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(getApiError(data, 'Could not save this thought'));
+      setNotice('Saved as a personal thought. Brand OS will learn from it without treating it as a published opinion.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save this thought');
+    } finally {
+      setSavingThought(false);
+    }
+  };
+
   const createDraft = async () => {
     if (!token || !draftTitle.trim() || !draftTopic.trim() || !draftBody.trim()) {
       setError('Title, topic and draft body are required.'); return;
@@ -727,7 +751,7 @@ useEffect(() => {
           )}
 
           {tab === 'Research' && <ResearchView opportunities={opportunities} researchFocus={researchFocus} setResearchFocus={setResearchFocus} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
-          {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} />}
+          {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} />}
           {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'APPROVED' || item.status === 'EXECUTED')} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
           {tab === 'Brand DNA' && (
@@ -1110,7 +1134,7 @@ function ResearchCard({ item }: { item: Opportunity }) {
   );
 }
 
-function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBody, language, setLanguage, busy, improving, improvementProgress, improvementNotes, onImprove, onSubmit }: any) {
+function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBody, language, setLanguage, busy, improving, improvementProgress, improvementNotes, onImprove, onSubmit, savingThought, onSaveThought }: any) {
   return (
     <>
       <div className="page-header">
@@ -1135,6 +1159,7 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
               {improving && <span className="button-progress-track"><span style={{ width: improvementProgress + '%' }} /></span>}
             </button>
             <button className="button dark" disabled={busy || !body.trim()} onClick={onSubmit}><ShieldCheck size={14}/>{busy ? 'Sending…' : 'Send this version to approval'}</button>
+            <button className="button" disabled={savingThought || !body.trim()} onClick={onSaveThought}>{savingThought ? 'Saving…' : 'Save as personal thought'}</button>
           </div>
           {improvementNotes?.length ? <div style={{ marginTop: 12, padding: 11, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.5 }}><b style={{ color: '#5145cd' }}>What changed:</b> {improvementNotes.join(' · ')}</div> : null}
         </div>
