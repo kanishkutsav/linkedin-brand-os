@@ -96,6 +96,8 @@ async def build_authorization_url(session: AsyncSession, browser_nonce: str | No
         "redirect_uri": redirect_uri(),
         "state": state,
         "scope": " ".join(scopes),
+        # Let LinkedIn expose supported extended sign-in options where available.
+        "enable_extended_login": "true",
     }
     url = f"{LINKEDIN_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
     return url, state
