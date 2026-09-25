@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Activity, ArrowUpRight, BarChart3, BrainCircuit, Check, ChevronRight, CircleCheck,
   Clock3, Command, Download, ExternalLink, FileText, Gauge, Globe2, LayoutDashboard, Link2,
-  LogOut, Menu, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings,
+  LogOut, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings,
   ShieldCheck, Sparkles, Target, TrendingUp, UserRound, WandSparkles, X, Zap
 } from 'lucide-react';
 
@@ -92,7 +92,6 @@ export default function Home() {
   const [isResearching, setIsResearching] = useState(false);
   const [researchProgress, setResearchProgress] = useState(0);
   const [researchStage, setResearchStage] = useState('');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
@@ -334,7 +333,6 @@ useEffect(() => {
   }), [queue]);
 
   const initials = (profile.display_name || 'User').split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase();
-  const closeSidebar = () => setSidebarOpen(false);
   const closeMore = () => setMoreOpen(false);
   const isIosDevice = () => /iphone|ipad|ipod/i.test(window.navigator.userAgent) || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
   const installBrandOS = async () => {
@@ -374,13 +372,11 @@ useEffect(() => {
     setMoreOpen(false);
     if (!brand.ready && next !== 'Brand DNA') {
       setTab('Brand DNA');
-      closeSidebar();
       setNotice('Before using the workspace, complete your Brand DNA setup once.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
     setTab(next);
-    closeSidebar();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -621,7 +617,6 @@ useEffect(() => {
 
   return (
     <div className="app-shell">
-      {sidebarOpen && <div className="mobile-overlay" onClick={closeSidebar} />}
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="brand-lockup">
           <div className="brand-mark"><Sparkles size={18} /></div>
@@ -655,7 +650,6 @@ useEffect(() => {
       <div className="main-shell">
         <header className="topbar">
           <div className="topbar-left">
-            <button className="icon-button mobile-menu" onClick={() => setSidebarOpen(true)}><Menu size={18} /></button>
             <div><div className="eyebrow">Workspace / {tab}</div><div className="topbar-title">{tab === 'Dashboard' ? 'Command center' : nav.find((x) => x[0] === tab)?.[2]}</div></div>
           </div>
           <div className="topbar-actions">
@@ -1082,7 +1076,7 @@ function ResearchCard({ item }: { item: Opportunity }) {
 
       <div className="research-relevance-grid">
         <div className="research-relevance-item">
-          <div className="score-name">Brand relevance</div>
+          <div className="score-name">Relevance to your profile</div>
           <div className="research-relevance-value">{Math.round(brandRelevance)}%</div>
           <div className="score-bar"><span style={{ width: `${Math.min(100, Math.max(0, brandRelevance))}%` }}/></div>
         </div>
