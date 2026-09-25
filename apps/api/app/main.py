@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.db.database import engine, get_session, SessionLocal
 from app.services.agent_scheduler import AgentScheduler
 from app.services.brand_intelligence import BrandIntelligenceService
+from app.services.brand_learning import BrandLearningService
 from app.guards.guardrails import normalize_human_style, run_content_guards
 from app.integrations.linkedin import OfficialLinkedInAdapter
 from app.models.base import Base
@@ -180,6 +181,13 @@ class ResearchRequest(BaseModel):
 
     topic: str | None = None
     sources: list[dict[str, str]] = Field(default_factory=list)
+
+
+class LearningThoughtRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content: str
+    topic: str | None = None
+    title: str | None = None
 
 
 class VoiceRequest(BaseModel):
@@ -712,6 +720,31 @@ async def build_research_evidence(
         req.topic or "",
         req.sources,
     )
+
+
+@app.post("/api/learning/thought")
+async def save_learning_thought(req: LearningThoughtRequest, session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "user"))):
+    content = (req.content or "").strip()
+    if len(content) < 10:
+        raise HTTPException(status_code=400, detail="Write a little more so Brand OS has a useful idea to learn from.")
+    if len(content) > 20000:
+        raise HTTPException(status_code=400, detail="Thoughts are limited to 20,000 characters.")
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    event_id = await BrandLearningService(session).record_event(
+        profile_id=profile.id,
+        event_type="USER_THOUGHT",
+        source_type="manual_thought",
+        content=content,
+        metadata={"topic": (req.topic or "").strip()[:300], "title": (req.title or "").strip()[:200]},
+    )
+    await session.commit()
+    return {"saved": True, "event_id": event_id}
+
+
+@app.get("/api/learning/status")
+async def learning_status(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    return await BrandLearningService(session).summary(profile.id)
 
 
 @app.post("/api/voice/profile")
