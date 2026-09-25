@@ -59,16 +59,56 @@ class ApprovalService:
         return result.scalars().all()
 
     async def list_dashboard(self, profile_id: int, limit: int = 100):
-        """Return approval records owned by the active profile."""
-        result = await self.session.execute(
+        """Return active workflow records plus a small recent terminal history.
+
+        The Command Center is intentionally not a lifetime content archive:
+        active work remains visible, while only the latest 10 rejected and
+        published records are returned for context.
+        """
+        active_result = await self.session.execute(
             select(ApprovalRequest)
             .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
             .join(ContentItem, ContentItem.id == ContentVersion.content_id)
-            .where(ContentItem.profile_id == profile_id)
+            .where(
+                ContentItem.profile_id == profile_id,
+                ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED", "APPROVED", "PUBLISHING", "FAILED"]),
+            )
             .order_by(ApprovalRequest.created_at.desc())
-            .limit(limit)
+            .limit(max(1, min(limit, 200)))
         )
-        approvals = result.scalars().all()
+        active = list(active_result.scalars().all())
+
+        rejected_result = await self.session.execute(
+            select(ApprovalRequest)
+            .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(
+                ContentItem.profile_id == profile_id,
+                ApprovalRequest.status == "REJECTED",
+            )
+            .order_by(ApprovalRequest.created_at.desc())
+            .limit(10)
+        )
+        rejected = list(rejected_result.scalars().all())
+
+        published_result = await self.session.execute(
+            select(ApprovalRequest)
+            .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(
+                ContentItem.profile_id == profile_id,
+                ApprovalRequest.status == "EXECUTED",
+            )
+            .order_by(ApprovalRequest.approved_at.desc().nullslast(), ApprovalRequest.created_at.desc())
+            .limit(10)
+        )
+        published = list(published_result.scalars().all())
+
+        approvals = active + rejected + published
+        # Keep the response deterministic and de-duplicate records if a future
+        # status migration causes a record to appear in more than one bucket.
+        unique = {int(item.id): item for item in approvals}
+        approvals = sorted(unique.values(), key=lambda item: item.created_at, reverse=True)
 
         # Older deployments used FAILED as a terminal approval state when a
         # LinkedIn publish attempt failed. Restore those records to APPROVED so
