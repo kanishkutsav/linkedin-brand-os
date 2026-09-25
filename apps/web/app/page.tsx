@@ -676,7 +676,7 @@ useEffect(() => {
             </>
           )}
 
-          {tab === 'Research' && <ResearchView opportunities={opportunities} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
+          {tab === 'Research' && <ResearchView opportunities={opportunities} researchFocus={researchFocus} setResearchFocus={setResearchFocus} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
           {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} />}
           {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'APPROVED' || item.status === 'EXECUTED')} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
