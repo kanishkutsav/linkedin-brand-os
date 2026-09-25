@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import BrandMemory, HistoricalPost, UserProfile, VoiceMemory
 from app.services.gemini_service import ModelRouterService
+from app.services.brand_learning import BrandLearningService
 
 
 def _json(value) -> str:
@@ -218,7 +219,7 @@ Return:
             "updated_at": memory.updated_at.isoformat() if memory.updated_at else None,
         }
 
-    async def generation_context(self, profile_id: int) -> dict:
+    async def generation_context(self, profile_id: int, query: str | None = None) -> dict:
         memory = await self.get_memory(profile_id)
         if memory is None or memory.status != "READY":
             raise ValueError("Brand Intelligence is not initialized. Complete the Brand DNA setup first.")
@@ -242,8 +243,16 @@ Return:
         # Refreshing Brand DNA is an explicit user action. This keeps generation fast
         # and prevents a hidden second LLM call from blocking the editor.
         posts = await self.get_posts(profile_id, limit=5)
+        learning_context = await BrandLearningService(self.session).context(
+            profile_id,
+            query=query,
+            memory_limit=10,
+            event_limit=6,
+            semantic_limit=8,
+        )
         return {
             "brand_memory": self.serialize(memory),
+            "learning_memory": learning_context,
             "historical_examples": [
                 {
                     "published_at": p.published_at.isoformat() if p.published_at else None,
