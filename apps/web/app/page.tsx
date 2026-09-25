@@ -98,6 +98,10 @@ export default function Home() {
   const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
   const [loading, setLoading] = useState(false);
   const [learningStatus, setLearningStatus] = useState({ pending_events: 0, memory_count: 0 });
+  const [dashboardCounts, setDashboardCounts] = useState({
+    total: 0, awaiting_approval: 0, approved: 0, published: 0,
+    needs_review: 0, rejected: 0, pending_filter: 0,
+  });
   const [savingThought, setSavingThought] = useState(false);
 
   const headers = (authToken = token) => authToken ? { Authorization: `Bearer ${authToken}` } : {};
@@ -270,6 +274,15 @@ useEffect(() => {
         title: item.title || '', topic: item.topic || '', approved_at: item.approved_at || null, created_at: item.created_at,
       }));
       setQueue(nextQueue);
+      setDashboardCounts({
+        total: Number(approvalsJson.counts?.total ?? 0),
+        awaiting_approval: Number(approvalsJson.counts?.awaiting_approval ?? 0),
+        approved: Number(approvalsJson.counts?.approved ?? 0),
+        published: Number(approvalsJson.counts?.published ?? 0),
+        needs_review: Number(approvalsJson.counts?.needs_review ?? 0),
+        rejected: Number(approvalsJson.counts?.rejected ?? 0),
+        pending_filter: Number(approvalsJson.counts?.pending_filter ?? 0),
+      });
       if (nextQueue.length && !nextQueue.some((i) => i.id === selectedId)) setSelectedId(nextQueue[0].id);
 
       setLoading(false);
@@ -328,12 +341,12 @@ useEffect(() => {
   }, [filteredQueue, selectedId]);
 
   const selectedApproval = queue.find((item) => item.id === selectedId) ?? null;
-  const summary = useMemo(() => ({
-    pending: queue.filter((i) => ['PENDING', 'EDITED', 'REGENERATED'].includes(i.status)).length,
-    reviewed: queue.filter((i) => i.status === 'APPROVED').length,
-    rejected: queue.filter((i) => i.status === 'REJECTED').length,
-    executed: queue.filter((i) => i.status === 'EXECUTED').length,
-  }), [queue]);
+  const summary = {
+    pending: dashboardCounts.awaiting_approval,
+    reviewed: dashboardCounts.approved,
+    rejected: dashboardCounts.rejected,
+    executed: dashboardCounts.published,
+  };
 
   const initials = (profile.display_name || 'User').split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase();
   const closeMore = () => setMoreOpen(false);
@@ -754,7 +767,7 @@ useEffect(() => {
 
           {tab === 'Research' && <ResearchView opportunities={opportunities} researchFocus={researchFocus} setResearchFocus={setResearchFocus} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
           {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
-          {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} />}
+          {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
           {tab === 'Brand DNA' && (
             <SettingsView
@@ -919,7 +932,10 @@ function ApprovalWorkspace(props: any) {
               ['REJECTED', 'Rejected'],
               ['EXECUTED', 'Published'],
             ] as const).map(([value, label]) => (
-              <button key={value} className={`filter-chip ${statusFilter === value ? 'active' : ''}`} onClick={() => setStatusFilter(value)}>{label}</button>
+              <button key={value} className={`filter-chip ${statusFilter === value ? 'active' : ''}`} onClick={() => setStatusFilter(value)}>
+  <span>{label}</span>
+  <em className="filter-count">{value === 'PENDING' ? dashboardCounts.pending_filter : value === 'NEEDS_REVIEW' ? dashboardCounts.needs_review : value === 'REJECTED' ? dashboardCounts.rejected : dashboardCounts.published}</em>
+</button>
             ))}
           </div>
         </div>
@@ -1018,7 +1034,7 @@ function StatusPill({ status, label }: { status: string; label?: string }) {
   return <span className={`status-pill ${cls}`}><span>●</span>{label || status}</span>;
 }
 
-function LinkedInPostsView({ posts }: { posts: ApprovalItem[] }) {
+function LinkedInPostsView({ posts, totalPublished }: { posts: ApprovalItem[]; totalPublished: number }) {
   return (
     <>
       <div className="page-header">
@@ -1030,7 +1046,7 @@ function LinkedInPostsView({ posts }: { posts: ApprovalItem[] }) {
       </div>
       <section className="panel">
         <div className="panel-head">
-          <div><div className="panel-title">Published posts</div><div className="panel-subtitle">Showing your 10 most recent published posts</div></div>
+          <div><div className="panel-title">Published posts</div><div className="panel-subtitle">{totalPublished > 10 ? `Showing the 10 most recent of ${totalPublished} published posts` : `Showing all ${totalPublished} published posts`}</div></div>
         </div>
         <div className="post-stack">
           {posts.length ? posts.map((post) => (
