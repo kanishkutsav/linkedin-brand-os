@@ -3,6 +3,7 @@ import hashlib
 import json
 import secrets
 import urllib.parse
+import base64
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -52,7 +53,18 @@ def _request_json(url: str, *, data: dict | None = None, headers: dict | None = 
         raise HTTPException(status_code=502, detail=f"LinkedIn API request failed: {exc}") from exc
 
 
-def _best_effort_profile(access_token: str, userinfo: dict) -> dict:
+def _decode_jwt_payload(token: str | None) -> dict:
+    if not token or token.count(".") != 2:
+        return {}
+    try:
+        payload = token.split(".", 2)[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8"))
+    except Exception:
+        return {}
+
+
+def _best_effort_profile(access_token: str, userinfo: dict, id_token: str | None = None) -> dict:
     """Return profile fields LinkedIn makes available to this OAuth app.
 
     OIDC always gives us identity fields. Some LinkedIn products also expose
@@ -61,6 +73,11 @@ def _best_effort_profile(access_token: str, userinfo: dict) -> dict:
     authentication.
     """
     profile = dict(userinfo or {})
+    oidc_claims = _decode_jwt_payload(id_token)
+    for key, value in oidc_claims.items():
+        if key not in profile or not profile.get(key):
+            profile[key] = value
+
     profile_api_error = None
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -99,6 +116,7 @@ def _best_effort_profile(access_token: str, userinfo: dict) -> dict:
             profile_api_error = fallback_exc.detail
             logger.warning("LinkedIn basic profile lookup unavailable: %s", fallback_exc.detail)
 
+    logger.info("LinkedIn profile fields available: %s", sorted(k for k in profile.keys() if not k.startswith("_")))
     if profile_api_error:
         profile["_linkedin_profile_api_error"] = profile_api_error
     return profile
@@ -137,7 +155,7 @@ async def build_authorization_url(session: AsyncSession, browser_nonce: str | No
     # requested because LinkedIn's Profile API uses it for authenticated-member
     # headline and public-profile fields. It is only effective when the
     # application has been granted the corresponding LinkedIn product access.
-    scopes = ["openid", "profile", "email", "w_member_social", "r_basicprofile"]
+    scopes = ["openid", "profile", "email", "w_member_social"]
     if settings.linkedin_analytics_oauth_enabled:
         scopes.extend(["r_member_postAnalytics", "r_member_profileAnalytics"])
 
@@ -191,7 +209,7 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
         LINKEDIN_USERINFO_URL,
         headers={"Authorization": f"Bearer {access_token}"},
     )
-    profile_data = await asyncio.to_thread(_best_effort_profile, access_token, userinfo)
+    profile_data = await asyncio.to_thread(_best_effort_profile, access_token, userinfo, token_payload.get("id_token"))
 
     email = AuthService.normalize_email(profile_data.get("email"))
     member_sub = profile_data.get("sub") or profile_data.get("id")
