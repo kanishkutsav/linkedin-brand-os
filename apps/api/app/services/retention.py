@@ -97,6 +97,7 @@ class RetentionService:
         )
         keep_count: dict[int, int] = {}
         trim_version_ids: list[int] = []
+        trim_approval_ids: list[int] = []
         for approval_id, version_id, profile_id in result.all():
             profile_id = int(profile_id)
             current = keep_count.get(profile_id, 0)
@@ -106,6 +107,7 @@ class RetentionService:
                 if str(approval_id) in pending_publish_ids:
                     continue
                 trim_version_ids.append(int(version_id))
+                trim_approval_ids.append(int(approval_id))
 
         for start in range(0, len(trim_version_ids), 500):
             batch = trim_version_ids[start:start + 500]
@@ -115,6 +117,12 @@ class RetentionService:
                     .where(ContentVersion.id.in_(batch))
                     .where(ContentVersion.body != "")
                     .values(body="")
+                )
+                await session.execute(
+                    update(ApprovalRequest)
+                    .where(ApprovalRequest.id.in_(trim_approval_ids[start:start + 500]))
+                    .where(ApprovalRequest.edited_body.is_not(None))
+                    .values(edited_body=None)
                 )
         return len(trim_version_ids)
 
