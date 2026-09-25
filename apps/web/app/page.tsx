@@ -864,6 +864,7 @@ function MiniStat({ icon: Icon, label, value }: any) {
 function ApprovalWorkspace(props: any) {
   const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction } = props;
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [mobileReviewOpen, setMobileReviewOpen] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   useEffect(() => {
@@ -897,7 +898,7 @@ function ApprovalWorkspace(props: any) {
         </div>
         <div className="queue-items">
           {queue.length ? queue.map((item: ApprovalItem) => (
-            <button key={item.id} className={`queue-item ${selectedId === item.id ? 'selected' : ''}`} onClick={() => setSelectedId(item.id)}>
+            <button key={item.id} className={`queue-item ${selectedId === item.id ? 'selected' : ''}`} onClick={() => { setSelectedId(item.id); setMobileReviewOpen(true); }}>
               <div className="queue-item-top"><span className="queue-id">POST #{item.id}</span><StatusPill status={item.status}/></div>
               <div className="queue-action">{item.action_type}</div>
               <div className="queue-preview">{item.content.slice(0, 88)}{item.content.length > 88 ? '…' : ''}</div>
@@ -905,9 +906,10 @@ function ApprovalWorkspace(props: any) {
           )) : <div className="empty-state"><div className="empty-icon"><FileText size={18}/></div><strong>Queue is clear</strong><span>Create a draft or generate content to start the review flow.</span></div>}
         </div>
       </div>
-      <div className="review-pane">
+      <div className={`review-pane ${mobileReviewOpen ? 'mobile-review-open' : ''}`}>
         {selected ? (
           <>
+            <button className="mobile-review-back" onClick={() => setMobileReviewOpen(false)}><ChevronRight size={16} style={{ transform: 'rotate(180deg)' }} /> Back to queue</button>
             <div className="review-head"><div><div className="review-label">Editorial review · post #{selected.id}</div><div className="review-title">{selected.action_type}</div></div><StatusPill status={selected.status}/></div>
 
             {['PENDING','EDITED','REGENERATED'].includes(selected.status) ? (
