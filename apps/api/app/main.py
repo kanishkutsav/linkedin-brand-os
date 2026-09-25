@@ -582,7 +582,9 @@ async def dashboard_approvals(
     session: AsyncSession = Depends(get_session),
     current_user: AppUser = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
-    approvals = await ApprovalService(session).list_dashboard(int(current_user.id))
+    approval_service = ApprovalService(session)
+    approvals = await approval_service.list_dashboard(int(current_user.id))
+    counts = await approval_service.dashboard_counts(int(current_user.id))
     records = []
     for item in approvals:
         version = await session.get(ContentVersion, item.content_version_id)
@@ -600,7 +602,7 @@ async def dashboard_approvals(
                 "created_at": item.created_at,
             }
         )
-    return {"pending_approvals": records}
+    return {"pending_approvals": records, "counts": counts}
 
 
 @app.get("/api/agent/status")
