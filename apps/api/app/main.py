@@ -1000,7 +1000,7 @@ async def execute_approval(
         if image is not None:
             image_mime = (image.content_type or "").lower()
             if image_mime not in {"image/jpeg", "image/png", "image/gif"}:
-                raise ValueError("Only JPEG, PNG, or GIF images are supported.")
+                raise ValueError("Only JPEG or PNG images are supported.")
             image_bytes = await image.read()
             if not image_bytes:
                 raise ValueError("The selected image is empty.")
