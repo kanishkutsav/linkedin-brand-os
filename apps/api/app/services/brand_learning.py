@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+import math
 from typing import Any
 
 from google import genai
@@ -259,10 +260,17 @@ Return:
         memories_result = await self.session.execute(
             select(LearningMemory)
             .where(LearningMemory.profile_id == profile_id)
-            .order_by(LearningMemory.importance.desc(), LearningMemory.updated_at.desc())
-            .limit(max(1, min(memory_limit, 20)))
+            .order_by(LearningMemory.updated_at.desc())
+            .limit(max(10, min(memory_limit * 3, 60)))
         )
         memories = list(memories_result.scalars().all())
+        now = _utcnow()
+        def memory_rank(item: LearningMemory) -> float:
+            age_days = max(0.0, (now - (item.updated_at or now)).total_seconds() / 86400)
+            recency = 0.5 + 0.5 * math.exp(-age_days / 180.0)
+            return float(item.importance or 0.5) * recency
+        memories.sort(key=memory_rank, reverse=True)
+        memories = memories[:max(1, min(memory_limit, 20))]
 
         recent_result = await self.session.execute(
             select(LearningEvent)
@@ -278,7 +286,10 @@ Return:
         semantic_events: list[dict] = []
         semantic_memories: list[dict] = []
         if query and query.strip():
-            embedding = await self._embed_query(query)
+            try:
+                embedding = await self._embed_query(query)
+            except Exception:
+                embedding = []
             if len(embedding) == self.EMBEDDING_DIMENSIONS:
                 literal = _vector_literal(embedding)
                 event_rows = await self.session.execute(
