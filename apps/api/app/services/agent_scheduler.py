@@ -11,6 +11,7 @@ from app.models.models import AgentRun, BrandMemory, UserProfile
 
 from app.agents.orchestrator import AgentOrchestrator
 from app.services.brand_learning import BrandLearningService
+from app.services.retention import RetentionService
 from app.core.config import settings
 
 
@@ -31,6 +32,7 @@ class AgentScheduler:
         self._task: asyncio.Task | None = None
         self._last_discovery_date: str | None = None
         self._last_calendar_date: str | None = None
+        self._last_retention_date: str | None = None
 
     def start(self) -> None:
         if settings.agent_enabled and self._task is None:
@@ -74,6 +76,17 @@ class AgentScheduler:
                 except Exception as exc:
                     # Learning is additive. A temporary embedding/LLM outage must never affect scheduled content generation.
                     print(f"Brand learning cycle skipped: {exc}")
+
+                if self._last_retention_date != now.date().isoformat():
+                    try:
+                        retention = await RetentionService().compact(learning_session)
+                        print(f"Brand OS retention cycle completed: {retention}")
+                        self._last_retention_date = now.date().isoformat()
+                    except Exception as exc:
+                        await learning_session.rollback()
+                        # Retention is strictly additive to the product lifecycle:
+                        # a cleanup failure must never block learning or generation.
+                        print(f"Brand OS retention cycle skipped: {exc}")
 
             await asyncio.sleep(30)
 
