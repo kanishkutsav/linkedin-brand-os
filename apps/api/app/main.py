@@ -7,7 +7,7 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, File, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -956,7 +956,26 @@ async def create_draft(
 @app.post("/api/approvals/{approval_id}/approve")
 async def approve(
     approval_id: int,
-    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin", "reviewer", "owner", "user")),
+):
+    try:
+        approval = await ApprovalService(session).approve(approval_id, int(current_user.id))
+        return {
+            "id": approval.id,
+            "status": approval.status,
+            "approval_hash": approval.approval_hash,
+            "approved_at": approval.approved_at,
+            "message": "Approved. The content is now locked and ready for execution.",
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/approvals/{approval_id}/execute")
+async def execute_approval(
+    approval_id: int,
+    image: UploadFile | None = File(default=None),
     session: AsyncSession = Depends(get_session),
     current_user: AppUser = Depends(require_roles("admin", "reviewer", "owner", "user")),
 ):
@@ -966,26 +985,33 @@ async def approve(
         )
         connection = connection_result.scalar_one_or_none()
         if connection is None:
-            raise ValueError("Connect your LinkedIn account before approving for publication.")
+            raise ValueError("Connect your LinkedIn account before executing the post.")
         if connection.token_expires_at and connection.token_expires_at <= datetime.now(timezone.utc):
-            raise ValueError("Your LinkedIn connection has expired. Reconnect LinkedIn before approving for publication.")
+            raise ValueError("Your LinkedIn connection has expired. Reconnect LinkedIn before executing the post.")
 
-        existing = await session.get(ApprovalRequest, approval_id)
-        if existing and existing.status == "APPROVED":
-            approval = await ApprovalService(session)._get_owned_approval(approval_id, int(current_user.id))
-        else:
-            approval = await ApprovalService(session).approve(approval_id, int(current_user.id))
+        image_bytes = None
+        image_mime = None
+        if image is not None:
+            image_mime = (image.content_type or "").lower()
+            if image_mime not in {"image/jpeg", "image/png", "image/gif"}:
+                raise ValueError("Only JPEG, PNG, or GIF images are supported.")
+            image_bytes = await image.read()
+            if not image_bytes:
+                raise ValueError("The selected image is empty.")
+            if len(image_bytes) > 10 * 1024 * 1024:
+                raise ValueError("Image must be 10 MB or smaller.")
 
-        # Approval is the explicit human authorization. Once granted, publish
-        # immediately through the connected official LinkedIn API so the UI
-        # action has one unambiguous outcome: Approve & publish.
         publish_adapter = OfficialLinkedInAdapter(connection.access_token, connection.member_sub)
-        publish_result = await ApprovalService(session).execute(approval_id, publish_adapter, int(current_user.id))
+        publish_result = await ApprovalService(session).execute(
+            approval_id,
+            publish_adapter,
+            int(current_user.id),
+            image_bytes=image_bytes,
+            image_mime=image_mime,
+        )
         return {
-            "id": approval.id,
-            "status": "EXECUTED" if publish_result.success else approval.status,
-            "approval_hash": approval.approval_hash,
-            "approved_at": approval.approved_at,
+            "id": approval_id,
+            "status": "EXECUTED" if publish_result.success else "APPROVED",
             "published": publish_result.success,
             "external_id": publish_result.external_id,
             "message": publish_result.message,
