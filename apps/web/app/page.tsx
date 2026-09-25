@@ -756,6 +756,7 @@ useEffect(() => {
                   queue={filteredQueue} selected={selectedApproval} selectedId={selectedId}
                   setSelectedId={setSelectedId} searchTerm={searchTerm} setSearchTerm={setSearchTerm}
                   statusFilter={statusFilter} setStatusFilter={setStatusFilter}
+                  dashboardCounts={dashboardCounts}
                   editedBody={editedBody} setEditedBody={setEditedBody}
                   reviewNote={reviewNote} setReviewNote={setReviewNote}
                   isBusy={isBusy} busyAction={busyAction} operationProgress={operationProgress} operationStage={operationStage}
@@ -895,7 +896,7 @@ function MiniStat({ icon: Icon, label, value }: any) {
 
 // Production copy sync marker: ensure latest UI copy is included in deployment.
 function ApprovalWorkspace(props: any) {
-  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction } = props;
+  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, dashboardCounts, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction } = props;
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [mobileReviewOpen, setMobileReviewOpen] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
