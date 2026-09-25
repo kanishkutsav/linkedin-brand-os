@@ -617,7 +617,7 @@ useEffect(() => {
 
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+      <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark"><Sparkles size={18} /></div>
           <div><div className="brand-name">Brand OS</div><div className="brand-sub">Personal Brand Manager</div></div>
