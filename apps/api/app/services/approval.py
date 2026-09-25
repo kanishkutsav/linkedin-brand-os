@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 import asyncio
 import hashlib
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import ApprovalRequest, ContentVersion, ContentItem, UserProfile, VoiceMemory, AuditLog, SystemFlag, FeedbackEntry, HistoricalPost
 from app.core.config import settings
@@ -45,6 +45,25 @@ class ApprovalService:
             raise ValueError("Approval not found")
         return approval
 
+    async def dashboard_counts(self, profile_id: int) -> dict[str, int]:
+        """Return lifetime workflow counts from approval rows, independent of dashboard pagination."""
+        result = await self.session.execute(
+            select(ApprovalRequest.status, func.count(ApprovalRequest.id))
+            .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(ContentItem.profile_id == profile_id)
+            .group_by(ApprovalRequest.status)
+        )
+        by_status = {str(status): int(count) for status, count in result.all()}
+        return {
+            "total": sum(by_status.values()),
+            "awaiting_approval": sum(by_status.get(status, 0) for status in ("PENDING", "EDITED", "REGENERATED")),
+            "approved": by_status.get("APPROVED", 0),
+            "published": by_status.get("EXECUTED", 0),
+            "needs_review": sum(by_status.get(status, 0) for status in ("EDITED", "REGENERATED")),
+            "rejected": by_status.get("REJECTED", 0),
+            "pending_filter": sum(by_status.get(status, 0) for status in ("PENDING", "APPROVED", "PUBLISHING")),
+        }
     async def list_pending(self, profile_id: int):
         result = await self.session.execute(
             select(ApprovalRequest)
