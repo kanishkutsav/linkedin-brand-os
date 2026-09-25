@@ -45,7 +45,7 @@ const nav = [
   ['Dashboard', LayoutDashboard, 'Command center'],
   ['Research', Search, 'Find opportunities'],
   ['Content', FileText, 'Draft & refine'],
-  ['LinkedIn Posts', ExternalLink, 'Approved & published'],
+  ['LinkedIn Posts', ExternalLink, 'Published posts'],
   ['Analytics', BarChart3, 'Performance'],
   ['Brand DNA', Settings, 'Brand DNA'],
 ] as const;
@@ -69,7 +69,7 @@ export default function Home() {
   const [isBuildingBrand, setIsBuildingBrand] = useState(false);
   const [queue, setQueue] = useState<ApprovalItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'EXECUTED' | 'REJECTED'>('PENDING');
+  const [statusFilter, setStatusFilter] = useState<'PENDING' | 'NEEDS_REVIEW' | 'EXECUTED' | 'REJECTED'>('PENDING');
   const [searchTerm, setSearchTerm] = useState('');
   const [editedBody, setEditedBody] = useState('');
   const [reviewNote, setReviewNote] = useState('');
@@ -305,13 +305,12 @@ useEffect(() => {
 
   const filteredQueue = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
-    const pendingStatuses = new Set(['PENDING', 'REGENERATED', 'EDITED']);
     return queue.filter((item) => {
       const normalizedStatus = String(item.status || '').trim().toUpperCase();
-      const statusMatch = statusFilter === 'all'
-        ? true
-        : statusFilter === 'PENDING'
-          ? pendingStatuses.has(normalizedStatus)
+      const statusMatch = statusFilter === 'PENDING'
+        ? ['PENDING', 'APPROVED', 'PUBLISHING'].includes(normalizedStatus)
+        : statusFilter === 'NEEDS_REVIEW'
+          ? ['EDITED', 'REGENERATED'].includes(normalizedStatus)
           : normalizedStatus === statusFilter;
       const haystack = `${item.action_type} ${item.content} ${item.reason || ''}`.toLowerCase();
       return statusMatch && (!query || haystack.includes(query));
@@ -432,7 +431,7 @@ useEffect(() => {
       if (action === 'approve') {
         window.localStorage.removeItem(`brand-os-regeneration-feedback:${selectedApproval.id}`);
         setReviewNote('');
-        setStatusFilter('APPROVED');
+        setStatusFilter('PENDING');
       }
       if (action === 'execute') setStatusFilter('EXECUTED');
       setOperationProgress(action === 'approve' || action === 'execute' ? 82 : 88);
@@ -755,7 +754,7 @@ useEffect(() => {
 
           {tab === 'Research' && <ResearchView opportunities={opportunities} researchFocus={researchFocus} setResearchFocus={setResearchFocus} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
           {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
-          {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'APPROVED' || item.status === 'EXECUTED')} />}
+          {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
           {tab === 'Brand DNA' && (
             <SettingsView
@@ -914,7 +913,14 @@ function ApprovalWorkspace(props: any) {
         <div className="queue-tools">
           <div className="searchbox"><Search size={13}/><input className="input" placeholder="Search drafts…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
           <div className="filter-row">
-            {(['PENDING','REGENERATED','EDITED','APPROVED','EXECUTED','REJECTED','all'] as const).map((x) => <button key={x} className={`filter-chip ${statusFilter === x ? 'active' : ''}`} onClick={() => setStatusFilter(x)}>{x === 'all' ? 'All' : x[0] + x.slice(1).toLowerCase()}</button>)}
+            {([
+              ['PENDING', 'Pending'],
+              ['NEEDS_REVIEW', 'Needs review'],
+              ['REJECTED', 'Rejected'],
+              ['EXECUTED', 'Published'],
+            ] as const).map(([value, label]) => (
+              <button key={value} className={`filter-chip ${statusFilter === value ? 'active' : ''}`} onClick={() => setStatusFilter(value)}>{label}</button>
+            ))}
           </div>
         </div>
         <div className="queue-items">
@@ -1018,13 +1024,13 @@ function LinkedInPostsView({ posts }: { posts: ApprovalItem[] }) {
       <div className="page-header">
         <div>
           <div className="page-kicker"><ExternalLink size={13}/> LinkedIn content</div>
-          <h1 className="page-title">Your approved LinkedIn posts.</h1>
-          <p className="page-description">Approved content stays visible here even after it leaves the review queue. Published posts are marked separately.</p>
+          <h1 className="page-title">Your published LinkedIn posts.</h1>
+          <p className="page-description">Your 10 most recently published LinkedIn posts are shown here. Older posts are retained as learning signals, not as a full content archive.</p>
         </div>
       </div>
       <section className="panel">
         <div className="panel-head">
-          <div><div className="panel-title">Approved posts</div><div className="panel-subtitle">{posts.length} post{posts.length === 1 ? '' : 's'} in the workflow</div></div>
+          <div><div className="panel-title">Published posts</div><div className="panel-subtitle">Showing your 10 most recent published posts</div></div>
         </div>
         <div className="post-stack">
           {posts.length ? posts.map((post) => (
@@ -1038,7 +1044,7 @@ function LinkedInPostsView({ posts }: { posts: ApprovalItem[] }) {
               <div style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.7, color: '#344054' }}>{post.content}</div>
               {post.approved_at ? <div className="form-help" style={{ marginTop: 10 }}>Approved {new Date(post.approved_at).toLocaleString()}</div> : null}
             </article>
-          )) : <EmptyState icon={ExternalLink} title="No approved posts yet" text="Approve a post from the editorial queue and it will appear here automatically." />}
+          )) : <EmptyState icon={ExternalLink} title="No published posts yet" text="Once you publish a post through Brand OS, it will appear here automatically." />}
         </div>
       </section>
     </>
