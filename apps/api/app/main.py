@@ -779,19 +779,11 @@ async def improve_content(
     if memory is None or memory.status != "READY":
         raise HTTPException(status_code=400, detail="Complete Brand Intelligence setup first.")
 
-    # Polishing should not trigger a hidden Brand DNA re-analysis. The user's
-    # saved Brand DNA is the source of truth and the editor should stay fast.
-    recent_posts = await brand_service.get_posts(profile.id, limit=3)
-    brand_context = await brand_service.generation_context(profile.id, query=f"{req.title} {req.topic}".strip())
-        "historical_examples": [
-            {
-                "published_at": post.published_at.isoformat() if post.published_at else None,
-                "source": post.source,
-                "body": post.body[:1200],
-            }
-            for post in recent_posts
-        ],
-    }
+    # Polishing stays fast and uses the saved Brand DNA plus relevant learning memory.
+    brand_context = await brand_service.generation_context(
+        profile.id,
+        query=f"{req.title} {req.topic}".strip(),
+    )
     voice_result = await session.execute(
         select(VoiceMemory).where(VoiceMemory.profile_id == profile.id).limit(1)
     )
