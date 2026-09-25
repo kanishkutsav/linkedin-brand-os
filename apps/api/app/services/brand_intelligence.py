@@ -165,7 +165,6 @@ Return:
         memory.summary = str(analysis.get("summary") or "").strip()
         memory.identity_json = _json(analysis.get("identity"))
         memory.expertise_json = _json(analysis.get("expertise"))
-        memory.audience_json = _json([])
         memory.themes_json = _json(analysis.get("themes"))
         memory.opinions_json = _json(analysis.get("opinions"))
         memory.experiences_json = _json(analysis.get("experiences"))
@@ -208,7 +207,6 @@ Return:
             "summary": memory.summary,
             "identity": json.loads(memory.identity_json or "[]"),
             "expertise": json.loads(memory.expertise_json or "[]"),
-            "audience": json.loads(memory.audience_json or "[]"),
             "themes": json.loads(memory.themes_json or "[]"),
             "opinions": json.loads(memory.opinions_json or "[]"),
             "experiences": json.loads(memory.experiences_json or "[]"),
