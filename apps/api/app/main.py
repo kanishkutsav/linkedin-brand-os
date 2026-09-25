@@ -407,9 +407,16 @@ async def brand_status(
     await session.commit()
     memory = await service.get_memory(profile.id)
     posts = await service.get_posts(profile.id, limit=100)
+    profile_complete = bool(
+        profile.professional_title and profile.professional_title.strip()
+        and profile.industry and profile.industry.strip()
+        and profile.tone and profile.tone.strip()
+        and profile.experience_years is not None
+    )
+    brand_ready = bool(memory and memory.status == "READY" and profile_complete)
     return {
-        "status": memory.status if memory else "NOT_INITIALIZED",
-        "ready": bool(memory and memory.status == "READY"),
+        "status": "READY" if brand_ready else ("NEEDS_INPUT" if memory else "NOT_INITIALIZED"),
+        "ready": brand_ready,
         "source_post_count": memory.source_post_count if memory else len(posts),
         "current_post_count": len(posts),
         "summary": memory.summary if memory else None,
