@@ -284,7 +284,11 @@ a { color: inherit; }
 .settings-card { padding: 21px; }
 .settings-title { font-family: 'Space Grotesk', sans-serif; font-size: 15px; margin: 0 0 5px; }
 .settings-copy { color: var(--muted); font-size: 12px; line-height: 1.55; margin: 0 0 16px; }
-.profile-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.profile-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; align-items: start; }
+.profile-grid .form-group { min-width: 0; margin-bottom: 0; align-self: start; }
+.profile-grid .form-label { display: block; min-height: 16px; line-height: 16px; }
+.profile-grid .input { height: 40px; min-height: 40px; }
+.profile-grid .form-help { min-height: 14px; }
 .post-stack { display: grid; gap: 10px; }
 .post-entry { padding: 12px; border: 1px solid #eef0f4; border-radius: 13px; background: #fafbfc; }
 .post-entry-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
