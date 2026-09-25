@@ -12,17 +12,18 @@ from app.core.config import settings
 
 
 class ModelRouterService:
-    """OpenRouter-first LLM router with Groq fallback.
+    """OpenRouter-first LLM router with Groq and Gemini fallbacks.
 
-    Normal generation uses OpenRouter's free-model router first. If the request
-    fails, Groq's free-tier GPT-OSS 120B is used as the callback provider.
+    User-entered Brand DNA is passed in the generation prompt, so every
+    configured provider receives the same title, industry, experience, tone,
+    Brand Intelligence memory and historical writing evidence.
     No provider is allowed to perform external LinkedIn actions.
     """
 
     def __init__(self) -> None:
-        if not settings.openrouter_api_key and not settings.groq_api_key:
+        if not settings.openrouter_api_key and not settings.groq_api_key and not settings.gemini_api_key:
             raise RuntimeError(
-                "Neither OPENROUTER_API_KEY nor GROQ_API_KEY is configured."
+                "No LLM provider is configured. Set OPENROUTER_API_KEY, GROQ_API_KEY or GEMINI_API_KEY."
             )
 
     async def generate_json(
@@ -53,6 +54,16 @@ class ModelRouterService:
                 )
             except Exception as exc:
                 errors.append(f"groq: {exc}")
+
+        if settings.gemini_api_key:
+            try:
+                return await self._gemini_json(
+                    system_instruction,
+                    prompt,
+                    max_output_tokens=max_output_tokens,
+                )
+            except Exception as exc:
+                errors.append(f"gemini: {exc}")
 
         raise RuntimeError(
             "All configured LLM providers failed. " + " | ".join(errors)
@@ -135,6 +146,28 @@ class ModelRouterService:
         data = response.json()
         content = self._extract_content(data)
         return self._parse_json(content, "Groq")
+
+    async def _gemini_json(
+        self,
+        system_instruction: str,
+        prompt: str,
+        *,
+        max_output_tokens: int,
+    ) -> dict:
+        client = genai.Client(api_key=settings.gemini_api_key)
+        response = await client.aio.models.generate_content(
+            model=settings.gemini_model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
+                max_output_tokens=max_output_tokens,
+            ),
+        )
+        content = getattr(response, "text", None)
+        if not content:
+            raise RuntimeError("Gemini returned an empty response.")
+        return self._parse_json(str(content), "Gemini")
 
     @staticmethod
     def _extract_content(data: dict[str, Any]) -> str:
