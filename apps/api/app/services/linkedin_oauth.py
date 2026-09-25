@@ -4,7 +4,6 @@ import json
 import secrets
 import urllib.parse
 import base64
-import os
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -86,8 +85,8 @@ def _best_effort_profile(access_token: str, userinfo: dict, id_token: str | None
         "X-Restli-Protocol-Version": "2.0.0",
     }
     try:
-        # Keep this projection limited to LinkedIn's documented authenticated-
-        # member basic profile fields. Industry is not part of r_basicprofile.
+        # Try LinkedIn's member profile endpoint as a best-effort enrichment path.
+        # This is never required for OAuth sign-in; OIDC remains the source of truth.
         member = _request_json(
             "https://api.linkedin.com/v2/me?projection=(id,headline,localizedHeadline,vanityName)",
             headers=headers,
@@ -152,15 +151,10 @@ async def build_authorization_url(session: AsyncSession, browser_nonce: str | No
     )
     await session.commit()
 
-    # OIDC provides the identity baseline. r_basicprofile is additionally
-    # requested because LinkedIn's Profile API uses it for authenticated-member
-    # headline and public-profile fields. It is only effective when the
-    # application has been granted the corresponding LinkedIn product access.
+    # Keep LinkedIn onboarding on the self-serve OIDC + Share on LinkedIn
+    # permissions only. No Community Management, Advertising API, or
+    # r_basicprofile dependency is required for sign-in/profile enrichment.
     scopes = ["openid", "profile", "email", "w_member_social"]
-    # r_basicprofile is only available when the app has approved Advertising or
-    # Community Management access. Keep it opt-in so ordinary OIDC sign-in remains valid.
-    if os.getenv("LINKEDIN_BASIC_PROFILE_OAUTH_ENABLED", "").lower() in {"1", "true", "yes"}:
-        scopes.append("r_basicprofile")
     if settings.linkedin_analytics_oauth_enabled:
         scopes.extend(["r_member_postAnalytics", "r_member_profileAnalytics"])
 
@@ -223,11 +217,13 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
         profile_data.get("headline")
         or profile_data.get("localizedHeadline")
         or _localized_value(profile_data.get("headline"))
+        or _localized_value(profile_data.get("localizedHeadline"))
     )
     industry = (
         profile_data.get("industryName")
         or profile_data.get("localizedIndustry")
         or _localized_value(profile_data.get("industry"))
+        or _localized_value(profile_data.get("localizedIndustry"))
     )
     vanity_name = profile_data.get("vanityName")
     profile_url = (
