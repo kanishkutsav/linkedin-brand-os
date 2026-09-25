@@ -220,7 +220,7 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
                     "source_hints": [source.get("source") or source.get("domain") or ""],
                     "source_urls": [source["url"]],
                     "brand_fit": 62,
-                    "audience_relevance": 60,
+                    "context_relevance": 60,
                     "timeliness": 82,
                     "evidence_strength": 72,
                     "novelty": 58,
@@ -351,7 +351,7 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
             "created_at": item.created_at.isoformat() if item.created_at else None,
         }
 
-    def build_evidence_pack(self, topic: str, audience: str, sources: list[dict]) -> dict:
+    def build_evidence_pack(self, topic: str, sources: list[dict]) -> dict:
         facts = [
             {
                 "claim": source.get("summary", "Public source suggests this is relevant."),
@@ -362,7 +362,6 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
         ]
         return {
             "topic": topic,
-            "audience": audience,
             "facts": facts,
             "sources": sources,
             "confidence": "medium",
