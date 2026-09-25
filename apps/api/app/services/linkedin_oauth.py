@@ -63,7 +63,7 @@ def _best_effort_profile(access_token: str, userinfo: dict) -> dict:
     profile = dict(userinfo or {})
     try:
         member = _request_json(
-            "https://api.linkedin.com/v2/me",
+            "https://api.linkedin.com/v2/me?projection=(id,headline,localizedHeadline,vanityName,industryId,industryName)",
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "Linkedin-Version": settings.linkedin_api_version,
