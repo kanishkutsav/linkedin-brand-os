@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import secrets
 import urllib.parse
 import base64
@@ -15,6 +16,8 @@ from app.core.config import settings
 from app.models.models import AuthUser, LinkedInConnection, LinkedInOAuthExchange, LinkedInOAuthState, UserProfile
 from app.services.auth_service import AppUser, AuthService
 
+
+logger = logging.getLogger(__name__)
 
 LINKEDIN_AUTHORIZE_URL = "https://www.linkedin.com/oauth/v2/authorization"
 LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
