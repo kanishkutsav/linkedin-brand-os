@@ -613,7 +613,7 @@ useEffect(() => {
 
           {tab === 'Dashboard' && (
             <>
-              <section className="hero" onClick={!brand.ready ? () => go('Settings') : undefined} style={!brand.ready ? { cursor: 'pointer' } : undefined}>
+              <section className="hero" onClick={!brand.ready ? () => go('Brand DNA') : undefined} style={!brand.ready ? { cursor: 'pointer' } : undefined}>
                 <div className="hero-grid">
                   <div>
                     <div className="page-kicker" style={{ color: '#bdb6ff' }}>
@@ -629,7 +629,7 @@ useEffect(() => {
                         onClick={(event) => {
                           event.stopPropagation();
                           if (!brand.ready) {
-                            go('Settings');
+                            go('Brand DNA');
                             return;
                           }
                           void generateContent();
