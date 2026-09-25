@@ -127,9 +127,8 @@ Rules:
 Return:
 {
   "summary": "short brand DNA summary",
-  "identity": {"role": [], "industry": [], "positioning": []},
+  "identity": {"role": [], "industry": []},
   "expertise": [{"area": "", "evidence": "profile|post_pattern", "confidence": "high|medium|low"}],
-  "audience": [{"segment": "", "why": ""}],
   "themes": [{"theme": "", "frequency": "high|medium|low", "examples": []}],
   "opinions": [{"view": "", "evidence": "post_pattern", "confidence": "high|medium|low"}],
   "experiences": [{"signal": "", "evidence": "post_pattern", "confidence": "high|medium|low"}],
@@ -144,9 +143,7 @@ Return:
                     "display_name": profile.display_name,
                     "professional_title": profile.professional_title,
                     "industry": profile.industry,
-                    "audience": profile.audience,
-                    "goals": profile.goals,
-                    "brand_positioning": profile.brand_positioning,
+                    "experience_years": profile.experience_years,
                     "tone": profile.tone,
                 },
                 "historical_posts": examples,
@@ -168,7 +165,7 @@ Return:
         memory.summary = str(analysis.get("summary") or "").strip()
         memory.identity_json = _json(analysis.get("identity"))
         memory.expertise_json = _json(analysis.get("expertise"))
-        memory.audience_json = _json(analysis.get("audience"))
+        memory.audience_json = _json([])
         memory.themes_json = _json(analysis.get("themes"))
         memory.opinions_json = _json(analysis.get("opinions"))
         memory.experiences_json = _json(analysis.get("experiences"))
@@ -179,6 +176,9 @@ Return:
         memory.initialized_at = datetime.now(timezone.utc)
 
         voice_data = analysis.get("voice") or {}
+        # Desired tone is explicitly supplied by the user and remains the source of truth.
+        if profile.tone:
+            voice_data = {**voice_data, "tone": profile.tone}
         voice_result = await self.session.execute(select(VoiceMemory).where(VoiceMemory.profile_id == profile_id).limit(1))
         voice = voice_result.scalar_one_or_none()
         if voice is None:
