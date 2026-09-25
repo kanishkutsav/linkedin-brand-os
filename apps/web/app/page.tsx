@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Activity, ArrowUpRight, BarChart3, BrainCircuit, Check, ChevronRight, CircleCheck,
-  Clock3, Command, ExternalLink, FileText, Gauge, Globe2, LayoutDashboard, Link2,
-  LogOut, Menu, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings,
+  Clock3, Command, Download, ExternalLink, FileText, Gauge, Globe2, LayoutDashboard, Link2,
+  LogOut, Menu, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings,
   ShieldCheck, Sparkles, Target, TrendingUp, UserRound, WandSparkles, X, Zap
 } from 'lucide-react';
 
@@ -35,6 +35,11 @@ type Opportunity = {
   source_ids?: number[]; sources?: { title?: string; url?: string; domain?: string }[];
 };
 type Tab = 'Dashboard' | 'Research' | 'Content' | 'LinkedIn Posts' | 'Analytics' | 'Brand DNA';
+
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+};
 
 const nav = [
   ['Dashboard', LayoutDashboard, 'Command center'],
@@ -88,9 +93,40 @@ export default function Home() {
   const [researchProgress, setResearchProgress] = useState(0);
   const [researchStage, setResearchStage] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const headers = (authToken = token) => authToken ? { Authorization: `Bearer ${authToken}` } : {};
+
+  useEffect(() => {
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+    setIsStandalone(standalone);
+
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    };
+    const handleAppInstalled = () => {
+      setInstallPrompt(null);
+      setIsStandalone(true);
+      setMoreOpen(false);
+      setNotice('Brand OS was added to your device.');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
 
   useEffect(() => {
     if (!notice) return;
@@ -299,6 +335,25 @@ useEffect(() => {
 
   const initials = (profile.display_name || 'User').split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase();
   const closeSidebar = () => setSidebarOpen(false);
+  const closeMore = () => setMoreOpen(false);
+  const isIosDevice = () => /iphone|ipad|ipod/i.test(window.navigator.userAgent) || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
+  const installBrandOS = async () => {
+    if (isStandalone) return;
+    if (installPrompt) {
+      const prompt = installPrompt;
+      setInstallPrompt(null);
+      await prompt.prompt();
+      const choice = await prompt.userChoice;
+      if (choice.outcome === 'accepted') setNotice('Installing Brand OS…');
+      return;
+    }
+    if (isIosDevice()) {
+      setMoreOpen(false);
+      setShowIosInstallGuide(true);
+      return;
+    }
+    setNotice('Use your browser menu to install Brand OS or add it to your home screen.');
+  };
   const connectLinkedIn = () => {
     const nonce = window.crypto?.randomUUID?.() || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
     window.localStorage.setItem('brand-os-oauth-nonce', nonce);
@@ -316,6 +371,7 @@ useEffect(() => {
     }
   };
   const go = (next: Tab) => {
+    setMoreOpen(false);
     if (!brand.ready && next !== 'Brand DNA') {
       setTab('Brand DNA');
       closeSidebar();
@@ -707,6 +763,62 @@ useEffect(() => {
           )}
         </main>
       </div>
+
+      <nav className="mobile-bottom-nav" aria-label="Mobile workspace navigation">
+        {[
+          ['Dashboard', LayoutDashboard, 'Home'],
+          ['Research', Search, 'Research'],
+          ['Content', FileText, 'Content'],
+          ['LinkedIn Posts', ExternalLink, 'Posts'],
+        ].map(([key, Icon, label]) => (
+          <button key={key as string} className={`mobile-nav-item ${tab === key ? 'active' : ''}`} onClick={() => go(key as Tab)}>
+            <Icon size={18} />
+            <span>{label as string}</span>
+          </button>
+        ))}
+        <button className={`mobile-nav-item ${moreOpen ? 'active' : ''}`} onClick={() => setMoreOpen((open) => !open)}>
+          <MoreHorizontal size={19} />
+          <span>More</span>
+        </button>
+      </nav>
+
+      {moreOpen && (
+        <>
+          <div className="mobile-more-backdrop" onClick={closeMore} />
+          <section className="mobile-more-sheet" aria-label="More workspace options">
+            <div className="mobile-sheet-handle" />
+            <div className="mobile-sheet-title">More</div>
+            <div className="mobile-more-grid">
+              <button onClick={() => go('Analytics')}><BarChart3 size={18} /><span>Analytics</span></button>
+              <button onClick={() => go('Brand DNA')}><Settings size={18} /><span>Brand DNA</span></button>
+              <button onClick={() => { closeMore(); connectLinkedIn(); }}><Link2 size={18} /><span>{linkedin.connected ? 'LinkedIn' : 'Connect LinkedIn'}</span></button>
+              <button onClick={installBrandOS} disabled={isStandalone}><Download size={18} /><span>{isStandalone ? 'Installed' : 'Install Brand OS'}</span></button>
+            </div>
+            <div className="mobile-more-status">
+              <span className={`connection-dot ${linkedin.connected ? 'live' : ''}`} />
+              <div><strong>{linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}</strong><span>{linkedin.connected ? 'Official API connection is ready.' : 'Connect through official OAuth to enable publishing.'}</span></div>
+            </div>
+            <button className="mobile-more-signout" onClick={logout}><LogOut size={17} /> Sign out</button>
+            <div className="mobile-more-footer">Brand OS · by Kanishka</div>
+          </section>
+        </>
+      )}
+
+      {showIosInstallGuide && (
+        <div className="install-guide-backdrop" onClick={() => setShowIosInstallGuide(false)}>
+          <section className="install-guide" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Install Brand OS">
+            <div className="install-guide-icon"><Download size={20} /></div>
+            <h2>Add Brand OS to your iPhone</h2>
+            <p>Safari can install Brand OS as an app on your Home Screen.</p>
+            <ol>
+              <li>Tap the <strong>Share</strong> button in Safari.</li>
+              <li>Choose <strong>Add to Home Screen</strong>.</li>
+              <li>Turn on <strong>Open as Web App</strong>, then tap <strong>Add</strong>.</li>
+            </ol>
+            <button className="button primary" onClick={() => setShowIosInstallGuide(false)}>Got it</button>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
