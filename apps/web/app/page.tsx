@@ -592,6 +592,7 @@ useEffect(() => {
           <div className="connection-meta">No external LinkedIn action is executed without your explicit approval.</div>
         </div>
         <button className="side-button" onClick={logout}><LogOut size={14} /> Sign out <span style={{ marginLeft: 'auto' }}>⌘Q</span></button>
+        <div className="brand-footer">Brand OS · by Kanishka</div>
       </aside>
 
       <div className="main-shell">
