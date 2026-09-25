@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
+import re
 from datetime import datetime, timezone
 from urllib.parse import quote_plus, urlparse
 import xml.etree.ElementTree as ET
@@ -112,6 +114,69 @@ class ResearchService:
                     items.append(item)
         return items[:16]
 
+    async def _source_context(self, client: httpx.AsyncClient, source: dict) -> dict:
+        """Fetch a small, source-grounded text excerpt for research summaries.
+
+        This deliberately stays dependency-free: it uses the standard library to
+        remove obvious HTML chrome and keeps the excerpt small enough for the
+        ranking prompt. If a publisher blocks extraction, the original URL and
+        metadata remain usable.
+        """
+        url = str(source.get("url") or "").strip()
+        if not url:
+            return source
+
+        try:
+            response = await client.get(url)
+            response.raise_for_status()
+            content_type = response.headers.get("content-type", "")
+            if "text/html" not in content_type.lower():
+                return source
+
+            raw = response.text[:500_000]
+            raw = re.sub(r"(?is)<(script|style|noscript|svg|nav|footer|header)[^>]*>.*?</\\1>", " ", raw)
+            paragraphs = re.findall(r"(?is)<p[^>]*>(.*?)</p>", raw)
+            text_parts = []
+            for paragraph in paragraphs:
+                cleaned = re.sub(r"(?is)<[^>]+>", " ", paragraph)
+                cleaned = html.unescape(cleaned)
+                cleaned = re.sub(r"\\s+", " ", cleaned).strip()
+                if len(cleaned) >= 50:
+                    text_parts.append(cleaned)
+                if sum(len(item) for item in text_parts) >= 6000:
+                    break
+
+            excerpt = " ".join(text_parts)[:6000].strip()
+            if not excerpt:
+                description_match = re.search(
+                    r'(?is)<meta[^>]+(?:name|property)=["\'](?:description|og:description)["\'][^>]+content=["\'](.*?)["\']',
+                    raw,
+                )
+                excerpt = html.unescape(description_match.group(1)).strip() if description_match else ""
+
+            if excerpt:
+                return source | {"source_excerpt": excerpt}
+        except Exception:
+            pass
+        return source
+
+    async def _enrich_source_context(self, sources: list[dict]) -> list[dict]:
+        if not sources:
+            return sources
+        async with httpx.AsyncClient(
+            timeout=6.0,
+            follow_redirects=True,
+            headers={"User-Agent": "BrandOS/1.0"},
+        ) as client:
+            results = await asyncio.gather(
+                *(self._source_context(client, source) for source in sources[:16]),
+                return_exceptions=True,
+            )
+        enriched = []
+        for source, result in zip(sources[:16], results):
+            enriched.append(result if isinstance(result, dict) else source)
+        return enriched + sources[16:]
+
     async def research_and_rank(
         self,
         *,
@@ -156,6 +221,7 @@ class ResearchService:
                 seen_urls.add(source["url"])
                 deduped_sources.append(source)
         live_sources = deduped_sources[:20]
+        live_sources = await self._enrich_source_context(live_sources)
 
         if not live_sources:
             # Do not turn a temporary public-feed outage into a hard Research failure.
@@ -178,7 +244,10 @@ class ResearchService:
             "recent_content_topics": recent_content[:10],
             "requested_topic": requested_topic,
             "candidate_limit": candidate_limit,
-            "live_sources": live_sources[:16],
+            "live_sources": [
+                {key: value for key, value in source.items() if key != "source_excerpt" or value}
+                for source in live_sources[:16]
+            ],
         }, ensure_ascii=False)
 
         system = """You are the live research and content-opportunity engine for a professional LinkedIn personal-brand system.
@@ -198,7 +267,7 @@ Hard rules:
 Return:
 {"opportunities":[{"title":"","topic":"","angle":"","pillar":"","format":"","objective":"","why_now":"","evidence_summary":"","source_hints":[],"source_urls":[],"brand_fit":0,"context_relevance":0,"timeliness":0,"evidence_strength":0,"novelty":0,"conversation_potential":0,"authenticity":0,"risk":0,"rationale":""}]}
 
-Generate 6-8 genuinely different opportunities. Every opportunity must cite at least one supplied source URL in source_urls.
+Generate 6-8 genuinely different opportunities. Every opportunity must cite at least one supplied source URL in source_urls. For evidence_summary, write one useful 80-120 word paragraph explaining what the supplied source says and why it matters. Only use claims supported by the supplied source excerpt or metadata. If no article text was available, be explicit that the summary is based on the available source metadata rather than inventing details.
 """
 
         try:
@@ -218,7 +287,7 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
                     "format": "Insight post",
                     "objective": "Build informed professional visibility",
                     "why_now": "This item appeared in the live public source feed during the research run.",
-                    "evidence_summary": source["title"],
+                    "evidence_summary": (source.get("source_excerpt") or source["title"])[:900],
                     "source_hints": [source.get("source") or source.get("domain") or ""],
                     "source_urls": [source["url"]],
                     "brand_fit": 62,
