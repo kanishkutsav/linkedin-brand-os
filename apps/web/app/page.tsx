@@ -97,6 +97,7 @@ export default function Home() {
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [learningStatus, setLearningStatus] = useState({ pending_events: 0, memory_count: 0 });
   const [savingThought, setSavingThought] = useState(false);
 
   const headers = (authToken = token) => authToken ? { Authorization: `Bearer ${authToken}` } : {};
@@ -278,11 +279,13 @@ useEffect(() => {
       void Promise.all([
         fetch(`${API_BASE}/api/research/opportunities`, { headers: headers(authToken) }),
         fetch(`${API_BASE}/api/analytics/overview`, { headers: headers(authToken) }),
-      ]).then(async ([opportunityRes, analyticsRes]) => {
+        fetch(`${API_BASE}/api/learning/status`, { headers: headers(authToken) }),
+      ]).then(async ([opportunityRes, analyticsRes, learningRes]) => {
         const opportunityJson = opportunityRes.ok ? await opportunityRes.json() : { opportunities: [] };
         setOpportunities(opportunityJson.opportunities || []);
         const analyticsJson = analyticsRes.ok ? await analyticsRes.json() : null;
         setAnalytics(analyticsJson);
+        if (learningRes.ok) setLearningStatus(await learningRes.json());
       }).catch(() => {
         // Optional panels are allowed to fail without affecting the core workspace.
       });
@@ -751,7 +754,7 @@ useEffect(() => {
           )}
 
           {tab === 'Research' && <ResearchView opportunities={opportunities} researchFocus={researchFocus} setResearchFocus={setResearchFocus} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
-          {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} />}
+          {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
           {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'APPROVED' || item.status === 'EXECUTED')} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
           {tab === 'Brand DNA' && (
@@ -1134,7 +1137,7 @@ function ResearchCard({ item }: { item: Opportunity }) {
   );
 }
 
-function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBody, language, setLanguage, busy, improving, improvementProgress, improvementNotes, onImprove, onSubmit, savingThought, onSaveThought }: any) {
+function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBody, language, setLanguage, busy, improving, improvementProgress, improvementNotes, onImprove, onSubmit, savingThought, onSaveThought, learningStatus }: any) {
   return (
     <>
       <div className="page-header">
@@ -1142,6 +1145,7 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
           <div className="page-kicker"><WandSparkles size={13}/> Editorial studio</div>
           <h1 className="page-title">Write it your way. Let Brand OS polish it.</h1>
           <p className="page-description">Start with your own idea and wording in any language. Brand OS can improve structure and clarity using your Brand DNA, then you preview the exact version before it enters the approval queue.</p>
+          <div className="form-help" style={{ marginTop: 8 }}>Brand learning is active · {learningStatus?.memory_count ?? 0} learned signals · {learningStatus?.pending_events ?? 0} queued for processing</div>
         </div>
       </div>
       <section className="panel studio-grid">
