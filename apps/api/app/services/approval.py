@@ -325,6 +325,7 @@ class ApprovalService:
         if not guard.passed:
             raise ValueError("Regenerated content blocked by guardrails: " + "; ".join(guard.issues))
 
+        previous_body = version.body
         version.body = new_body
         version.content_hash = new_hash
         version.version_number += 1
@@ -347,7 +348,7 @@ class ApprovalService:
                 source_type="approval_regeneration",
                 source_id=f"{approval.id}:{version.version_number}",
                 content=(feedback or "").strip(),
-                metadata={"previous_draft": version.body[:6000]},
+                metadata={"previous_draft": previous_body[:6000]},
             )
         self.session.add(AuditLog(
             event_type="APPROVAL_REGENERATED",
