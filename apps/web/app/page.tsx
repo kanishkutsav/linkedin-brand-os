@@ -34,7 +34,7 @@ type Opportunity = {
   evidence?: { summary?: string; why_now?: string; source_hints?: string[]; grounding_queries?: string[] };
   source_ids?: number[]; sources?: { title?: string; url?: string; domain?: string }[];
 };
-type Tab = 'Dashboard' | 'Research' | 'Content' | 'LinkedIn Posts' | 'Analytics' | 'Settings';
+type Tab = 'Dashboard' | 'Research' | 'Content' | 'LinkedIn Posts' | 'Analytics' | 'Brand DNA';
 
 const nav = [
   ['Dashboard', LayoutDashboard, 'Command center'],
@@ -42,7 +42,7 @@ const nav = [
   ['Content', FileText, 'Draft & refine'],
   ['LinkedIn Posts', ExternalLink, 'Approved & published'],
   ['Analytics', BarChart3, 'Performance'],
-  ['Settings', Settings, 'Brand DNA'],
+  ['Brand DNA', Settings, 'Brand DNA'],
 ] as const;
 
 export default function Home() {
@@ -315,8 +315,8 @@ useEffect(() => {
     }
   };
   const go = (next: Tab) => {
-    if (!brand.ready && next !== 'Settings') {
-      setTab('Settings');
+    if (!brand.ready && next !== 'Brand DNA') {
+      setTab('Brand DNA');
       closeSidebar();
       setNotice('Before using the workspace, complete your Brand DNA setup once.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -329,7 +329,7 @@ useEffect(() => {
 
   const requireBrand = (actionLabel: string) => {
     if (brand.ready) return true;
-    go('Settings');
+    go('Brand DNA');
     setError('Brand DNA is not set up yet. Before ' + actionLabel + ', complete your Brand DNA details and add 3–10 previous LinkedIn posts to calibrate your writing voice.');
     return false;
   };
@@ -678,7 +678,7 @@ useEffect(() => {
           {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} />}
           {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'APPROVED' || item.status === 'EXECUTED')} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
-          {tab === 'Settings' && (
+          {tab === 'Brand DNA' && (
             <SettingsView
               brand={brand}
               profile={profile}
