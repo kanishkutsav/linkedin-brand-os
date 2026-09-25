@@ -782,8 +782,7 @@ async def improve_content(
     # Polishing should not trigger a hidden Brand DNA re-analysis. The user's
     # saved Brand DNA is the source of truth and the editor should stay fast.
     recent_posts = await brand_service.get_posts(profile.id, limit=3)
-    brand_context = {
-        "brand_memory": brand_service.serialize(memory),
+    brand_context = await brand_service.generation_context(profile.id, query=f"{req.title} {req.topic}".strip())
         "historical_examples": [
             {
                 "published_at": post.published_at.isoformat() if post.published_at else None,
