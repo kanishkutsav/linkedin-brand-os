@@ -1076,12 +1076,12 @@ function ResearchCard({ item }: { item: Opportunity }) {
 
       <div className="research-relevance-grid">
         <div className="research-relevance-item">
-          <div className="score-name">Relevance to your profile</div>
+          <div className="score-name">Relevant to your profile</div>
           <div className="research-relevance-value">{Math.round(brandRelevance)}%</div>
           <div className="score-bar"><span style={{ width: `${Math.min(100, Math.max(0, brandRelevance))}%` }}/></div>
         </div>
         <div className="research-relevance-item">
-          <div className="score-name">Evidence strength</div>
+          <div className="score-name">Evidence quality</div>
           <div className="research-relevance-value">{Math.round(evidenceStrength)}%</div>
           <div className="score-bar"><span style={{ width: `${Math.min(100, Math.max(0, evidenceStrength))}%` }}/></div>
         </div>
