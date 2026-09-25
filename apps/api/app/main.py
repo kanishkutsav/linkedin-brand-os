@@ -99,6 +99,12 @@ async def lifespan(app: FastAPI):
         if "experience_years" not in columns:
             await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN experience_years FLOAT"))
 
+        approval_columns = await conn.run_sync(lambda sync_conn: {
+            column["name"] for column in inspect(sync_conn).get_columns("approval_requests")
+        })
+        if "published_image_urn" not in approval_columns:
+            await conn.execute(text("ALTER TABLE approval_requests ADD COLUMN published_image_urn VARCHAR(255)"))
+
         # Drop the retired self-declared audience, goals and positioning fields.
         # They are no longer part of Brand DNA and must not remain as an
         # alternative source of user context.
