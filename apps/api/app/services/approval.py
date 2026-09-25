@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 import asyncio
 import hashlib
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import ApprovalRequest, ContentVersion, ContentItem, UserProfile, VoiceMemory, AuditLog, SystemFlag, FeedbackEntry, HistoricalPost
 from app.core.config import settings
@@ -45,6 +45,25 @@ class ApprovalService:
             raise ValueError("Approval not found")
         return approval
 
+    async def dashboard_counts(self, profile_id: int) -> dict[str, int]:
+        """Return lifetime workflow counts from approval rows, independent of dashboard pagination."""
+        result = await self.session.execute(
+            select(ApprovalRequest.status, func.count(ApprovalRequest.id))
+            .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(ContentItem.profile_id == profile_id)
+            .group_by(ApprovalRequest.status)
+        )
+        by_status = {str(status): int(count) for status, count in result.all()}
+        return {
+            "total": sum(by_status.values()),
+            "awaiting_approval": sum(by_status.get(status, 0) for status in ("PENDING", "EDITED", "REGENERATED")),
+            "approved": by_status.get("APPROVED", 0),
+            "published": by_status.get("EXECUTED", 0),
+            "needs_review": sum(by_status.get(status, 0) for status in ("EDITED", "REGENERATED")),
+            "rejected": by_status.get("REJECTED", 0),
+            "pending_filter": sum(by_status.get(status, 0) for status in ("PENDING", "APPROVED", "PUBLISHING")),
+        }
     async def list_pending(self, profile_id: int):
         result = await self.session.execute(
             select(ApprovalRequest)
@@ -59,16 +78,56 @@ class ApprovalService:
         return result.scalars().all()
 
     async def list_dashboard(self, profile_id: int, limit: int = 100):
-        """Return approval records owned by the active profile."""
-        result = await self.session.execute(
+        """Return active workflow records plus a small recent terminal history.
+
+        The Command Center is intentionally not a lifetime content archive:
+        active work remains visible, while only the latest 10 rejected and
+        published records are returned for context.
+        """
+        active_result = await self.session.execute(
             select(ApprovalRequest)
             .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
             .join(ContentItem, ContentItem.id == ContentVersion.content_id)
-            .where(ContentItem.profile_id == profile_id)
+            .where(
+                ContentItem.profile_id == profile_id,
+                ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED", "APPROVED", "PUBLISHING", "FAILED"]),
+            )
             .order_by(ApprovalRequest.created_at.desc())
-            .limit(limit)
+            .limit(max(1, min(limit, 200)))
         )
-        approvals = result.scalars().all()
+        active = list(active_result.scalars().all())
+
+        rejected_result = await self.session.execute(
+            select(ApprovalRequest)
+            .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(
+                ContentItem.profile_id == profile_id,
+                ApprovalRequest.status == "REJECTED",
+            )
+            .order_by(ApprovalRequest.created_at.desc())
+            .limit(10)
+        )
+        rejected = list(rejected_result.scalars().all())
+
+        published_result = await self.session.execute(
+            select(ApprovalRequest)
+            .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(
+                ContentItem.profile_id == profile_id,
+                ApprovalRequest.status == "EXECUTED",
+            )
+            .order_by(ApprovalRequest.approved_at.desc().nullslast(), ApprovalRequest.created_at.desc())
+            .limit(10)
+        )
+        published = list(published_result.scalars().all())
+
+        approvals = active + rejected + published
+        # Keep the response deterministic and de-duplicate records if a future
+        # status migration causes a record to appear in more than one bucket.
+        unique = {int(item.id): item for item in approvals}
+        approvals = sorted(unique.values(), key=lambda item: item.created_at, reverse=True)
 
         # Older deployments used FAILED as a terminal approval state when a
         # LinkedIn publish attempt failed. Restore those records to APPROVED so

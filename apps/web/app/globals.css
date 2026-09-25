@@ -210,6 +210,9 @@ a { color: inherit; }
 .textarea { min-height: 160px; padding: 13px; resize: vertical; line-height: 1.55; }
 .input:focus, .textarea:focus, .select:focus { border-color: #a79fff; box-shadow: 0 0 0 3px rgba(109,93,252,.10); background: #fff; }
 .filter-row { display: flex; gap: 5px; flex-wrap: wrap; }
+.filter-chip { display: inline-flex; align-items: center; gap: 6px; }
+.filter-count { font-style: normal; min-width: 17px; height: 17px; padding: 0 4px; display: inline-grid; place-items: center; border-radius: 999px; background: #eef0f4; color: #667085; font-size: 9px; font-weight: 800; }
+.filter-chip.active .filter-count { background: rgba(255,255,255,.78); color: #5145cd; }
 .filter-chip {
   flex: 0 0 auto; min-width: 46px; border: 1px solid var(--line); border-radius: 8px; padding: 7px 7px; background: #fff; color: var(--muted);
   font-size: 10px; font-weight: 700; cursor: pointer; transition: all .16s ease;

@@ -158,7 +158,7 @@ class HistoricalPost(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     profile_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id"), index=True, nullable=False)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    body: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     source: Mapped[str] = mapped_column(String(50), default="user_import")

@@ -47,7 +47,11 @@ class BrandIntelligenceService:
     async def get_posts(self, profile_id: int, limit: int = 20) -> list[HistoricalPost]:
         result = await self.session.execute(
             select(HistoricalPost)
-            .where(HistoricalPost.profile_id == profile_id)
+            .where(
+                HistoricalPost.profile_id == profile_id,
+                HistoricalPost.body.is_not(None),
+                HistoricalPost.body != "",
+            )
             .order_by(HistoricalPost.published_at.desc().nullslast(), HistoricalPost.created_at.desc())
             .limit(max(1, min(limit, 100)))
         )

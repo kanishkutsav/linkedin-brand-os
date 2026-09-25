@@ -45,7 +45,7 @@ const nav = [
   ['Dashboard', LayoutDashboard, 'Command center'],
   ['Research', Search, 'Find opportunities'],
   ['Content', FileText, 'Draft & refine'],
-  ['LinkedIn Posts', ExternalLink, 'Approved & published'],
+  ['LinkedIn Posts', ExternalLink, 'Published posts'],
   ['Analytics', BarChart3, 'Performance'],
   ['Brand DNA', Settings, 'Brand DNA'],
 ] as const;
@@ -69,7 +69,7 @@ export default function Home() {
   const [isBuildingBrand, setIsBuildingBrand] = useState(false);
   const [queue, setQueue] = useState<ApprovalItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'EXECUTED' | 'REJECTED'>('PENDING');
+  const [statusFilter, setStatusFilter] = useState<'PENDING' | 'NEEDS_REVIEW' | 'EXECUTED' | 'REJECTED'>('PENDING');
   const [searchTerm, setSearchTerm] = useState('');
   const [editedBody, setEditedBody] = useState('');
   const [reviewNote, setReviewNote] = useState('');
@@ -98,6 +98,10 @@ export default function Home() {
   const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
   const [loading, setLoading] = useState(false);
   const [learningStatus, setLearningStatus] = useState({ pending_events: 0, memory_count: 0 });
+  const [dashboardCounts, setDashboardCounts] = useState({
+    total: 0, awaiting_approval: 0, approved: 0, published: 0,
+    needs_review: 0, rejected: 0, pending_filter: 0,
+  });
   const [savingThought, setSavingThought] = useState(false);
 
   const headers = (authToken = token) => authToken ? { Authorization: `Bearer ${authToken}` } : {};
@@ -270,6 +274,15 @@ useEffect(() => {
         title: item.title || '', topic: item.topic || '', approved_at: item.approved_at || null, created_at: item.created_at,
       }));
       setQueue(nextQueue);
+      setDashboardCounts({
+        total: Number(approvalsJson.counts?.total ?? 0),
+        awaiting_approval: Number(approvalsJson.counts?.awaiting_approval ?? 0),
+        approved: Number(approvalsJson.counts?.approved ?? 0),
+        published: Number(approvalsJson.counts?.published ?? 0),
+        needs_review: Number(approvalsJson.counts?.needs_review ?? 0),
+        rejected: Number(approvalsJson.counts?.rejected ?? 0),
+        pending_filter: Number(approvalsJson.counts?.pending_filter ?? 0),
+      });
       if (nextQueue.length && !nextQueue.some((i) => i.id === selectedId)) setSelectedId(nextQueue[0].id);
 
       setLoading(false);
@@ -305,13 +318,12 @@ useEffect(() => {
 
   const filteredQueue = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
-    const pendingStatuses = new Set(['PENDING', 'REGENERATED', 'EDITED']);
     return queue.filter((item) => {
       const normalizedStatus = String(item.status || '').trim().toUpperCase();
-      const statusMatch = statusFilter === 'all'
-        ? true
-        : statusFilter === 'PENDING'
-          ? pendingStatuses.has(normalizedStatus)
+      const statusMatch = statusFilter === 'PENDING'
+        ? ['PENDING', 'APPROVED', 'PUBLISHING'].includes(normalizedStatus)
+        : statusFilter === 'NEEDS_REVIEW'
+          ? ['EDITED', 'REGENERATED'].includes(normalizedStatus)
           : normalizedStatus === statusFilter;
       const haystack = `${item.action_type} ${item.content} ${item.reason || ''}`.toLowerCase();
       return statusMatch && (!query || haystack.includes(query));
@@ -329,12 +341,12 @@ useEffect(() => {
   }, [filteredQueue, selectedId]);
 
   const selectedApproval = queue.find((item) => item.id === selectedId) ?? null;
-  const summary = useMemo(() => ({
-    pending: queue.filter((i) => ['PENDING', 'EDITED', 'REGENERATED'].includes(i.status)).length,
-    reviewed: queue.filter((i) => i.status === 'APPROVED').length,
-    rejected: queue.filter((i) => i.status === 'REJECTED').length,
-    executed: queue.filter((i) => i.status === 'EXECUTED').length,
-  }), [queue]);
+  const summary = {
+    pending: dashboardCounts.awaiting_approval,
+    reviewed: dashboardCounts.approved,
+    rejected: dashboardCounts.rejected,
+    executed: dashboardCounts.published,
+  };
 
   const initials = (profile.display_name || 'User').split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase();
   const closeMore = () => setMoreOpen(false);
@@ -432,7 +444,7 @@ useEffect(() => {
       if (action === 'approve') {
         window.localStorage.removeItem(`brand-os-regeneration-feedback:${selectedApproval.id}`);
         setReviewNote('');
-        setStatusFilter('APPROVED');
+        setStatusFilter('PENDING');
       }
       if (action === 'execute') setStatusFilter('EXECUTED');
       setOperationProgress(action === 'approve' || action === 'execute' ? 82 : 88);
@@ -755,7 +767,7 @@ useEffect(() => {
 
           {tab === 'Research' && <ResearchView opportunities={opportunities} researchFocus={researchFocus} setResearchFocus={setResearchFocus} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
           {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
-          {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'APPROVED' || item.status === 'EXECUTED')} />}
+          {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
           {tab === 'Brand DNA' && (
             <SettingsView
@@ -914,7 +926,17 @@ function ApprovalWorkspace(props: any) {
         <div className="queue-tools">
           <div className="searchbox"><Search size={13}/><input className="input" placeholder="Search drafts…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
           <div className="filter-row">
-            {(['PENDING','REGENERATED','EDITED','APPROVED','EXECUTED','REJECTED','all'] as const).map((x) => <button key={x} className={`filter-chip ${statusFilter === x ? 'active' : ''}`} onClick={() => setStatusFilter(x)}>{x === 'all' ? 'All' : x[0] + x.slice(1).toLowerCase()}</button>)}
+            {([
+              ['PENDING', 'Pending'],
+              ['NEEDS_REVIEW', 'Needs review'],
+              ['REJECTED', 'Rejected'],
+              ['EXECUTED', 'Published'],
+            ] as const).map(([value, label]) => (
+              <button key={value} className={`filter-chip ${statusFilter === value ? 'active' : ''}`} onClick={() => setStatusFilter(value)}>
+  <span>{label}</span>
+  <em className="filter-count">{value === 'PENDING' ? dashboardCounts.pending_filter : value === 'NEEDS_REVIEW' ? dashboardCounts.needs_review : value === 'REJECTED' ? dashboardCounts.rejected : dashboardCounts.published}</em>
+</button>
+            ))}
           </div>
         </div>
         <div className="queue-items">
@@ -1007,38 +1029,38 @@ function ApprovalWorkspace(props: any) {
   );
 }
 
-function StatusPill({ status }: { status: string }) {
+function StatusPill({ status, label }: { status: string; label?: string }) {
   const cls = status.toLowerCase();
-  return <span className={`status-pill ${cls}`}><span>●</span>{status}</span>;
+  return <span className={`status-pill ${cls}`}><span>●</span>{label || status}</span>;
 }
 
-function LinkedInPostsView({ posts }: { posts: ApprovalItem[] }) {
+function LinkedInPostsView({ posts, totalPublished }: { posts: ApprovalItem[]; totalPublished: number }) {
   return (
     <>
       <div className="page-header">
         <div>
           <div className="page-kicker"><ExternalLink size={13}/> LinkedIn content</div>
-          <h1 className="page-title">Your approved LinkedIn posts.</h1>
-          <p className="page-description">Approved content stays visible here even after it leaves the review queue. Published posts are marked separately.</p>
+          <h1 className="page-title">Your published LinkedIn posts.</h1>
+          <p className="page-description">Your 10 most recently published LinkedIn posts are shown here. Older posts are retained as learning signals, not as a full content archive.</p>
         </div>
       </div>
       <section className="panel">
         <div className="panel-head">
-          <div><div className="panel-title">Approved posts</div><div className="panel-subtitle">{posts.length} post{posts.length === 1 ? '' : 's'} in the workflow</div></div>
+          <div><div className="panel-title">Published posts</div><div className="panel-subtitle">{totalPublished > 10 ? `Showing the 10 most recent of ${totalPublished} published posts` : `Showing all ${totalPublished} published posts`}</div></div>
         </div>
         <div className="post-stack">
           {posts.length ? posts.map((post) => (
             <article className="post-entry" key={post.id}>
               <div className="post-entry-head">
                 <span className="post-index">POST #{post.id}</span>
-                <StatusPill status={post.status}/>
+                <StatusPill status={post.status} label="Published"/>
               </div>
               {post.title ? <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 7 }}>{post.title}</div> : null}
               {post.topic ? <div className="form-help" style={{ marginBottom: 9 }}>{post.topic}</div> : null}
               <div style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.7, color: '#344054' }}>{post.content}</div>
               {post.approved_at ? <div className="form-help" style={{ marginTop: 10 }}>Approved {new Date(post.approved_at).toLocaleString()}</div> : null}
             </article>
-          )) : <EmptyState icon={ExternalLink} title="No approved posts yet" text="Approve a post from the editorial queue and it will appear here automatically." />}
+          )) : <EmptyState icon={ExternalLink} title="No published posts yet" text="Once you publish a post through Brand OS, it will appear here automatically." />}
         </div>
       </section>
     </>
