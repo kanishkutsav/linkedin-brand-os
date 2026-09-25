@@ -5,7 +5,7 @@ import {
   Activity, ArrowUpRight, BarChart3, BrainCircuit, Check, ChevronRight, CircleCheck,
   Clock3, Command, ExternalLink, FileText, Gauge, Globe2, LayoutDashboard, Link2,
   LogOut, Menu, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings,
-  ShieldCheck, Sparkles, Target, TrendingUp, UserRound, WandSparkles, X, Zap
+  ShieldCheck, Sparkles, Target, TrendingUp, UserRound, WandSparkles, X, Zap, Image as ImageIcon
 } from 'lucide-react';
 
 const API_BASE = typeof window !== 'undefined' && window.location.hostname === 'localhost' ? (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000') : '/api/backend';
@@ -72,7 +72,7 @@ export default function Home() {
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeTtl, setNoticeTtl] = useState(4500);
   const [isBusy, setIsBusy] = useState(false);
-  const [busyAction, setBusyAction] = useState<'approve' | 'edit' | 'reject' | 'regenerate' | null>(null);
+  const [busyAction, setBusyAction] = useState<'approve' | 'edit' | 'reject' | 'regenerate' | 'execute' | null>(null);
   const [operationProgress, setOperationProgress] = useState(0);
   const [operationStage, setOperationStage] = useState('');
   const [tab, setTab] = useState<Tab>('Dashboard');
@@ -334,7 +334,7 @@ useEffect(() => {
     return false;
   };
 
-  const runApprovalAction = async (action: 'approve' | 'edit' | 'reject' | 'regenerate', payload?: Record<string, string>) => {
+  const runApprovalAction = async (action: 'approve' | 'edit' | 'reject' | 'regenerate' | 'execute', payload?: Record<string, string> | File | null) => {
     if (!selectedApproval || !token) return;
     if (action === 'regenerate' && !requireBrand('regenerating content')) return;
     if (action === 'regenerate' && !reviewNote.trim()) {
@@ -344,22 +344,35 @@ useEffect(() => {
     setIsBusy(true); setBusyAction(action); setError(null); setNotice(null);
     if (action === 'approve') {
       setOperationProgress(20);
-      setOperationStage('Authorizing publication…');
+      setOperationStage('Locking the approved version…');
+    } else if (action === 'execute') {
+      setOperationProgress(20);
+      setOperationStage('Preparing LinkedIn publication…');
     }
     try {
-      const res = await fetch(`${API_BASE}/api/approvals/${selectedApproval.id}/${action}`, {
-        method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}),
-      });
+      const isExecute = action === 'execute';
+      const requestInit: RequestInit = {
+        method: 'POST',
+        headers: isExecute ? headers() : { ...headers(), 'Content-Type': 'application/json' },
+        body: isExecute
+          ? (() => {
+              const form = new FormData();
+              if (payload instanceof File) form.append('image', payload);
+              return form;
+            })()
+          : JSON.stringify(payload || {}),
+      };
+      const res = await fetch(`${API_BASE}/api/approvals/${selectedApproval.id}/${action}`, requestInit);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, `Action failed: ${action}`));
-      if (action === 'approve' && data.published === false) {
-        throw new Error(data.message || 'Approval was recorded, but LinkedIn publication failed.');
+      if (action === 'execute' && data.published === false) {
+        throw new Error(data.message || 'Execution was not completed.');
       }
       if (action === 'regenerate') {
         window.localStorage.removeItem(`brand-os-regeneration-feedback:${selectedApproval.id}`);
         setReviewNote('');
       }
-      setOperationProgress(action === 'approve' ? 82 : 88);
+      setOperationProgress(action === 'approve' || action === 'execute' ? 82 : 88);
       setOperationStage(action === 'regenerate' ? 'Refreshing the approval queue…' : 'Refreshing the workspace…');
       await fetchData();
       setOperationProgress(100);
@@ -369,9 +382,13 @@ useEffect(() => {
         action === 'regenerate'
           ? 'Regenerated successfully.'
           : action === 'approve'
-            ? 'Approved and published to LinkedIn.'
-            : 'Action completed successfully.'
+            ? 'Approved. The post is now locked and ready to execute.'
+            : action === 'execute'
+              ? 'Published to LinkedIn successfully.'
+              : 'Action completed successfully.'
       );
+      if (action === 'approve') setStatusFilter('APPROVED');
+      if (action === 'execute') setStatusFilter('EXECUTED');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Approval action failed');
     } finally {
@@ -727,6 +744,29 @@ function MiniStat({ icon: Icon, label, value }: any) {
 // Production copy sync marker: ensure latest UI copy is included in deployment.
 function ApprovalWorkspace(props: any) {
   const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction } = props;
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedImage(null);
+    setImagePreview(null);
+  }, [selectedId]);
+
+  const chooseImage = (file: File | null) => {
+    if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
+      window.alert('Only JPEG, PNG, or GIF images are supported.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      window.alert('Image must be 10 MB or smaller.');
+      return;
+    }
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setSelectedImage(file);
+    setImagePreview(URL.createObjectURL(file));
+  };
+
   return (
     <div className="queue-layout">
       <div className="queue-list">
@@ -750,70 +790,73 @@ function ApprovalWorkspace(props: any) {
         {selected ? (
           <>
             <div className="review-head"><div><div className="review-label">Editorial review · post #{selected.id}</div><div className="review-title">{selected.action_type}</div></div><StatusPill status={selected.status}/></div>
-            <div className="review-editor">
-              <div className="editor-toolbar"><span>Exact content bound to approval</span><span>{editedBody.length} chars</span></div>
-              <textarea className="textarea" value={editedBody} onChange={(e) => setEditedBody(e.target.value)} />
-              <div className="review-label" style={{ marginTop: 10, marginBottom: 7 }}>Feedback for regeneration <span className="form-help">(optional)</span></div>
-              <textarea
-                className="textarea"
-                style={{ minHeight: 82, marginTop: 0 }}
-                value={reviewNote}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setReviewNote(value);
-                  if (selected?.id) {
-                    const key = `brand-os-regeneration-feedback:${selected.id}`;
-                    if (value.trim()) window.localStorage.setItem(key, value);
-                    else window.localStorage.removeItem(key);
-                  }
-                }}
-                placeholder="Tell us what to change, add, or remove. Example: Make the opening less polished and add the point about stakeholder alignment."
-              />
-              {['PENDING','EDITED','REGENERATED'].includes(selected.status) ? (
-                <>
-                  <div className="review-actions">
-                    <button className="button success progress-button" disabled={isBusy} onClick={() => onAction('approve')}>
-                      <span className="button-content"><Check size={14}/> {busyAction === 'approve' ? operationStage || 'Publishing…' : 'Approve & publish'}</span>
-                      {busyAction === 'approve' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
-                    </button>
-                    <button className="button" disabled={isBusy} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>
-                    <button
-                      className="button progress-button"
-                      disabled={isBusy || !reviewNote.trim()}
-                      title={!reviewNote.trim() ? 'Add feedback before regenerating.' : 'Regenerate using your feedback'}
-                      onClick={() => onAction('regenerate', { reason: reviewNote.trim() })}
-                    >
-                      <span className="button-content"><RotateCcw size={14}/> {busyAction === 'regenerate' ? operationStage || 'Regenerating…' : 'Regenerate'}</span>
-                      {busyAction === 'regenerate' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
-                    </button>
-                    <button className="button danger" disabled={isBusy} onClick={() => onAction('reject', { reason: reviewNote || 'Rejected by reviewer.' })}><X size={14}/> Reject</button>
-                  </div>
-                  <div className="form-help" style={{ marginTop: 8 }}>
-                    {reviewNote.trim() ? 'Regenerate will use this feedback and keep the new version behind the approval gate.' : 'Add feedback above to enable Regenerate.'}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className={selected.status === 'EXECUTED' ? 'notice success' : 'notice error'} style={{ marginTop: 10 }}>
-                    <CircleCheck size={15}/>
-                    <span>{selected.status === 'EXECUTED' ? 'approved and published to linkedin' : selected.status === 'APPROVED' ? 'Approved, but publication did not complete. Use Publish to LinkedIn to retry.' : 'This post is no longer awaiting a decision.'}</span>
-                  </div>
-                  {selected.status === 'APPROVED' && (
-                    <div className="review-actions review-actions-publish">
-                      <button className="button success progress-button publish-retry-button" disabled={isBusy} onClick={() => onAction('approve')}>
-                        <span className="button-content"><ExternalLink size={14}/>{busyAction === 'approve' ? operationStage || 'Publishing…' : 'Publish to LinkedIn'}</span>
-                        {busyAction === 'approve' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
-                      </button>
+
+            {['PENDING','EDITED','REGENERATED'].includes(selected.status) ? (
+              <div className="review-editor">
+                <div className="editor-toolbar"><span>Exact content bound to approval</span><span>{editedBody.length} chars</span></div>
+                <textarea className="textarea" value={editedBody} onChange={(e) => setEditedBody(e.target.value)} />
+                <div className="review-label" style={{ marginTop: 10, marginBottom: 7 }}>Feedback for regeneration <span className="form-help">(optional)</span></div>
+                <textarea
+                  className="textarea"
+                  style={{ minHeight: 82, marginTop: 0 }}
+                  value={reviewNote}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setReviewNote(value);
+                    if (selected?.id) {
+                      const key = `brand-os-regeneration-feedback:${selected.id}`;
+                      if (value.trim()) window.localStorage.setItem(key, value);
+                      else window.localStorage.removeItem(key);
+                    }
+                  }}
+                  placeholder="Tell us what to change, add, or remove. Example: Make the opening less polished and add the point about stakeholder alignment."
+                />
+                <div className="review-actions">
+                  <button className="button success progress-button" disabled={isBusy} onClick={() => onAction('approve')}>
+                    <span className="button-content"><Check size={14}/> {busyAction === 'approve' ? operationStage || 'Approving…' : 'Approve'}</span>
+                    {busyAction === 'approve' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
+                  </button>
+                  <button className="button" disabled={isBusy} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>
+                  <button className="button progress-button" disabled={isBusy || !reviewNote.trim()} title={!reviewNote.trim() ? 'Add feedback before regenerating.' : 'Regenerate using your feedback'} onClick={() => onAction('regenerate', { reason: reviewNote.trim() })}>
+                    <span className="button-content"><RotateCcw size={14}/> {busyAction === 'regenerate' ? operationStage || 'Regenerating…' : 'Regenerate'}</span>
+                    {busyAction === 'regenerate' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
+                  </button>
+                  <button className="button danger" disabled={isBusy} onClick={() => onAction('reject', { reason: reviewNote || 'Rejected by reviewer.' })}><X size={14}/> Reject</button>
+                </div>
+                <div className="form-help" style={{ marginTop: 8 }}>{reviewNote.trim() ? 'Regenerate will use this feedback and keep the new version behind the approval gate.' : 'Add feedback above to enable Regenerate.'}</div>
+              </div>
+            ) : selected.status === 'APPROVED' ? (
+              <div className="review-editor">
+                <div className="notice success" style={{ marginTop: 0 }}><CircleCheck size={15}/><span>Approved and locked. The content can no longer be edited or regenerated.</span></div>
+                <div className="editor-toolbar" style={{ marginTop: 12 }}><span>Locked approved content</span><span>{selected.content.length} chars</span></div>
+                <div className="readonly-field" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65, minHeight: 150 }}>{selected.content}</div>
+                <div style={{ marginTop: 14, padding: 12, border: '1px dashed #d0d5dd', borderRadius: 12, background: '#fafafa' }}>
+                  <div className="review-label" style={{ marginBottom: 7 }}>Optional photograph</div>
+                  <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG, PNG, or GIF image (up to 10 MB). The image is sent directly to LinkedIn during execution and is not stored by Brand OS.</div>
+                  <input type="file" accept="image/jpeg,image/png,image/gif" onChange={(e) => chooseImage(e.target.files?.[0] || null)} disabled={isBusy} />
+                  {imagePreview && (
+                    <div style={{ marginTop: 10 }}>
+                      <img src={imagePreview} alt="Selected LinkedIn post image preview" style={{ display: 'block', width: '100%', maxHeight: 280, objectFit: 'contain', borderRadius: 10, background: '#f2f4f7' }} />
+                      <button className="link-button" style={{ marginTop: 7 }} onClick={() => { if (imagePreview) URL.revokeObjectURL(imagePreview); setImagePreview(null); setSelectedImage(null); }}>Remove image</button>
                     </div>
                   )}
-                </>
-              )}
-            </div>
+                </div>
+                <div className="review-actions" style={{ marginTop: 14 }}>
+                  <button className="button success progress-button" disabled={isBusy} onClick={() => onAction('execute', selectedImage)}>
+                    <span className="button-content"><ExternalLink size={14}/> {busyAction === 'execute' ? operationStage || 'Publishing…' : 'Execute'}</span>
+                    {busyAction === 'execute' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className={selected.status === 'EXECUTED' ? 'notice success' : 'notice error'} style={{ marginTop: 0 }}>
+                <CircleCheck size={15}/><span>{selected.status === 'EXECUTED' ? 'Approved and published to LinkedIn. This post is permanently locked.' : 'This post is no longer awaiting a decision.'}</span>
+              </div>
+            )}
+
             <div style={{ marginTop: 17 }}>
               <div className="review-label" style={{ marginBottom: 9 }}>Safety rail</div>
-              <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-                {['Claim guard','Voice guard','Duplicate guard','Action guard'].map((x) => <span key={x} className="tag"><ShieldCheck size={10}/>{x}</span>)}
-              </div>
+              <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>{['Claim guard','Voice guard','Duplicate guard','Action guard'].map((x) => <span key={x} className="tag"><ShieldCheck size={10}/>{x}</span>)}</div>
             </div>
           </>
         ) : <EmptyState icon={FileText} title="Select a draft" text="Your editorial workspace will appear here." />}
