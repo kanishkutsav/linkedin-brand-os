@@ -1050,7 +1050,7 @@ function ResearchView({ opportunities, researchFocus, setResearchFocus, isResear
   return (
     <>
       <div className="page-header">
-        <div><div className="page-kicker"><Search size={13}/> Intelligence layer</div><h1 className="page-title">Research & opportunities</h1><p className="page-description">{hasResearch ? 'Your latest research is below. Add a focus whenever you want Brand OS to explore a specific topic.' : 'Live evidence is combined with your Brand DNA before an idea reaches the drafting engine.'}</p></div>
+        <div><div className="page-kicker"><Search size={13}/> Intelligence layer</div><h1 className="page-title">Research & opportunities</h1><p className="page-description">{hasResearch ? 'Your latest research is below. Add a focus whenever you want Brand OS to explore a specific topic.' : 'Live evidence is combined with your Brand DNA, recent research interests and learned context before an idea reaches the drafting engine.'}</p></div>
         <button className="button primary progress-button" onClick={onResearch} disabled={isResearching}>
           <span className="button-content"><Search size={14}/>{isResearching ? researchStage || 'Researching…' : hasResearch ? 'Research now' : 'Run research'}</span>
           {isResearching && <span className="button-progress-track"><span style={{ width: researchProgress + '%' }} /></span>}
@@ -1060,7 +1060,7 @@ function ResearchView({ opportunities, researchFocus, setResearchFocus, isResear
       <section className="panel research-focus-panel">
         <div className="research-focus-copy">
           <div className="panel-title">Guide the research <span className="form-help">(optional)</span></div>
-          <div className="panel-subtitle">Tell Brand OS what you want to explore. Leave it blank to research from your Brand DNA.</div>
+          <div className="panel-subtitle">Tell Brand OS what you want to explore. Leave it blank and Brand OS will use your Brand DNA plus what it has learned from your research and content.</div>
         </div>
         <div className="research-focus-row">
           <div className="research-focus-input">
