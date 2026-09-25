@@ -365,7 +365,7 @@ useEffect(() => {
       }
     } finally {
       window.localStorage.removeItem(STORAGE_KEY);
-      setToken(null); setQueue([]); setLinkedin({ connected: false }); closeSidebar();
+      setToken(null); setQueue([]); setLinkedin({ connected: false });
     }
   };
   const go = (next: Tab) => {
