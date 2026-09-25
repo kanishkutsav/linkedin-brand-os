@@ -11,6 +11,7 @@ class PublishResult:
     success: bool
     external_id: str | None
     message: str
+    image_urn: str | None = None
 
 
 class LinkedInAdapter:
@@ -43,6 +44,7 @@ class OfficialLinkedInAdapter(LinkedInAdapter):
             "X-Restli-Protocol-Version": "2.0.0",
             "Linkedin-Version": settings.linkedin_api_version,
         }
+        uploaded_image_urn = None
         payload = {
             "author": f"urn:li:person:{self.member_sub}",
             "commentary": body.strip(),
@@ -97,6 +99,7 @@ class OfficialLinkedInAdapter(LinkedInAdapter):
                         "altText": "",
                     }
                 }
+                uploaded_image_urn = image_urn
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")
                 return PublishResult(False, None, f"LinkedIn image upload was rejected ({exc.code}): {detail[:500]}")
@@ -115,7 +118,7 @@ class OfficialLinkedInAdapter(LinkedInAdapter):
             with urllib.request.urlopen(request, timeout=20) as response:
                 external_id = response.headers.get("x-restli-id")
                 suffix = " with image." if image_bytes else "."
-                return PublishResult(True, external_id, f"Published to LinkedIn through the official Posts API{suffix}")
+                return PublishResult(True, external_id, f"Published to LinkedIn through the official Posts API{suffix}", uploaded_image_urn)
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             return PublishResult(False, None, f"LinkedIn API rejected the post ({exc.code}): {detail[:500]}")
