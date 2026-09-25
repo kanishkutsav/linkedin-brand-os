@@ -45,6 +45,11 @@ services:
     startCommand: "cd apps/api && python -m app.jobs.scheduled discovery"
     branch: master
     envVars:
+      - key: AGENT_ENABLED
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: AGENT_ENABLED
       - key: APP_ENV
         fromService:
           name: linkedin-brand-os-api
@@ -136,6 +141,11 @@ services:
     startCommand: "cd apps/api && python -m app.jobs.scheduled calendar"
     branch: master
     envVars:
+      - key: AGENT_ENABLED
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: AGENT_ENABLED
       - key: APP_ENV
         fromService:
           name: linkedin-brand-os-api
