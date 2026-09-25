@@ -24,7 +24,7 @@ class ResearchService:
     def __init__(self, session: AsyncSession | None = None):
         self.session = session
 
-    async def _live_sources(self, profile: UserProfile, requested_topic: str | None) -> list[dict]:
+    async def _live_sources(self, profile: UserProfile, requested_topic: str | None, learned_queries: list[str] | None = None) -> list[dict]:
         queries = []
         if requested_topic:
             queries.append(requested_topic)
@@ -34,6 +34,9 @@ class ResearchService:
             queries.append(profile.professional_title)
         if profile.experience_years is not None:
             queries.append(f"{profile.industry or 'professional'} {profile.experience_years:g} years experience")
+        for learned in (learned_queries or [])[:2]:
+            if learned and learned not in queries:
+                queries.append(learned)
         if not queries:
             queries = ["technology business leadership AI"]
 
@@ -67,7 +70,7 @@ class ResearchService:
                     items.append(item)
         return items[:16]
 
-    async def _gdelt_sources(self, profile: UserProfile, requested_topic: str | None) -> list[dict]:
+    async def _gdelt_sources(self, profile: UserProfile, requested_topic: str | None, learned_queries: list[str] | None = None) -> list[dict]:
         queries: list[str] = []
         if requested_topic:
             queries.append(requested_topic)
@@ -77,6 +80,9 @@ class ResearchService:
             queries.append(profile.professional_title)
         if profile.experience_years is not None:
             queries.append(f"{profile.industry or 'professional'} {profile.experience_years:g} years experience")
+        for learned in (learned_queries or [])[:2]:
+            if learned and learned not in queries:
+                queries.append(learned)
         if not queries:
             queries = ["technology business leadership AI"]
 
@@ -196,6 +202,12 @@ class ResearchService:
         brand = BrandIntelligenceService(self.session)
         context = await brand.generation_context(profile_id, query=requested_topic or "current topics relevant to my professional brand")
         historical = await brand.get_posts(profile_id, limit=12)
+        learning_memory = context.get("learning_memory") or {}
+        learned_queries = [
+            str(item.get("content") or "").strip()
+            for item in (learning_memory.get("memories") or [])
+            if item.get("type") in {"topic", "interest"} and str(item.get("content") or "").strip()
+        ][:2]
         recent_content_result = await self.session.execute(
             select(ContentItem.topic, ContentItem.created_at)
             .where(ContentItem.profile_id == profile_id)
@@ -205,8 +217,8 @@ class ResearchService:
         recent_content = [{"topic": row[0], "created_at": row[1].isoformat() if row[1] else None} for row in recent_content_result.all()]
 
         source_errors: list[str] = []
-        google_task = asyncio.create_task(self._live_sources(profile, requested_topic))
-        gdelt_task = asyncio.create_task(self._gdelt_sources(profile, requested_topic))
+        google_task = asyncio.create_task(self._live_sources(profile, requested_topic, learned_queries))
+        gdelt_task = asyncio.create_task(self._gdelt_sources(profile, requested_topic, learned_queries))
         google_result, gdelt_result = await asyncio.gather(google_task, gdelt_task, return_exceptions=True)
 
         live_sources: list[dict] = []
