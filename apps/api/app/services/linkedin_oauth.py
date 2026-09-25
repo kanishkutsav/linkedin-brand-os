@@ -62,8 +62,13 @@ def _best_effort_profile(access_token: str, userinfo: dict) -> dict:
     """
     profile = dict(userinfo or {})
     try:
+        # Keep this projection limited to fields documented as part of
+        # LinkedIn's authenticated-member basic profile. Including fields such
+        # as industryId/industryName in this projection can make the entire
+        # /v2/me request fail for an app that only has r_basicprofile access,
+        # which would incorrectly hide the headline too.
         member = _request_json(
-            "https://api.linkedin.com/v2/me?projection=(id,headline,localizedHeadline,vanityName,industryId,industryName)",
+            "https://api.linkedin.com/v2/me?projection=(id,headline,localizedHeadline,vanityName)",
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "Linkedin-Version": settings.linkedin_api_version,
@@ -75,10 +80,11 @@ def _best_effort_profile(access_token: str, userinfo: dict) -> dict:
             for key, value in member.items():
                 if key not in profile or not profile.get(key):
                     profile[key] = value
-    except HTTPException:
-        # The OIDC token may not have the legacy Profile API permission.
-        # Authentication and the basic LinkedIn identity must still work.
-        pass
+    except HTTPException as exc:
+        # OIDC identity remains usable when the Profile API permission is not
+        # available. Keep the failure visible in server logs rather than
+        # silently making the UI look like LinkedIn returned an empty profile.
+        logger.warning("LinkedIn basic profile lookup unavailable: %s", exc.detail)
     return profile
 
 
