@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import ContentItem, ContentOpportunity, ResearchSource, UserProfile
 from app.services.brand_intelligence import BrandIntelligenceService
 from app.services.gemini_service import ModelRouterService
+from app.services.brand_learning import BrandLearningService
 
 
 class ResearchService:
@@ -193,7 +194,7 @@ class ResearchService:
             raise ValueError("Profile is not initialized.")
 
         brand = BrandIntelligenceService(self.session)
-        context = await brand.generation_context(profile_id)
+        context = await brand.generation_context(profile_id, query=requested_topic or "current topics relevant to my professional brand")
         historical = await brand.get_posts(profile_id, limit=12)
         recent_content_result = await self.session.execute(
             select(ContentItem.topic, ContentItem.created_at)
@@ -223,6 +224,16 @@ class ResearchService:
                 deduped_sources.append(source)
         live_sources = deduped_sources[:20]
         live_sources = await self._enrich_source_context(live_sources)
+
+        if requested_topic:
+            await BrandLearningService(self.session).record_event(
+                profile_id=profile_id,
+                event_type="RESEARCH_QUERY",
+                source_type="research",
+                source_id=f"{datetime.now(timezone.utc).date().isoformat()}:{requested_topic.strip().lower()[:220]}",
+                content=requested_topic.strip(),
+                metadata={"explicit_user_query": True},
+            )
 
         if not live_sources:
             # Do not turn a temporary public-feed outage into a hard Research failure.
