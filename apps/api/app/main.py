@@ -21,7 +21,8 @@ from app.agents.strategy import ContentStrategyService
 from app.agents.voice import VoiceProfileBuilder
 from app.auth import require_roles
 from app.core.config import settings
-from app.db.database import engine, get_session
+from app.db.database import engine, get_session, SessionLocal
+from app.services.agent_scheduler import AgentScheduler
 from app.services.brand_intelligence import BrandIntelligenceService
 from app.guards.guardrails import normalize_human_style, run_content_guards
 from app.integrations.linkedin import OfficialLinkedInAdapter
@@ -81,6 +82,9 @@ def _database_needs_reset() -> bool:
         return False
 
 
+agent_scheduler = AgentScheduler(SessionLocal)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     absolute_path = _resolve_sqlite_path()
@@ -112,21 +116,6 @@ async def lifespan(app: FastAPI):
                 # so a deployment on such a database remains isolated and safe.
                 logger.warning("Could not drop retired user_profiles.%s", column_name)
 
-        agent_run_columns = await conn.run_sync(lambda sync_conn: {
-            column["name"] for column in inspect(sync_conn).get_columns("agent_runs")
-        })
-        if "scheduled_key" not in agent_run_columns:
-            await conn.execute(text("ALTER TABLE agent_runs ADD COLUMN scheduled_key VARCHAR(255)"))
-        # Existing deployments need the same cross-process idempotency guard that
-        # new databases get from the ORM model. NULL keeps manual/event runs
-        # outside the uniqueness contract.
-        await conn.execute(
-            text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS ix_agent_runs_scheduled_key "
-                "ON agent_runs (scheduled_key)"
-            )
-        )
-
         brand_memory_columns = await conn.run_sync(lambda sync_conn: {
             column["name"] for column in inspect(sync_conn).get_columns("brand_memory")
         })
@@ -135,7 +124,9 @@ async def lifespan(app: FastAPI):
                 await conn.execute(text('ALTER TABLE brand_memory DROP COLUMN "audience_json"'))
             except Exception:
                 logger.warning("Could not drop retired brand_memory.audience_json")
+    agent_scheduler.start()
     yield
+    await agent_scheduler.stop()
     await engine.dispose()
 
 
@@ -613,16 +604,9 @@ async def agent_status(
     return {
         "enabled": settings.agent_enabled,
         "modes": {
-            # Scheduled execution is owned by Render Cron Jobs. Keep these
-            # booleans stable for API consumers and expose the real schedules
-            # explicitly instead of reading web-process scheduler settings.
-            "daily_discovery": settings.agent_enabled,
+            "daily_discovery": settings.agent_daily_discovery_enabled,
             "event_driven": True,
-            "scheduled_calendar": settings.agent_enabled,
-        },
-        "schedules": {
-            "daily_discovery": "09:00 Asia/Kolkata",
-            "scheduled_calendar": "09:15 Asia/Kolkata",
+            "scheduled_calendar": settings.agent_calendar_enabled,
         },
         "recent_runs": [
             {
