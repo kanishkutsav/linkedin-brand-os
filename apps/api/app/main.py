@@ -131,8 +131,7 @@ async def lifespan(app: FastAPI):
                 await conn.execute(text('ALTER TABLE brand_memory DROP COLUMN "audience_json"'))
             except Exception:
                 logger.warning("Could not drop retired brand_memory.audience_json")
-    if settings.agent_in_process_schedule_enabled:
-        agent_scheduler.start()
+    agent_scheduler.start()
     yield
     await agent_scheduler.stop()
     await engine.dispose()
