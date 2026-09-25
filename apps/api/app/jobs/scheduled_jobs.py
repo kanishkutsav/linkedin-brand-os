@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.orchestrator import AgentOrchestrator
@@ -34,6 +34,15 @@ class ScheduledJobs:
         summary = {"mode": mode, "profiles": 0, "skipped": 0, "succeeded": 0, "failed": 0}
 
         async with self.session_factory() as session:
+            # pg_cron retries are safe even if an earlier invocation is still running.
+            # The transaction-scoped advisory lock serializes each scheduled mode.
+            bind = session.bind
+            if bind is not None and bind.dialect.name == "postgresql":
+                await session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                    {"lock_key": f"brand-os-scheduled:{mode}"},
+                )
+
             result = await session.execute(
                 select(UserProfile.id)
                 .join(BrandMemory, BrandMemory.profile_id == UserProfile.id)
