@@ -26,7 +26,7 @@ type BrandStatus = {
   ready: boolean; status: string; source_post_count: number; current_post_count?: number;
   continuous_learning?: boolean; historical_import_optional?: boolean; last_updated?: string | null;
   summary?: string | null;
-  profile?: { display_name?: string; professional_title?: string | null; industry?: string | null; audience?: string | null; brand_positioning?: string | null; tone?: string | null };
+  profile?: { display_name?: string; professional_title?: string | null; industry?: string | null; experience_years?: number | null; tone?: string | null };
 };
 type Opportunity = {
   id: number; title: string; topic: string; angle: string; pillar: string; format?: string; objective?: string;
@@ -49,14 +49,11 @@ export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile>({ display_name: 'User', role: 'owner' });
   const [linkedin, setLinkedin] = useState<LinkedInStatus>({ connected: false });
-  const [linkedinProfileSynced, setLinkedinProfileSynced] = useState(false);
   const [brand, setBrand] = useState<BrandStatus>({ ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 });
   const [brandTitle, setBrandTitle] = useState('');
   const [brandIndustry, setBrandIndustry] = useState('');
-  const [brandAudience, setBrandAudience] = useState('');
-  const [brandPositioning, setBrandPositioning] = useState('');
+  const [brandExperienceYears, setBrandExperienceYears] = useState<number | ''>('');
   const [brandTone, setBrandTone] = useState('');
-  const [brandGoals, setBrandGoals] = useState('');
   const [historicalPostEntries, setHistoricalPostEntries] = useState<string[]>([]);
   const [brandEditing, setBrandEditing] = useState(false);
   const [analytics, setAnalytics] = useState<any>(null);
@@ -216,65 +213,12 @@ useEffect(() => {
 
       let brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
 
-      // Keep Brand DNA profile facts synchronized from the connected LinkedIn
-      // account once per browser session. This replaces the old manual profile form.
-      if (linkedinRes.ok && !linkedinProfileSynced) {
-        setLinkedinProfileSynced(true);
-        try {
-          const syncRes = await fetch(API_BASE + '/api/linkedin/sync-profile', {
-            method: 'POST',
-            headers: headers(authToken),
-          });
-          const syncJson = await syncRes.json().catch(() => ({}));
-          if (!syncRes.ok) {
-            throw new Error(getApiError(syncJson, 'LinkedIn profile sync failed. Please reconnect LinkedIn.'));
-          }
-          const refreshedBrandRes = await fetch(API_BASE + '/api/brand/status', { headers: headers(authToken) });
-          if (refreshedBrandRes.ok) brandJson = await refreshedBrandRes.json();
-        } catch (syncError) {
-          setError(syncError instanceof Error ? syncError.message : 'LinkedIn profile sync failed. Please reconnect LinkedIn.');
-        }
-      }
-
-      // A newly connected user should never be left in a manual "build" state.
-      // Once LinkedIn is connected, initialize Brand DNA automatically from the
-      // synced LinkedIn profile. Historical posts remain optional enrichment.
-      if (linkedinRes.ok && brandJson.status !== 'READY') {
-        try {
-          const initializeRes = await fetch(API_BASE + '/api/brand/initialize', {
-            method: 'POST',
-            headers: { ...headers(authToken), 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              display_name: profileJson.display_name || 'User',
-            }),
-          });
-          if (initializeRes.ok) {
-            const initialized = await initializeRes.json().catch(() => ({}));
-            if (initialized.brand_memory) {
-              brandJson = {
-                ...brandJson,
-                ...initialized.brand_memory,
-                status: initialized.brand_memory.status || 'READY',
-                ready: initialized.brand_memory.status === 'READY',
-              };
-            }
-            const refreshedBrandRes = await fetch(API_BASE + '/api/brand/status', { headers: headers(authToken) });
-            if (refreshedBrandRes.ok) brandJson = await refreshedBrandRes.json();
-          }
-        } catch {
-          // Do not block the workspace if the LLM provider is temporarily unavailable.
-          // The user can retry Build Brand DNA later.
-        }
-      }
-
       setBrand(brandJson);
       const p = brandJson.profile || {};
       setBrandTitle(p.professional_title || '');
       setBrandIndustry(p.industry || '');
-      setBrandAudience(p.audience || '');
-      setBrandPositioning(p.brand_positioning || '');
+      setBrandExperienceYears(typeof p.experience_years === 'number' ? p.experience_years : '');
       setBrandTone(p.tone || '');
-      setBrandGoals(Array.isArray(p.goals) ? p.goals.join(', ') : (p.goals || ''));
 
       // Brand status now carries the frozen source-post snapshot, so Brand DNA
       // does not depend on a second request just to display the user's posts.
@@ -367,7 +311,7 @@ useEffect(() => {
       }
     } finally {
       window.localStorage.removeItem(STORAGE_KEY);
-      setToken(null); setQueue([]); setLinkedin({ connected: false }); setLinkedinProfileSynced(false); closeSidebar();
+      setToken(null); setQueue([]); setLinkedin({ connected: false }); closeSidebar();
     }
   };
   const go = (next: Tab) => {
@@ -386,7 +330,7 @@ useEffect(() => {
   const requireBrand = (actionLabel: string) => {
     if (brand.ready) return true;
     go('Settings');
-    setError('Brand DNA is not set up yet. Before ' + actionLabel + ', connect LinkedIn and build Brand DNA. Add 3–10 previous LinkedIn posts to calibrate your Brand DNA and writing voice.');
+    setError('Brand DNA is not set up yet. Before ' + actionLabel + ', complete your Brand DNA details and add 3–10 previous LinkedIn posts to calibrate your writing voice.');
     return false;
   };
 
@@ -506,9 +450,15 @@ useEffect(() => {
   const buildBrand = async () => {
     if (!token) return;
     const blocks = historicalPostEntries.map((body) => body.trim()).filter(Boolean);
+    const title = brandTitle.trim();
+    const industry = brandIndustry.trim();
+    const tone = brandTone.trim();
+    const experience = typeof brandExperienceYears === 'number' ? brandExperienceYears : Number(brandExperienceYears);
 
-    // Brand DNA requires a meaningful historical sample. Enforce the same
-    // 3–10 contract in the UI that the API enforces server-side.
+    if (!title || !industry || !tone || !Number.isFinite(experience) || experience < 0) {
+      setError('Professional title, industry, desired tone and years of experience are required.');
+      return;
+    }
     if (blocks.length < 3) {
       setError('Add at least 3 and up to 10 previous LinkedIn posts to build your Brand DNA.');
       return;
@@ -519,6 +469,10 @@ useEffect(() => {
       const endpoint = '/api/brand/onboard';
       const body = {
         display_name: profile.display_name,
+        professional_title: title,
+        industry,
+        tone,
+        experience_years: experience,
         posts: blocks.map((body) => ({ body })),
       };
 
@@ -533,9 +487,7 @@ useEffect(() => {
       const memory = data.brand_memory || {};
       setBrand({ ...memory, ready: memory.status === 'READY' });
       setNotice(
-        blocks.length
-          ? 'Brand Intelligence updated using your LinkedIn profile plus ' + blocks.length + ' imported posts.'
-          : 'Brand Intelligence updated using your LinkedIn profile and imported posts.'
+        'Brand Intelligence updated using your saved Brand DNA details and ' + blocks.length + ' imported posts.'
       );
       await fetchData();
       setBrandEditing(false);
@@ -648,7 +600,7 @@ useEffect(() => {
                     <h1>{brand.ready ? 'Turn your expertise into a recognizable point of view.' : 'Start by teaching Brand OS your voice.'}</h1>
                     <p>{brand.ready
                       ? 'Research, content strategy, drafting and review — orchestrated around your brand voice, with you always in control of what reaches LinkedIn.'
-                      : 'Your LinkedIn profile is the factual starting point. Brand OS can build your Brand DNA automatically, and previous posts are optional evidence for stronger voice calibration.'}</p>
+                      : 'Enter your professional title, industry, desired tone and years of experience. Then add 3–10 previous LinkedIn posts so Brand OS can learn your writing style.'}</p>
                     <div className="hero-actions">
                       <button
                         className="button primary progress-button"
@@ -707,12 +659,27 @@ useEffect(() => {
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
           {tab === 'Settings' && (
             <SettingsView
-              brand={brand} profile={profile} brandTitle={brandTitle} setBrandTitle={setBrandTitle}
-              brandIndustry={brandIndustry} setBrandIndustry={setBrandIndustry} brandAudience={brandAudience} setBrandAudience={setBrandAudience}
-              brandPositioning={brandPositioning} setBrandPositioning={setBrandPositioning} brandTone={brandTone} setBrandTone={setBrandTone}
-              brandGoals={brandGoals} setBrandGoals={setBrandGoals} posts={historicalPostEntries}
-              updatePost={updateHistoricalPost} addPost={addHistoricalPost} removePost={removeHistoricalPost}
-              building={isBuildingBrand} onBuild={buildBrand} linkedin={linkedin} onConnect={connectLinkedIn} editing={brandEditing} setEditing={setBrandEditing} onCancel={cancelBrandEdit}
+              brand={brand}
+              profile={profile}
+              brandTitle={brandTitle}
+              setBrandTitle={setBrandTitle}
+              brandIndustry={brandIndustry}
+              setBrandIndustry={setBrandIndustry}
+              brandExperienceYears={brandExperienceYears}
+              setBrandExperienceYears={setBrandExperienceYears}
+              brandTone={brandTone}
+              setBrandTone={setBrandTone}
+              posts={historicalPostEntries}
+              updatePost={updateHistoricalPost}
+              addPost={addHistoricalPost}
+              removePost={removeHistoricalPost}
+              building={isBuildingBrand}
+              onBuild={buildBrand}
+              linkedin={linkedin}
+              onConnect={connectLinkedIn}
+              editing={brandEditing}
+              setEditing={setBrandEditing}
+              onCancel={cancelBrandEdit}
             />
           )}
         </main>
@@ -1085,12 +1052,14 @@ function AnalyticsView({ analytics }: { analytics: any }) {
 
 function SettingsView(props: any) {
   const {
-    brand, profile, brandTitle, brandIndustry, brandAudience, brandPositioning,
-    brandTone, brandGoals, posts, updatePost, addPost, removePost, building,
-    onBuild, linkedin, onConnect, editing, setEditing, onCancel
+    brand, profile, brandTitle, setBrandTitle, brandIndustry, setBrandIndustry,
+    brandExperienceYears, setBrandExperienceYears, brandTone, setBrandTone,
+    posts, updatePost, addPost, removePost, building, onBuild, linkedin, onConnect,
+    editing, setEditing, onCancel
   } = props;
 
   const count = posts.filter((x: string) => x.trim()).length;
+  const experienceValue = brandExperienceYears === '' ? '' : String(brandExperienceYears);
 
   return (
     <>
@@ -1098,11 +1067,10 @@ function SettingsView(props: any) {
         <div>
           <div className="page-kicker"><BrainCircuit size={13}/> Brand intelligence</div>
           <h1 className="page-title">Your brand memory.</h1>
-          <p className="page-description">Your LinkedIn profile is used as the factual baseline. Brand OS derives the remaining brand signals from the profile and any content you explicitly provide.</p>
+          <p className="page-description">Brand DNA is built from the details you provide and the writing evidence you explicitly import. LinkedIn is not used to auto-fill your Brand DNA.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span className={"status-pill " + (brand.ready ? 'approved' : 'edited')}>{brand.ready ? '● ACTIVE' : '● SETUP NEEDED'}</span>
-          {linkedin.connected && <button className="button" onClick={onConnect}><Link2 size={14}/> Refresh LinkedIn profile</button>}
           {brand.ready && !editing && <button className="button" onClick={() => setEditing(true)}><Pencil size={14}/> Manage Brand DNA</button>}
         </div>
       </div>
@@ -1113,40 +1081,45 @@ function SettingsView(props: any) {
             <div className="panel-head" style={{ padding: 0, border: 0 }}>
               <div>
                 <h2 className="settings-title">Build your Brand DNA</h2>
-                <p className="settings-copy">Profile facts are pulled from your connected LinkedIn account. You do not need to type your role or industry manually.</p>
+                <p className="settings-copy">Tell Brand OS the four profile facts you want it to use. Nothing here is auto-fetched from LinkedIn.</p>
               </div>
               {brand.ready && <button className="button" onClick={onCancel}><X size={14}/> Cancel</button>}
             </div>
 
             <div className="profile-grid" style={{ marginTop: 16 }}>
               <div className="form-group">
-                <span className="form-label">Professional title</span>
-                <div className="readonly-field">{brandTitle || 'LinkedIn did not provide a headline for this account yet.'}</div>
+                <label className="form-label">Professional title</label>
+                <input className="input" value={brandTitle} onChange={(e) => setBrandTitle(e.target.value)} placeholder="e.g. Product Leader, Founder, Engineering Manager" />
               </div>
               <div className="form-group">
-                <span className="form-label">Industry</span>
-                <div className="readonly-field">{brandIndustry || 'LinkedIn did not provide an industry field for this account.'}</div>
+                <label className="form-label">Industry</label>
+                <input className="input" value={brandIndustry} onChange={(e) => setBrandIndustry(e.target.value)} placeholder="e.g. SaaS, FinTech, Healthcare, Consulting" />
               </div>
               <div className="form-group">
-                <span className="form-label">Who you want to reach</span>
-                <div className="readonly-field">{brandAudience || 'Derived by Brand OS after Brand DNA analysis.'}</div>
+                <label className="form-label">Desired tone</label>
+                <input className="input" value={brandTone} onChange={(e) => setBrandTone(e.target.value)} placeholder="e.g. Direct, practical and credible" />
               </div>
               <div className="form-group">
-                <span className="form-label">Goals</span>
-                <div className="readonly-field">{brandGoals || 'Derived from your LinkedIn profile and future content signals.'}</div>
-              </div>
-              <div className="form-group">
-                <span className="form-label">Desired tone</span>
-                <div className="readonly-field">{brandTone || 'Learned from your profile and writing signals.'}</div>
-              </div>
-              <div className="form-group">
-                <span className="form-label">How you want to be known</span>
-                <div className="readonly-field">{brandPositioning || 'Derived as part of Brand Intelligence.'}</div>
+                <label className="form-label">Years of work experience</label>
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={experienceValue}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setBrandExperienceYears(raw === '' ? '' : Number(raw));
+                  }}
+                  placeholder="e.g. 8.5"
+                />
+                <span className="form-help">Decimal values are accepted.</span>
               </div>
             </div>
 
             <div style={{ marginTop: 14, padding: 11, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.55 }}>
-              <b style={{ color: '#5145cd' }}>LinkedIn-sourced:</b> Name and any profile fields the connected LinkedIn API makes available. Brand OS will never invent credentials or experience.
+              <b style={{ color: '#5145cd' }}>Your inputs:</b> These four details are passed directly into Brand Intelligence and future content generation. Brand OS will not replace them with LinkedIn profile data.
             </div>
           </section>
 
@@ -1154,7 +1127,7 @@ function SettingsView(props: any) {
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <div>
                 <h2 className="settings-title">Voice calibration</h2>
-                <p className="settings-copy">Add 3–10 previous LinkedIn posts so Brand OS has enough evidence to build your writing style and Brand DNA.</p>
+                <p className="settings-copy">Add 3–10 previous LinkedIn posts so Brand OS has enough evidence to learn your writing style.</p>
               </div>
               <span className={"status-pill " + (count >= 3 ? 'approved' : 'edited')}>{count}/10 posts</span>
             </div>
@@ -1189,17 +1162,15 @@ function SettingsView(props: any) {
         <div className="settings-stack">
           <section className="panel settings-card">
             <div className="panel-head" style={{ padding: 0, border: 0 }}>
-              <div><h2 className="settings-title">Saved Brand DNA</h2><p className="settings-copy">Read-only view of the profile and signals used by Brand OS.</p></div>
+              <div><h2 className="settings-title">Saved Brand DNA</h2><p className="settings-copy">Read-only view of the profile context used by Brand OS.</p></div>
               <span className="tag"><ShieldCheck size={10}/> Frozen</span>
             </div>
             <div className="profile-grid" style={{ marginTop: 16 }}>
               {[
                 ['Professional title', brandTitle],
                 ['Industry', brandIndustry],
-                ['Who you want to reach', brandAudience],
-                ['Goals', brandGoals],
                 ['Desired tone', brandTone],
-                ['How you want to be known', brandPositioning],
+                ['Years of work experience', experienceValue ? experienceValue + ' years' : ''],
               ].map(([label, value]) => (
                 <div className="form-group" key={label as string}>
                   <span className="form-label">{label}</span>
@@ -1235,10 +1206,10 @@ function SettingsView(props: any) {
             <h2 className="settings-title">Brand Intelligence status</h2>
             <p className="settings-copy">{brand.summary || 'Brand Intelligence is active and ready to shape content.'}</p>
             <div className="learning-flow">
-              <div className="flow-step"><BrainCircuit size={15} color="#6d5dfc"/><b>Identity</b><span>{brand.profile?.professional_title || 'LinkedIn profile'}</span></div>
-              <div className="flow-step"><Target size={15} color="#6d5dfc"/><b>Audience</b><span>{brand.profile?.audience || 'Derived by Brand Intelligence'}</span></div>
-              <div className="flow-step"><Sparkles size={15} color="#6d5dfc"/><b>Voice</b><span>{brand.profile?.tone || 'Learned from content'}</span></div>
-              <div className="flow-step"><Activity size={15} color="#6d5dfc"/><b>Memory</b><span>{brand.current_post_count ?? brand.source_post_count} signals · continuous</span></div>
+              <div className="flow-step"><BrainCircuit size={15} color="#6d5dfc"/><b>Professional title</b><span>{brand.profile?.professional_title || 'Not set'}</span></div>
+              <div className="flow-step"><Target size={15} color="#6d5dfc"/><b>Industry</b><span>{brand.profile?.industry || 'Not set'}</span></div>
+              <div className="flow-step"><Sparkles size={15} color="#6d5dfc"/><b>Voice</b><span>{brand.profile?.tone || 'Not set'}</span></div>
+              <div className="flow-step"><Activity size={15} color="#6d5dfc"/><b>Experience</b><span>{brand.profile?.experience_years != null ? brand.profile.experience_years + ' years' : 'Not set'} · {brand.current_post_count ?? brand.source_post_count} signals</span></div>
             </div>
           </section>
         </div>
@@ -1246,8 +1217,8 @@ function SettingsView(props: any) {
 
       <section className="panel settings-card" style={{ marginTop: 16 }}>
         <h2 className="settings-title">LinkedIn connection</h2>
-        <p className="settings-copy">Signed in as <b>{profile.display_name}</b>. {linkedin.connected ? 'The official LinkedIn connection is active and is the source of your profile baseline.' : 'Connect LinkedIn to enable supported API actions.'}</p>
-        <button className="button" onClick={onConnect}><Link2 size={14}/>{linkedin.connected ? 'Refresh LinkedIn profile' : 'Connect LinkedIn'}</button>
+        <p className="settings-copy">Signed in as <b>{profile.display_name}</b>. {linkedin.connected ? 'Your official LinkedIn connection is active for supported publishing actions. It does not auto-fill your Brand DNA.' : 'Connect LinkedIn to enable supported publishing actions.'}</p>
+        <button className="button" onClick={onConnect}><Link2 size={14}/>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
       </section>
     </>
   );
