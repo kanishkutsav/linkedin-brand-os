@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.research import ResearchService
@@ -93,6 +93,11 @@ async def lifespan(app: FastAPI):
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        columns = await conn.run_sync(lambda sync_conn: {
+            column["name"] for column in inspect(sync_conn).get_columns("user_profiles")
+        })
+        if "experience_years" not in columns:
+            await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN experience_years FLOAT"))
     agent_scheduler.start()
     yield
     await agent_scheduler.stop()
@@ -157,12 +162,10 @@ class ProfileRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     display_name: str = "User"
-    professional_title: str | None = None
-    industry: str | None = None
-    audience: str | None = None
-    goals: list[str] | None = None
-    brand_positioning: str | None = None
-    tone: str | None = None
+    professional_title: str
+    industry: str
+    tone: str
+    experience_years: float = Field(ge=0, le=100)
 
 
 class BrandOnboardingPost(BaseModel):
@@ -178,12 +181,10 @@ class BrandOnboardingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     display_name: str = "User"
-    professional_title: str | None = None
-    industry: str | None = None
-    audience: str | None = None
-    goals: list[str] = Field(default_factory=list)
-    brand_positioning: str | None = None
-    tone: str | None = None
+    professional_title: str
+    industry: str
+    tone: str
+    experience_years: float = Field(ge=0, le=100)
     posts: list[BrandOnboardingPost] = Field(default_factory=list)
 
 
@@ -382,8 +383,7 @@ async def get_profile(
         "display_name": profile.display_name,
         "professional_title": profile.professional_title,
         "industry": profile.industry,
-        "audience": profile.audience,
-        "brand_positioning": profile.brand_positioning,
+        "experience_years": profile.experience_years,
         "tone": profile.tone,
         "role": profile.role or "owner",
     }
@@ -393,7 +393,7 @@ async def get_profile(
 async def upsert_profile_legacy():
     raise HTTPException(
         status_code=410,
-        detail="Manual profile editing is disabled. LinkedIn is the factual profile source.",
+        detail="Use the Brand DNA setup to enter your professional title, industry, desired tone and years of experience.",
     )
 
 
@@ -420,10 +420,8 @@ async def brand_status(
             "display_name": profile.display_name if profile else "User",
             "professional_title": profile.professional_title if profile else None,
             "industry": profile.industry if profile else None,
-            "audience": profile.audience if profile else None,
-            "brand_positioning": profile.brand_positioning if profile else None,
+            "experience_years": profile.experience_years if profile else None,
             "tone": profile.tone if profile else None,
-            "goals": (profile.goals.split(",") if profile and profile.goals else []),
         },
         "source_posts": [
             {"id": post.id, "body": post.body, "published_at": post.published_at, "source": post.source}
@@ -477,9 +475,13 @@ async def brand_onboard(
 
     profile = await AuthService.get_or_create_profile(session, current_user)
 
-    # LinkedIn is the factual profile source. Imported posts are the only
-    # user-controlled onboarding input.
-    profile.display_name = current_user.display_name or profile.display_name or "User"
+    # Brand DNA is fully user-controlled. LinkedIn is used only for account
+    # connection and publishing, never as the source of Brand DNA profile fields.
+    profile.display_name = req.display_name.strip()[:150] or current_user.display_name or profile.display_name or "User"
+    profile.professional_title = req.professional_title.strip()[:200]
+    profile.industry = req.industry.strip()[:200]
+    profile.experience_years = float(req.experience_years)
+    profile.tone = req.tone.strip()[:200]
     profile.role = profile.role or current_user.role or "user"
     await session.commit()
 
@@ -519,38 +521,11 @@ async def brand_onboard(
 
 
 @app.post("/api/brand/initialize")
-async def brand_initialize(
-    req: ProfileRequest,
-    session: AsyncSession = Depends(get_session),
-    current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
-):
-    # Historical posts are optional. LinkedIn profile facts are the factual
-    # baseline, and Brand Intelligence can be initialized from that baseline
-    # alone. Keep this endpoint idempotent for first-time users.
-    profile = await AuthService.get_or_create_profile(session, current_user)
-
-    if req.display_name and req.display_name.strip():
-        profile.display_name = req.display_name.strip()[:150]
-    if req.professional_title is not None:
-        profile.professional_title = req.professional_title
-    if req.industry is not None:
-        profile.industry = req.industry
-
-    await session.commit()
-
-    service = BrandIntelligenceService(session)
-    try:
-        memory = await service.analyze(profile.id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("Brand DNA initialization failed: %s", exc)
-        raise HTTPException(
-            status_code=502,
-            detail="Brand DNA initialization failed. Check the configured LLM providers and try again.",
-        ) from exc
-
-    return {"brand_memory": memory}
+async def brand_initialize_legacy():
+    raise HTTPException(
+        status_code=410,
+        detail="Automatic Brand DNA initialization is disabled. Enter your Brand DNA details and use the onboarding form.",
+    )
 
 
 @app.post("/api/brand/rebuild")
