@@ -759,7 +759,7 @@ function ApprovalWorkspace(props: any) {
   const chooseImage = (file: File | null) => {
     if (!file) return;
     if (!['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
-      window.alert('Only JPEG, PNG, or GIF images are supported.');
+      window.alert('Only JPEG or PNG images are supported.');
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
@@ -836,8 +836,8 @@ function ApprovalWorkspace(props: any) {
                 <div className="readonly-field" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65, minHeight: 150 }}>{selected.content}</div>
                 <div style={{ marginTop: 14, padding: 12, border: '1px dashed #d0d5dd', borderRadius: 12, background: '#fafafa' }}>
                   <div className="review-label" style={{ marginBottom: 7 }}>Optional photograph</div>
-                  <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG, PNG, or GIF image (up to 10 MB). The image is sent directly to LinkedIn during execution and is not stored by Brand OS.</div>
-                  <input type="file" accept="image/jpeg,image/png,image/gif" onChange={(e) => chooseImage(e.target.files?.[0] || null)} disabled={isBusy} />
+                  <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG or PNG image (up to 10 MB). The image is sent directly to LinkedIn during execution and is not stored by Brand OS.</div>
+                  <input type="file" accept="image/jpeg,image/png" onChange={(e) => chooseImage(e.target.files?.[0] || null)} disabled={isBusy} />
                   {imagePreview && (
                     <div style={{ marginTop: 10 }}>
                       <img src={imagePreview} alt="Selected LinkedIn post image preview" style={{ display: 'block', width: '100%', maxHeight: 280, objectFit: 'contain', borderRadius: 10, background: '#f2f4f7' }} />
