@@ -613,9 +613,16 @@ async def agent_status(
     return {
         "enabled": settings.agent_enabled,
         "modes": {
-            "daily_discovery": settings.agent_daily_discovery_enabled,
+            # Scheduled execution is owned by Render Cron Jobs. Keep these
+            # booleans stable for API consumers and expose the real schedules
+            # explicitly instead of reading web-process scheduler settings.
+            "daily_discovery": settings.agent_enabled,
             "event_driven": True,
-            "scheduled_calendar": settings.agent_calendar_enabled,
+            "scheduled_calendar": settings.agent_enabled,
+        },
+        "schedules": {
+            "daily_discovery": "09:00 Asia/Kolkata",
+            "scheduled_calendar": "09:15 Asia/Kolkata",
         },
         "recent_runs": [
             {
