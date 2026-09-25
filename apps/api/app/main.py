@@ -723,7 +723,7 @@ async def build_research_evidence(
 
 
 @app.post("/api/learning/thought")
-async def save_learning_thought(req: LearningThoughtRequest, session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "user"))):
+async def save_learning_thought(req: LearningThoughtRequest, session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
     content = (req.content or "").strip()
     if len(content) < 10:
         raise HTTPException(status_code=400, detail="Write a little more so Brand OS has a useful idea to learn from.")
