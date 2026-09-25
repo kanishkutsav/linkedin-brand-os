@@ -310,7 +310,7 @@ class ApprovalService:
         await self.session.commit()
         return approval
 
-    async def execute(self, approval_id: int, adapter, profile_id: int | None = None):
+    async def execute(self, approval_id: int, adapter, profile_id: int | None = None, image_bytes: bytes | None = None, image_mime: str | None = None):
         if profile_id is None:
             raise ValueError("Profile ownership is required")
 
@@ -366,7 +366,7 @@ class ApprovalService:
         approval.publish_started_at = datetime.now(timezone.utc)
         await self.session.commit()
 
-        result = await asyncio.to_thread(adapter.publish_post, version.body)
+        result = await asyncio.to_thread(adapter.publish_post, version.body, image_bytes, image_mime)
 
         # Approval is the human decision and must remain durable even if the
         # external LinkedIn publish attempt fails. A failed attempt is retryable.
