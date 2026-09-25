@@ -291,7 +291,7 @@ useEffect(() => {
   const selectedApproval = queue.find((item) => item.id === selectedId) ?? null;
   const summary = useMemo(() => ({
     pending: queue.filter((i) => ['PENDING', 'EDITED', 'REGENERATED'].includes(i.status)).length,
-    reviewed: queue.filter((i) => ['APPROVED', 'EXECUTED'].includes(i.status)).length,
+    reviewed: queue.filter((i) => i.status === 'APPROVED').length,
     rejected: queue.filter((i) => i.status === 'REJECTED').length,
     executed: queue.filter((i) => i.status === 'EXECUTED').length,
   }), [queue]);
