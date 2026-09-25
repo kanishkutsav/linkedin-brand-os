@@ -134,13 +134,13 @@ class ResearchService:
                 return source
 
             raw = response.text[:500_000]
-            raw = re.sub(r"(?is)<(script|style|noscript|svg|nav|footer|header)[^>]*>.*?</\\1>", " ", raw)
+            raw = re.sub(r"(?is)<(script|style|noscript|svg|nav|footer|header)[^>]*>.*?</\1>", " ", raw)
             paragraphs = re.findall(r"(?is)<p[^>]*>(.*?)</p>", raw)
             text_parts = []
             for paragraph in paragraphs:
                 cleaned = re.sub(r"(?is)<[^>]+>", " ", paragraph)
                 cleaned = html.unescape(cleaned)
-                cleaned = re.sub(r"\\s+", " ", cleaned).strip()
+                cleaned = re.sub(r"\s+", " ", cleaned).strip()
                 if len(cleaned) >= 50:
                     text_parts.append(cleaned)
                 if sum(len(item) for item in text_parts) >= 6000:
