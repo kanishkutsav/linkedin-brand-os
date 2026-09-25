@@ -760,8 +760,8 @@ Rules:
         "profile": {
             "title": profile.professional_title,
             "industry": profile.industry,
-            "audience": profile.audience,
-            "positioning": profile.brand_positioning,
+            "experience_years": profile.experience_years,
+            "tone": profile.tone,
         },
         "brand_intelligence": brand_context,
         "voice": voice_context,
