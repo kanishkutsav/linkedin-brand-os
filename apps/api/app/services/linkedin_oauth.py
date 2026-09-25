@@ -67,109 +67,6 @@ def _decode_jwt_payload(token: str | None) -> dict:
         return {}
 
 
-def _best_effort_profile(access_token: str, userinfo: dict, id_token: str | None = None) -> dict:
-    """Return profile fields LinkedIn makes available to this OAuth app.
-
-    OIDC always gives us identity fields. Some LinkedIn products also expose
-    headline/public-profile details through the same member token. The extra
-    call is deliberately best-effort so a restricted LinkedIn app never blocks
-    authentication.
-    """
-    profile = dict(userinfo or {})
-    oidc_claims = _decode_jwt_payload(id_token)
-    for key, value in oidc_claims.items():
-        if key not in profile or not profile.get(key):
-            profile[key] = value
-
-    profile_api_error = None
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Linkedin-Version": settings.linkedin_api_version,
-        "X-Restli-Protocol-Version": "2.0.0",
-    }
-    try:
-        # Try LinkedIn's member profile endpoint as a best-effort enrichment path.
-        # This is never required for OAuth sign-in; OIDC remains the source of truth.
-        member = _request_json(
-            "https://api.linkedin.com/v2/me?projection=(id,headline,localizedHeadline,vanityName)",
-            headers=headers,
-            timeout=5,
-        )
-        if isinstance(member, dict):
-            for key, value in member.items():
-                if key not in profile or not profile.get(key):
-                    profile[key] = value
-    except HTTPException as exc:
-        profile_api_error = exc.detail
-        # Retry the documented current-member endpoint without a projection.
-        # This protects us from projection/version differences while preserving
-        # the same authenticated-member permission boundary.
-        try:
-            member = _request_json(
-                "https://api.linkedin.com/v2/me",
-                headers=headers,
-                timeout=5,
-            )
-            if isinstance(member, dict):
-                for key, value in member.items():
-                    if key not in profile or not profile.get(key):
-                        profile[key] = value
-                profile_api_error = None
-        except HTTPException as fallback_exc:
-            profile_api_error = fallback_exc.detail
-            logger.warning("LinkedIn basic profile lookup unavailable: %s", fallback_exc.detail)
-
-    logger.info("LinkedIn profile fields available: %s", sorted(k for k in profile.keys() if not k.startswith("_")))
-    if profile_api_error:
-        profile["_linkedin_profile_api_error"] = profile_api_error
-    return profile
-
-
-def _infer_industry_from_profile(profile: dict) -> str | None:
-    """Infer a broad industry only when LinkedIn does not return one.
-
-    This keeps onboarding fully automatic without pretending an inferred value
-    is a LinkedIn field. The inference is intentionally conservative and based
-    only on the member's returned headline/title text.
-    """
-    headline = " ".join(
-        str(profile.get(key) or "")
-        for key in ("headline", "localizedHeadline")
-    ).strip().lower()
-    if not headline:
-        return None
-    groups = [
-        ("Software & Technology", ("software", "developer", "engineering", "engineer", "saas", "technology", "tech ", "data scientist", "machine learning", "artificial intelligence", " ai ")),
-        ("Marketing & Communications", ("marketing", "brand", "communications", "content", "growth", "seo", "public relations", "pr ")),
-        ("Sales", ("sales", "account executive", "business development", "revenue", "partnerships")),
-        ("Finance", ("finance", "financial", "banking", "investment", "investor", "accounting", "accountant", "wealth")),
-        ("Human Resources", ("human resources", "hr ", "people operations", "talent acquisition", "recruiting", "recruiter")),
-        ("Consulting", ("consultant", "consulting", "advisor", "advisory")),
-        ("Product", ("product manager", "product management", "product lead", "product director")),
-        ("Design", ("designer", "design lead", "ux ", "ui ", "user experience", "user interface")),
-        ("Legal", ("lawyer", "attorney", "legal counsel", "legal")),
-        ("Healthcare", ("healthcare", "health care", "doctor", "physician", "medical", "nurse", "clinical")),
-        ("Education", ("teacher", "professor", "education", "educator", "academic")),
-        ("Operations", ("operations", "supply chain", "procurement", "logistics")),
-    ]
-    for label, terms in groups:
-        if any(term in headline for term in terms):
-            return label
-    return None
-
-
-def _localized_value(value: object) -> str | None:
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    if isinstance(value, dict):
-        localized = value.get("localized")
-        if isinstance(localized, dict):
-            for item in localized.values():
-                if isinstance(item, str) and item.strip():
-                    return item.strip()
-    return None
-
-
 async def build_authorization_url(session: AsyncSession, browser_nonce: str | None = None) -> tuple[str, str]:
     if not settings.linkedin_client_id or not settings.linkedin_client_secret:
         raise HTTPException(
@@ -187,9 +84,8 @@ async def build_authorization_url(session: AsyncSession, browser_nonce: str | No
     )
     await session.commit()
 
-    # Keep LinkedIn onboarding on the self-serve OIDC + Share on LinkedIn
-    # permissions only. No Community Management, Advertising API, or
-    # r_basicprofile dependency is required for sign-in/profile enrichment.
+    # Keep LinkedIn connection on the self-serve OIDC + Share on LinkedIn
+    # permissions only. Brand DNA is collected separately from the user.
     scopes = ["openid", "profile", "email", "w_member_social"]
     if settings.linkedin_analytics_oauth_enabled:
         scopes.extend(["r_member_postAnalytics", "r_member_profileAnalytics"])
@@ -244,30 +140,15 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
         LINKEDIN_USERINFO_URL,
         headers={"Authorization": f"Bearer {access_token}"},
     )
-    profile_data = await asyncio.to_thread(_best_effort_profile, access_token, userinfo, token_payload.get("id_token"))
+    profile_data = dict(userinfo or {})
+    oidc_claims = _decode_jwt_payload(token_payload.get("id_token"))
+    for key, value in oidc_claims.items():
+        if key not in profile_data or not profile_data.get(key):
+            profile_data[key] = value
 
     email = AuthService.normalize_email(profile_data.get("email"))
-    member_sub = profile_data.get("sub") or profile_data.get("id")
+    member_sub = profile_data.get("sub")
     display_name = profile_data.get("name") or "LinkedIn Member"
-    professional_title = (
-        profile_data.get("headline")
-        or profile_data.get("localizedHeadline")
-        or _localized_value(profile_data.get("headline"))
-        or _localized_value(profile_data.get("localizedHeadline"))
-    )
-    industry = (
-        profile_data.get("industryName")
-        or profile_data.get("localizedIndustry")
-        or _localized_value(profile_data.get("industry"))
-        or _localized_value(profile_data.get("localizedIndustry"))
-        or _infer_industry_from_profile(profile_data)
-    )
-    vanity_name = profile_data.get("vanityName")
-    profile_url = (
-        "https://www.linkedin.com/in/" + str(vanity_name).strip()
-        if vanity_name and str(vanity_name).strip()
-        else None
-    )
 
     if not email or not member_sub:
         raise HTTPException(status_code=403, detail="LinkedIn did not return the required member identity.")
@@ -292,11 +173,8 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
     user.is_active = True
     user.is_whitelisted = True
 
-    # Keep the authenticated LinkedIn profile as the factual Brand DNA baseline.
-    # User-controlled Brand DNA fields are only filled when LinkedIn actually
-    # supplies them; we never invent profile facts during sign-in.
-    if profile_url:
-        user.linkedin_url = profile_url
+    # LinkedIn is used for authentication and supported publishing only.
+    # Brand DNA fields are always supplied by the user in the Brand DNA form.
 
     profile = await session.get(UserProfile, int(user.id))
     if profile is None:
@@ -304,11 +182,6 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
         session.add(profile)
     else:
         profile.display_name = display_name
-
-    if professional_title:
-        profile.professional_title = str(professional_title)[:200]
-    if industry:
-        profile.industry = str(industry)[:200]
 
     connection_result = await session.execute(
         select(LinkedInConnection).where(LinkedInConnection.user_id == user.id)
@@ -342,70 +215,6 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
     )
     await session.commit()
     return exchange_code
-
-
-async def sync_linkedin_profile(session: AsyncSession, user_id: int) -> dict:
-    """Refresh the connected member's LinkedIn-backed Brand DNA profile."""
-    connection_result = await session.execute(
-        select(LinkedInConnection).where(LinkedInConnection.user_id == user_id)
-    )
-    connection = connection_result.scalar_one_or_none()
-    if connection is None:
-        raise HTTPException(status_code=404, detail="LinkedIn account is not connected.")
-
-    user = await session.get(AuthUser, user_id)
-    if user is None or not user.is_active or not user.is_whitelisted:
-        raise HTTPException(status_code=403, detail="Brand OS user is no longer active or whitelisted.")
-
-    userinfo = await asyncio.to_thread(
-        _request_json,
-        LINKEDIN_USERINFO_URL,
-        headers={"Authorization": f"Bearer {connection.access_token}"},
-    )
-    profile_data = await asyncio.to_thread(_best_effort_profile, connection.access_token, userinfo)
-
-    display_name = profile_data.get("name") or user.display_name or "LinkedIn Member"
-    professional_title = (
-        profile_data.get("headline")
-        or profile_data.get("localizedHeadline")
-        or _localized_value(profile_data.get("headline"))
-    )
-    industry = (
-        profile_data.get("industryName")
-        or profile_data.get("localizedIndustry")
-        or _localized_value(profile_data.get("industry"))
-    )
-    vanity_name = profile_data.get("vanityName")
-    profile_url = (
-        "https://www.linkedin.com/in/" + str(vanity_name).strip()
-        if vanity_name and str(vanity_name).strip()
-        else user.linkedin_url
-    )
-
-    user.display_name = str(display_name)[:150]
-    if profile_url:
-        user.linkedin_url = str(profile_url)[:255]
-
-    profile = await session.get(UserProfile, int(user.id))
-    if profile is None:
-        profile = UserProfile(id=int(user.id), display_name=str(display_name)[:150], role=user.role or "user")
-        session.add(profile)
-    else:
-        profile.display_name = str(display_name)[:150]
-
-    if professional_title:
-        profile.professional_title = str(professional_title)[:200]
-    if industry:
-        profile.industry = str(industry)[:200]
-
-    await session.commit()
-    return {
-        "display_name": profile.display_name,
-        "professional_title": profile.professional_title,
-        "industry": profile.industry,
-        "linkedin_url": user.linkedin_url,
-        "source": "linkedin",
-    }
 
 
 async def exchange_code(session: AsyncSession, code: str) -> dict:
