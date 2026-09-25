@@ -35,6 +35,7 @@ class UserProfile(Base):
     display_name: Mapped[str] = mapped_column(String(150), default="User")
     professional_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     industry: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    experience_years: Mapped[float | None] = mapped_column(Float, nullable=True)
     audience: Mapped[str | None] = mapped_column(String(200), nullable=True)
     goals: Mapped[str | None] = mapped_column(Text, nullable=True)
     brand_positioning: Mapped[str | None] = mapped_column(Text, nullable=True)
