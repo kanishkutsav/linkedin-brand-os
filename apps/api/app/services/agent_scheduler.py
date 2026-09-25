@@ -44,7 +44,7 @@ class AgentScheduler:
         tz = ZoneInfo(settings.agent_timezone)
         while True:
             now = datetime.now(tz)
-            if settings.agent_daily_discovery_enabled:
+            if settings.agent_in_process_schedule_enabled and settings.agent_daily_discovery_enabled:
                 if (
                     now.hour == settings.agent_daily_discovery_hour
                     and now.minute == settings.agent_daily_discovery_minute
@@ -53,7 +53,7 @@ class AgentScheduler:
                     await self.jobs.run("discovery")
                     self._last_discovery_date = now.date().isoformat()
 
-            if settings.agent_calendar_enabled:
+            if settings.agent_in_process_schedule_enabled and settings.agent_calendar_enabled:
                 if (
                     now.hour == settings.agent_calendar_hour
                     and now.minute == settings.agent_calendar_minute
@@ -68,7 +68,7 @@ class AgentScheduler:
                 except Exception as exc:
                     print(f"Brand learning cycle skipped: {exc}")
 
-                if self._last_retention_date != now.date().isoformat():
+                if settings.agent_in_process_schedule_enabled and self._last_retention_date != now.date().isoformat():
                     try:
                         retention = await self.jobs.process_retention(learning_session)
                         print(f"Brand OS retention cycle completed: {retention}")
