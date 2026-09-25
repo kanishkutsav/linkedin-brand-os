@@ -6,7 +6,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.models import ApprovalRequest, ContentVersion, HistoricalPost, LearningEvent
+from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LearningEvent
 
 
 class RetentionService:
@@ -57,22 +57,6 @@ class RetentionService:
         return len(trim_ids)
 
     async def _trim_old_content_versions(self, session: AsyncSession) -> int:
-        result = await session.execute(
-            select(ApprovalRequest.id, ApprovalRequest.content_version_id, HistoricalPost.profile_id)
-            .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
-            .join(
-                HistoricalPost,
-                HistoricalPost.profile_id == HistoricalPost.profile_id,
-            )
-            .where(False)
-        )
-        # The query above is intentionally not used; keep the retention logic
-        # profile-scoped through ContentItem below so we never rely on an
-        # implicit relationship that the legacy schema does not declare.
-        del result
-
-        from app.models.models import ContentItem
-
         result = await session.execute(
             select(
                 ApprovalRequest.id,
