@@ -27,8 +27,10 @@ class ResearchService:
             queries.append(requested_topic)
         if profile.industry:
             queries.append(f"{profile.industry} technology business")
-        if profile.brand_positioning:
-            queries.append(profile.brand_positioning)
+        if profile.professional_title:
+            queries.append(profile.professional_title)
+        if profile.experience_years is not None:
+            queries.append(f"{profile.industry or 'professional'} {profile.experience_years:g} years experience")
         if not queries:
             queries = ["technology business leadership AI"]
 
@@ -166,9 +168,8 @@ class ResearchService:
             "profile": {
                 "title": profile.professional_title,
                 "industry": profile.industry,
-                "audience": profile.audience,
-                "goals": profile.goals,
-                "positioning": profile.brand_positioning,
+                "experience_years": profile.experience_years,
+                "tone": profile.tone,
             },
             "brand_intelligence": context["brand_memory"],
             "recent_historical_posts": [p.body[:600] for p in historical[:6]],
@@ -193,7 +194,7 @@ Hard rules:
 - Return JSON only.
 
 Return:
-{"opportunities":[{"title":"","topic":"","angle":"","pillar":"","format":"","objective":"","why_now":"","evidence_summary":"","source_hints":[],"source_urls":[],"brand_fit":0,"audience_relevance":0,"timeliness":0,"evidence_strength":0,"novelty":0,"conversation_potential":0,"authenticity":0,"risk":0,"rationale":""}]}
+{"opportunities":[{"title":"","topic":"","angle":"","pillar":"","format":"","objective":"","why_now":"","evidence_summary":"","source_hints":[],"source_urls":[],"brand_fit":0,"context_relevance":0,"timeliness":0,"evidence_strength":0,"novelty":0,"conversation_potential":0,"authenticity":0,"risk":0,"rationale":""}]}
 
 Generate 6-8 genuinely different opportunities. Every opportunity must cite at least one supplied source URL in source_urls.
 """
@@ -236,8 +237,14 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
         for raw in opportunities:
             try:
                 scores = {
-                    key: max(0.0, min(100.0, float(raw.get(key, 0) or 0)))
-                    for key in ("brand_fit","audience_relevance","timeliness","evidence_strength","novelty","conversation_potential","authenticity","risk")
+                    "brand_fit": max(0.0, min(100.0, float(raw.get("brand_fit", 0) or 0))),
+                    "audience_relevance": max(0.0, min(100.0, float(raw.get("context_relevance", raw.get("audience_relevance", 0)) or 0))),
+                    "timeliness": max(0.0, min(100.0, float(raw.get("timeliness", 0) or 0))),
+                    "evidence_strength": max(0.0, min(100.0, float(raw.get("evidence_strength", 0) or 0))),
+                    "novelty": max(0.0, min(100.0, float(raw.get("novelty", 0) or 0))),
+                    "conversation_potential": max(0.0, min(100.0, float(raw.get("conversation_potential", 0) or 0))),
+                    "authenticity": max(0.0, min(100.0, float(raw.get("authenticity", 0) or 0))),
+                    "risk": max(0.0, min(100.0, float(raw.get("risk", 0) or 0))),
                 }
                 total = (
                     scores["brand_fit"] * 0.22 + scores["audience_relevance"] * 0.18 +
