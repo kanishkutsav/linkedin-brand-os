@@ -5,7 +5,7 @@ import {
   Activity, ArrowUpRight, BarChart3, BrainCircuit, Check, ChevronRight, CircleCheck,
   Clock3, Command, ExternalLink, FileText, Gauge, Globe2, LayoutDashboard, Link2,
   LogOut, Menu, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings,
-  ShieldCheck, Sparkles, Target, TrendingUp, UserRound, WandSparkles, X, Zap, Image as ImageIcon
+  ShieldCheck, Sparkles, Target, TrendingUp, UserRound, WandSparkles, X, Zap
 } from 'lucide-react';
 
 const API_BASE = typeof window !== 'undefined' && window.location.hostname === 'localhost' ? (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000') : '/api/backend';
