@@ -56,7 +56,7 @@ class RetentionService:
                     approval_id = str(json.loads(metadata_json or "{}").get("approval_id") or "")
                 except (TypeError, ValueError):
                     approval_id = ""
-                if approval_id and approval_id in pending_publish_ids:
+                if not approval_id or approval_id in pending_publish_ids:
                     continue
                 trim_ids.append(int(post_id))
 
