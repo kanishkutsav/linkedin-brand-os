@@ -32,3 +32,187 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+
+  # Scheduled agent jobs run outside the FastAPI web process. Render evaluates
+  # these schedules in UTC: 03:30 UTC = 09:00 IST and 03:45 UTC = 09:15 IST.
+  - type: cron
+    name: linkedin-brand-os-daily-discovery
+    runtime: python
+    plan: 0.5c-512mb
+    region: singapore
+    schedule: "30 3 * * *"
+    buildCommand: "cd apps/api && pip install -r requirements.txt"
+    startCommand: "cd apps/api && python -m app.jobs.scheduled discovery"
+    branch: master
+    envVars:
+      - key: APP_ENV
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: APP_ENV
+      - key: ENVIRONMENT
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: ENVIRONMENT
+      - key: DATABASE_URL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: DATABASE_URL
+      - key: SECRET_KEY
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: SECRET_KEY
+      - key: JWT_SECRET
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: JWT_SECRET
+      - key: SUPABASE_URL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: SUPABASE_URL
+      - key: SUPABASE_ANON_KEY
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: SUPABASE_ANON_KEY
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: SUPABASE_SERVICE_ROLE_KEY
+      - key: OPENROUTER_API_KEY
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: OPENROUTER_API_KEY
+      - key: OPENROUTER_BASE_URL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: OPENROUTER_BASE_URL
+      - key: OPENROUTER_MODEL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: OPENROUTER_MODEL
+      - key: GROQ_API_KEY
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: GROQ_API_KEY
+      - key: GROQ_BASE_URL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: GROQ_BASE_URL
+      - key: GROQ_MODEL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: GROQ_MODEL
+      - key: GEMINI_API_KEY
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: GEMINI_API_KEY
+      - key: GEMINI_MODEL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: GEMINI_MODEL
+
+  - type: cron
+    name: linkedin-brand-os-scheduled-calendar
+    runtime: python
+    plan: 0.5c-512mb
+    region: singapore
+    schedule: "45 3 * * *"
+    buildCommand: "cd apps/api && pip install -r requirements.txt"
+    startCommand: "cd apps/api && python -m app.jobs.scheduled calendar"
+    branch: master
+    envVars:
+      - key: APP_ENV
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: APP_ENV
+      - key: ENVIRONMENT
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: ENVIRONMENT
+      - key: DATABASE_URL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: DATABASE_URL
+      - key: SECRET_KEY
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: SECRET_KEY
+      - key: JWT_SECRET
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: JWT_SECRET
+      - key: SUPABASE_URL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: SUPABASE_URL
+      - key: SUPABASE_ANON_KEY
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: SUPABASE_ANON_KEY
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: SUPABASE_SERVICE_ROLE_KEY
+      - key: OPENROUTER_API_KEY
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: OPENROUTER_API_KEY
+      - key: OPENROUTER_BASE_URL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: OPENROUTER_BASE_URL
+      - key: OPENROUTER_MODEL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: OPENROUTER_MODEL
+      - key: GROQ_API_KEY
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: GROQ_API_KEY
+      - key: GROQ_BASE_URL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: GROQ_BASE_URL
+      - key: GROQ_MODEL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: GROQ_MODEL
+      - key: GEMINI_API_KEY
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: GEMINI_API_KEY
+      - key: GEMINI_MODEL
+        fromService:
+          name: linkedin-brand-os-api
+          type: web
+          envVarKey: GEMINI_MODEL
