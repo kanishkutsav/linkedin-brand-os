@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.integrations.linkedin import PublishResult
 from app.services.brand_intelligence import BrandIntelligenceService
 from app.services.gemini_service import ModelRouterService
+from app.services.brand_learning import BrandLearningService
 from app.guards.guardrails import normalize_human_style, run_content_guards
 
 
@@ -125,6 +126,15 @@ class ApprovalService:
             )
         )
         await self.session.commit()
+        await BrandLearningService(self.session).record_event(
+            profile_id=profile_id,
+            event_type="CONTENT_APPROVED",
+            source_type="approval",
+            source_id=approval.id,
+            content=version.body,
+            metadata={"reason": "human_approval"},
+        )
+        await self.session.commit()
         return approval
 
     async def edit(self, approval_id: int, edited_body: str, reason: str | None = None, profile_id: int | None = None):
@@ -182,6 +192,15 @@ class ApprovalService:
         )
         self.session.add(AuditLog(event_type="APPROVAL_EDITED", actor="user", payload=f"approval={approval.id}"))
         await self.session.commit()
+        await BrandLearningService(self.session).record_event(
+            profile_id=profile_id,
+            event_type="CONTENT_EDITED",
+            source_type="approval_edit",
+            source_id=f"{approval.id}:{version.version_number}",
+            content=edited_body,
+            metadata={"reason": approval.reason or "human_edit"},
+        )
+        await self.session.commit()
         return approval
 
     async def reject(self, approval_id: int, reason: str | None = None, profile_id: int | None = None):
@@ -210,6 +229,16 @@ class ApprovalService:
         )
         self.session.add(AuditLog(event_type="APPROVAL_REJECTED", actor="user", payload=f"approval={approval.id}"))
         await self.session.commit()
+        if version:
+            await BrandLearningService(self.session).record_event(
+                profile_id=profile_id,
+                event_type="CONTENT_REJECTED",
+                source_type="approval_rejection",
+                source_id=approval.id,
+                content=reason or "User rejected this draft.",
+                metadata={"draft": version.body[:6000], "reason": reason or "User rejected this draft."},
+            )
+            await self.session.commit()
         return approval
 
     async def regenerate(self, approval_id: int, feedback: str | None = None, profile_id: int | None = None):
@@ -311,6 +340,15 @@ class ApprovalService:
                 payload=new_body,
             )
         )
+        if (feedback or "").strip():
+            await BrandLearningService(self.session).record_event(
+                profile_id=profile_id,
+                event_type="REGENERATION_FEEDBACK",
+                source_type="approval_regeneration",
+                source_id=f"{approval.id}:{version.version_number}",
+                content=(feedback or "").strip(),
+                metadata={"previous_draft": version.body[:6000]},
+            )
         self.session.add(AuditLog(
             event_type="APPROVAL_REGENERATED",
             actor="system",
@@ -394,6 +432,14 @@ class ApprovalService:
         # brand evidence. This is the automatic learning path for content created
         # and published through the product; arbitrary LinkedIn scraping is never used.
         if result.success:
+            await BrandLearningService(self.session).record_event(
+                profile_id=profile_id,
+                event_type="CONTENT_PUBLISHED",
+                source_type="linkedin_publish",
+                source_id=approval.id,
+                content=version.body,
+                metadata={"external_id": result.external_id, "content_version_id": version.id},
+            )
             digest = hashlib.sha256(version.body.encode("utf-8")).hexdigest()
             existing = await self.session.execute(
                 select(HistoricalPost).where(
