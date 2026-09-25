@@ -171,7 +171,9 @@ useEffect(() => {
         return;
       }
       fetch(`${API_BASE}/api/auth/linkedin/exchange`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, oauth_nonce: oauthNonce }),
       }).then(async (res) => {
         const data = await res.json();
         if (!res.ok) throw new Error(getApiError(data, 'LinkedIn connection failed'));

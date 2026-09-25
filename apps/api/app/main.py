@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
@@ -204,6 +204,7 @@ class LinkedInExchangeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     code: str
+    oauth_nonce: str | None = None
 
 
 @app.get("/health")
@@ -232,7 +233,7 @@ async def linkedin_oauth_start(
         httponly=True,
         secure=bool(settings.environment == "production"),
         samesite="lax",
-        path="/api/auth/linkedin",
+        path="/api",
     )
     return response
 
@@ -250,7 +251,7 @@ async def linkedin_oauth_callback(
             url=f"{(settings.frontend_url or 'http://localhost:3000').rstrip('/')}/?linkedin_error=authorization_denied",
             status_code=302,
         )
-        response.delete_cookie("brand_os_oauth_state", path="/api/auth/linkedin")
+        response.delete_cookie("brand_os_oauth_state", path="/api")
         return response
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing LinkedIn OAuth code or state.")
@@ -264,16 +265,29 @@ async def linkedin_oauth_callback(
     frontend = (settings.frontend_url or "http://localhost:3000").rstrip("/")
     nonce_suffix = f"&oauth_nonce={browser_nonce}" if browser_nonce else ""
     response = RedirectResponse(url=f"{frontend}/?linkedin_code={exchange}{nonce_suffix}", status_code=302)
-    response.delete_cookie("brand_os_oauth_state", path="/api/auth/linkedin")
+    # Keep the short-lived state cookie until the browser exchanges the one-time
+    # code. This lets the server bind the exchange to the browser that started OAuth.
     return response
 
 
 @app.post("/api/auth/linkedin/exchange")
 async def linkedin_oauth_exchange(
+    request: Request,
     req: LinkedInExchangeRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    return await exchange_code(session, req.code)
+    browser_nonce = request.cookies.get("brand_os_oauth_state", "").split(".", 1)[0]
+    if not browser_nonce:
+        raise HTTPException(status_code=400, detail="LinkedIn exchange is not bound to the initiating browser.")
+    # The frontend sends the nonce it received in the callback URL. The cookie
+    # contains the exact state generated for the same browser.
+    oauth_nonce = req.oauth_nonce
+    if not oauth_nonce or oauth_nonce != browser_nonce:
+        raise HTTPException(status_code=400, detail="LinkedIn exchange browser verification failed.")
+    result = await exchange_code(session, req.code)
+    response = JSONResponse(result)
+    response.delete_cookie("brand_os_oauth_state", path="/api")
+    return response
 
 
 @app.post("/api/linkedin/sync-profile")
