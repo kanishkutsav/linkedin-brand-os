@@ -1013,9 +1013,9 @@ function ApprovalWorkspace(props: any) {
   );
 }
 
-function StatusPill({ status }: { status: string }) {
+function StatusPill({ status, label }: { status: string; label?: string }) {
   const cls = status.toLowerCase();
-  return <span className={`status-pill ${cls}`}><span>●</span>{status}</span>;
+  return <span className={`status-pill ${cls}`}><span>●</span>{label || status}</span>;
 }
 
 function LinkedInPostsView({ posts }: { posts: ApprovalItem[] }) {
@@ -1037,7 +1037,7 @@ function LinkedInPostsView({ posts }: { posts: ApprovalItem[] }) {
             <article className="post-entry" key={post.id}>
               <div className="post-entry-head">
                 <span className="post-index">POST #{post.id}</span>
-                <StatusPill status={post.status}/>
+                <StatusPill status={post.status} label="Published"/>
               </div>
               {post.title ? <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 7 }}>{post.title}</div> : null}
               {post.topic ? <div className="form-help" style={{ marginBottom: 9 }}>{post.topic}</div> : null}
