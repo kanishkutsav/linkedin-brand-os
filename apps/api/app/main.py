@@ -97,7 +97,33 @@ async def lifespan(app: FastAPI):
             column["name"] for column in inspect(sync_conn).get_columns("user_profiles")
         })
         if "experience_years" not in columns:
-            await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS experience_years FLOAT"))
+            await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN experience_years FLOAT"))
+
+        # Drop the retired self-declared audience, goals and positioning fields.
+        # They are no longer part of Brand DNA and must not remain as an
+        # alternative source of user context.
+        retired_columns = {
+            "audience",
+            "goals",
+            "brand_positioning",
+        }
+        for column_name in retired_columns.intersection(columns):
+            try:
+                await conn.execute(text(f'ALTER TABLE user_profiles DROP COLUMN "{column_name}"'))
+            except Exception:
+                # Older SQLite builds may not support DROP COLUMN. The ORM
+                # schema and application queries already ignore these fields,
+                # so a deployment on such a database remains isolated and safe.
+                logger.warning("Could not drop retired user_profiles.%s", column_name)
+
+        brand_memory_columns = await conn.run_sync(lambda sync_conn: {
+            column["name"] for column in inspect(sync_conn).get_columns("brand_memory")
+        })
+        if "audience_json" in brand_memory_columns:
+            try:
+                await conn.execute(text('ALTER TABLE brand_memory DROP COLUMN "audience_json"'))
+            except Exception:
+                logger.warning("Could not drop retired brand_memory.audience_json")
     agent_scheduler.start()
     yield
     await agent_scheduler.stop()
