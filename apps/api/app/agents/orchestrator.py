@@ -41,12 +41,6 @@ class AgentOrchestrator:
             profile = UserProfile(
                 id=self.profile_id,
                 display_name="User",
-                professional_title="Technical Project Manager",
-                industry="Technology",
-                audience="technology and business leaders",
-                goals="Build professional authority",
-                brand_positioning="Practical technology, AI, delivery and leadership insights",
-                tone="practical, direct, credible",
                 role="owner",
             )
             self.session.add(profile)
@@ -138,9 +132,7 @@ class AgentOrchestrator:
                 "name": profile.display_name,
                 "title": profile.professional_title,
                 "industry": profile.industry,
-                "audience": profile.audience,
-                "goals": profile.goals,
-                "positioning": profile.brand_positioning,
+                "experience_years": profile.experience_years,
                 "tone": profile.tone,
                 "brand_intelligence": brand_context,
             },
@@ -192,13 +184,12 @@ class AgentOrchestrator:
             angle = "Focus on the practical tradeoffs behind the topic."
             claims = []
             confidence = "low"
-            audience = profile.audience or "professional audience"
             body = (
                 f"{title}\n\n"
                 f"A practical way to think about {topic.lower()} is to start with the "
                 f"business problem, make the workflow explicit, and separate assumptions "
                 f"from evidence.\n\n"
-                f"For {audience}, three questions are useful:\n"
+                f"Three questions are useful:\n"
                 f"1. What is the actual bottleneck?\n"
                 f"2. Which part can be standardized or automated safely?\n"
                 f"3. What should remain under human review?\n\n"
@@ -282,8 +273,6 @@ class AgentOrchestrator:
 
     async def run_discovery(self, trigger: str = "scheduled_daily") -> dict:
         profile = await self._profile()
-        goal = profile.goals or "professional authority"
-        audience = profile.audience or "technology and business leaders"
         opportunities = await ResearchService(self.session).research_and_rank(profile_id=profile.id, candidate_limit=8)
 
         created: list[int] = []
@@ -316,8 +305,6 @@ class AgentOrchestrator:
 
     async def run_calendar(self, trigger: str = "scheduled_calendar") -> dict:
         profile = await self._profile()
-        goal = profile.goals or "professional authority"
-        audience = profile.audience or "technology and business leaders"
         opportunities = await ResearchService(self.session).research_and_rank(profile_id=profile.id, candidate_limit=6)
 
         created: list[int] = []
@@ -362,7 +349,7 @@ class AgentOrchestrator:
         # Build a deterministic, brand-grounded topic seed from persisted
         # positioning and recent source posts. The LLM then turns it into the
         # actual post; no unsupported personal facts are introduced.
-        positioning = profile.brand_positioning or "practical technology and leadership insights"
+        positioning = profile.professional_title or profile.industry or "professional expertise"
         recent_topics = []
         for post in historical:
             text = (post.body or "").strip().replace("\n", " ")
@@ -481,7 +468,6 @@ class AgentOrchestrator:
     async def run_event(self, event_type: str, payload: dict | None = None) -> dict:
         payload = payload or {}
         profile = await self._profile()
-        audience = profile.audience or "technology and business leaders"
         requested_topic = str(payload.get("topic") or "").strip() or None
 
         opportunities = await ResearchService(self.session).research_and_rank(
@@ -509,7 +495,6 @@ class AgentOrchestrator:
         return {
             "mode": "event",
             "event_type": event_type,
-            "audience": audience,
             "selected_opportunity": selected,
             "created_content_ids": [item_id] if item_id else [],
             "created_count": 1 if item_id else 0,
