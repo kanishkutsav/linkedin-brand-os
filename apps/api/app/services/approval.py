@@ -262,7 +262,7 @@ class ApprovalService:
         if not profile:
             raise ValueError("Brand profile not found")
 
-        brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id)
+        brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id, query=f"{item.topic if item else 'professional insight'} {feedback or ''}".strip())
         voice_result = await self.session.execute(select(VoiceMemory).where(VoiceMemory.profile_id == profile.id).limit(1))
         voice = voice_result.scalar_one_or_none()
         voice_context = {
