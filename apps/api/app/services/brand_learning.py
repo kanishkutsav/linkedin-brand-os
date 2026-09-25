@@ -30,7 +30,7 @@ class BrandLearningService:
     and processed asynchronously by the existing scheduler.
     """
 
-    EMBEDDING_MODEL = "gemini-embedding-001"
+    EMBEDDING_MODEL = settings.learning_embedding_model
     EMBEDDING_DIMENSIONS = 768
 
     def __init__(self, session: AsyncSession):
