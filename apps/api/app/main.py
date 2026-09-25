@@ -97,7 +97,7 @@ async def lifespan(app: FastAPI):
             column["name"] for column in inspect(sync_conn).get_columns("user_profiles")
         })
         if "experience_years" not in columns:
-            await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN experience_years FLOAT"))
+            await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS experience_years FLOAT"))
     agent_scheduler.start()
     yield
     await agent_scheduler.stop()
