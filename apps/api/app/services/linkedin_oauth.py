@@ -122,6 +122,39 @@ def _best_effort_profile(access_token: str, userinfo: dict, id_token: str | None
     return profile
 
 
+def _infer_industry_from_profile(profile: dict) -> str | None:
+    """Infer a broad industry only when LinkedIn does not return one.
+
+    This keeps onboarding fully automatic without pretending an inferred value
+    is a LinkedIn field. The inference is intentionally conservative and based
+    only on the member's returned headline/title text.
+    """
+    headline = " ".join(
+        str(profile.get(key) or "")
+        for key in ("headline", "localizedHeadline")
+    ).strip().lower()
+    if not headline:
+        return None
+    groups = [
+        ("Software & Technology", ("software", "developer", "engineering", "engineer", "saas", "technology", "tech ", "data scientist", "machine learning", "artificial intelligence", " ai ")),
+        ("Marketing & Communications", ("marketing", "brand", "communications", "content", "growth", "seo", "public relations", "pr ")),
+        ("Sales", ("sales", "account executive", "business development", "revenue", "partnerships")),
+        ("Finance", ("finance", "financial", "banking", "investment", "investor", "accounting", "accountant", "wealth")),
+        ("Human Resources", ("human resources", "hr ", "people operations", "talent acquisition", "recruiting", "recruiter")),
+        ("Consulting", ("consultant", "consulting", "advisor", "advisory")),
+        ("Product", ("product manager", "product management", "product lead", "product director")),
+        ("Design", ("designer", "design lead", "ux ", "ui ", "user experience", "user interface")),
+        ("Legal", ("lawyer", "attorney", "legal counsel", "legal")),
+        ("Healthcare", ("healthcare", "health care", "doctor", "physician", "medical", "nurse", "clinical")),
+        ("Education", ("teacher", "professor", "education", "educator", "academic")),
+        ("Operations", ("operations", "supply chain", "procurement", "logistics")),
+    ]
+    for label, terms in groups:
+        if any(term in headline for term in terms):
+            return label
+    return None
+
+
 def _localized_value(value: object) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
@@ -224,6 +257,7 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
         or profile_data.get("localizedIndustry")
         or _localized_value(profile_data.get("industry"))
         or _localized_value(profile_data.get("localizedIndustry"))
+        or _infer_industry_from_profile(profile_data)
     )
     vanity_name = profile_data.get("vanityName")
     profile_url = (
