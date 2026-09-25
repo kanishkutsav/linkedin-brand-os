@@ -140,15 +140,13 @@ class ImproveContentRequest(BaseModel):
 class StrategyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    goal: str
-    audience: str
+    focus: str
 
 
 class ResearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     topic: str | None = None
-    audience: str | None = None
     sources: list[dict[str, str]] = Field(default_factory=list)
 
 
@@ -652,7 +650,7 @@ async def recommend_strategy(
     req: StrategyRequest,
     current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
-    return ContentStrategyService().recommend(req.goal, req.audience)
+    return ContentStrategyService().recommend(req.focus)
 
 
 @app.post("/api/research/discover")
@@ -691,7 +689,6 @@ async def build_research_evidence(
 ):
     return ResearchService(session).build_evidence_pack(
         req.topic or "",
-        req.audience or "",
         req.sources,
     )
 
