@@ -376,6 +376,7 @@ class ApprovalService:
         approval.publish_started_at = None
         if result.success:
             approval.published_external_id = result.external_id
+            approval.published_image_urn = getattr(result, "image_urn", None)
             item = await self.session.get(ContentItem, version.content_id)
             if item:
                 item.status = "PUBLISHED"
