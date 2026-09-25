@@ -76,7 +76,7 @@ class ContentVersion(Base):
     __tablename__ = "content_versions"
     id: Mapped[int] = mapped_column(primary_key=True)
     content_id: Mapped[int] = mapped_column(Integer)
-    body: Mapped[str] = mapped_column(Text)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64))
     version_number: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
