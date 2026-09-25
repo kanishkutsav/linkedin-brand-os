@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select, update
@@ -30,19 +31,33 @@ class RetentionService:
         }
 
     async def _trim_published_history(self, session: AsyncSession) -> int:
+        pending_result = await session.execute(
+            select(LearningEvent.source_id).where(
+                LearningEvent.event_type == "CONTENT_PUBLISHED",
+                LearningEvent.status != "PROCESSED",
+            )
+        )
+        pending_publish_ids = {str(value) for (value,) in pending_result.all() if value is not None}
+
         result = await session.execute(
-            select(HistoricalPost.id, HistoricalPost.profile_id)
+            select(HistoricalPost.id, HistoricalPost.profile_id, HistoricalPost.metadata_json)
             .where(HistoricalPost.source == "brand_os_publish")
             .order_by(HistoricalPost.profile_id.asc(), HistoricalPost.published_at.desc().nullslast(), HistoricalPost.id.desc())
         )
         keep_count: dict[int, int] = {}
         trim_ids: list[int] = []
-        for post_id, profile_id in result.all():
+        for post_id, profile_id, metadata_json in result.all():
             profile_id = int(profile_id)
             current = keep_count.get(profile_id, 0)
             if current < settings.published_post_retention_limit:
                 keep_count[profile_id] = current + 1
             else:
+                try:
+                    approval_id = str(json.loads(metadata_json or "{}").get("approval_id") or "")
+                except (TypeError, ValueError):
+                    approval_id = ""
+                if approval_id and approval_id in pending_publish_ids:
+                    continue
                 trim_ids.append(int(post_id))
 
         for start in range(0, len(trim_ids), 500):
@@ -57,6 +72,14 @@ class RetentionService:
         return len(trim_ids)
 
     async def _trim_old_content_versions(self, session: AsyncSession) -> int:
+        pending_result = await session.execute(
+            select(LearningEvent.source_id).where(
+                LearningEvent.event_type == "CONTENT_PUBLISHED",
+                LearningEvent.status != "PROCESSED",
+            )
+        )
+        pending_publish_ids = {str(value) for (value,) in pending_result.all() if value is not None}
+
         result = await session.execute(
             select(
                 ApprovalRequest.id,
@@ -74,12 +97,14 @@ class RetentionService:
         )
         keep_count: dict[int, int] = {}
         trim_version_ids: list[int] = []
-        for _, version_id, profile_id in result.all():
+        for approval_id, version_id, profile_id in result.all():
             profile_id = int(profile_id)
             current = keep_count.get(profile_id, 0)
             if current < settings.published_post_retention_limit:
                 keep_count[profile_id] = current + 1
             else:
+                if str(approval_id) in pending_publish_ids:
+                    continue
                 trim_version_ids.append(int(version_id))
 
         for start in range(0, len(trim_version_ids), 500):
