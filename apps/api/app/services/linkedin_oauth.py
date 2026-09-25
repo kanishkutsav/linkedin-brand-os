@@ -4,6 +4,7 @@ import json
 import secrets
 import urllib.parse
 import base64
+import os
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -156,6 +157,10 @@ async def build_authorization_url(session: AsyncSession, browser_nonce: str | No
     # headline and public-profile fields. It is only effective when the
     # application has been granted the corresponding LinkedIn product access.
     scopes = ["openid", "profile", "email", "w_member_social"]
+    # r_basicprofile is only available when the app has approved Advertising or
+    # Community Management access. Keep it opt-in so ordinary OIDC sign-in remains valid.
+    if os.getenv("LINKEDIN_BASIC_PROFILE_OAUTH_ENABLED", "").lower() in {"1", "true", "yes"}:
+        scopes.append("r_basicprofile")
     if settings.linkedin_analytics_oauth_enabled:
         scopes.extend(["r_member_postAnalytics", "r_member_profileAnalytics"])
 
