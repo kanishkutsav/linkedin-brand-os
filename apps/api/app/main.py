@@ -21,7 +21,7 @@ from app.agents.strategy import ContentStrategyService
 from app.agents.voice import VoiceProfileBuilder
 from app.auth import require_roles
 from app.core.config import settings
-from app.db.database import engine, get_session, SessionLocal
+from app.db.database import engine, get_session
 from app.services.brand_intelligence import BrandIntelligenceService
 from app.guards.guardrails import normalize_human_style, run_content_guards
 from app.integrations.linkedin import OfficialLinkedInAdapter
