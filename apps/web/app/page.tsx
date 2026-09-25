@@ -234,6 +234,37 @@ useEffect(() => {
         }
       }
 
+      // A newly connected user should never be left in a manual "build" state.
+      // Once LinkedIn is connected, initialize Brand DNA automatically from the
+      // synced LinkedIn profile. Historical posts remain optional enrichment.
+      if (linkedinRes.ok && brandJson.status !== 'READY') {
+        try {
+          const initializeRes = await fetch(API_BASE + '/api/brand/initialize', {
+            method: 'POST',
+            headers: { ...headers(authToken), 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              display_name: profileJson.display_name || 'User',
+            }),
+          });
+          if (initializeRes.ok) {
+            const initialized = await initializeRes.json().catch(() => ({}));
+            if (initialized.brand_memory) {
+              brandJson = {
+                ...brandJson,
+                ...initialized.brand_memory,
+                status: initialized.brand_memory.status || 'READY',
+                ready: initialized.brand_memory.status === 'READY',
+              };
+            }
+            const refreshedBrandRes = await fetch(API_BASE + '/api/brand/status', { headers: headers(authToken) });
+            if (refreshedBrandRes.ok) brandJson = await refreshedBrandRes.json();
+          }
+        } catch {
+          // Do not block the workspace if the LLM provider is temporarily unavailable.
+          // The user can retry Build Brand DNA later.
+        }
+      }
+
       setBrand(brandJson);
       const p = brandJson.profile || {};
       setBrandTitle(p.professional_title || '');
