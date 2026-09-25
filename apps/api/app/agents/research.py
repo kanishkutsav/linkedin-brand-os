@@ -208,6 +208,12 @@ class ResearchService:
             for item in (learning_memory.get("memories") or [])
             if item.get("type") in {"topic", "interest"} and str(item.get("content") or "").strip()
         ][:2]
+        semantic_interest_queries = [
+            str(item.get("content") or "").strip()[:240]
+            for item in (learning_memory.get("semantic_matches") or {}).get("memories", [])
+            if str(item.get("content") or "").strip()
+        ][:2]
+        learned_queries = list(dict.fromkeys(learned_queries + semantic_interest_queries))[:3]
         recent_content_result = await self.session.execute(
             select(ContentItem.topic, ContentItem.created_at)
             .where(ContentItem.profile_id == profile_id)
