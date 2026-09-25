@@ -372,6 +372,12 @@ useEffect(() => {
         window.localStorage.removeItem(`brand-os-regeneration-feedback:${selectedApproval.id}`);
         setReviewNote('');
       }
+      if (action === 'approve') {
+        window.localStorage.removeItem(`brand-os-regeneration-feedback:${selectedApproval.id}`);
+        setReviewNote('');
+        setStatusFilter('APPROVED');
+      }
+      if (action === 'execute') setStatusFilter('EXECUTED');
       setOperationProgress(action === 'approve' || action === 'execute' ? 82 : 88);
       setOperationStage(action === 'regenerate' ? 'Refreshing the approval queue…' : 'Refreshing the workspace…');
       await fetchData();
@@ -387,8 +393,6 @@ useEffect(() => {
               ? 'Published to LinkedIn successfully.'
               : 'Action completed successfully.'
       );
-      if (action === 'approve') setStatusFilter('APPROVED');
-      if (action === 'execute') setStatusFilter('EXECUTED');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Approval action failed');
     } finally {
