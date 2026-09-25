@@ -70,8 +70,10 @@ class ResearchService:
             queries.append(requested_topic)
         if profile.industry:
             queries.append(f"{profile.industry} technology business")
-        if profile.brand_positioning:
-            queries.append(profile.brand_positioning)
+        if profile.professional_title:
+            queries.append(profile.professional_title)
+        if profile.experience_years is not None:
+            queries.append(f"{profile.industry or 'professional'} {profile.experience_years:g} years experience")
         if not queries:
             queries = ["technology business leadership AI"]
 
