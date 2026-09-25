@@ -730,6 +730,7 @@ function LoginScreen({ error, onConnect }: { error: string | null; onConnect: ()
           <div className="page-kicker"><ShieldCheck size={13}/> Secure official connection</div>
           <h2 style={{ fontFamily: 'Space Grotesk', fontSize: 29, letterSpacing: '-.04em', margin: '10px 0 8px' }}>Connect LinkedIn</h2>
           <p style={{ color: '#667085', fontSize: 13, lineHeight: 1.6, margin: 0 }}>Brand OS uses LinkedIn's official OAuth flow. Your LinkedIn password is never entered into Brand OS.</p>
+           <p style={{ color: '#667085', fontSize: 11, lineHeight: 1.55, margin: '10px 0 0' }}>You'll authenticate securely on LinkedIn. If you're already signed in, LinkedIn may take you straight in.</p>
           {error && <div className="notice error" style={{ marginTop: 16 }}><X size={15}/><span>{error}</span></div>}
           <button className="button primary" style={{ width: '100%', minHeight: 46, marginTop: 24 }} onClick={onConnect}><LinkedInMark size={18}/> Continue with LinkedIn</button>
           <div style={{ marginTop: 17, padding: 12, borderRadius: 12, background: '#f8f9fb', color: '#667085', fontSize: 10, lineHeight: 1.55 }}>OAuth permissions requested are limited to supported identity and posting capabilities. External actions remain behind the approval gate.</div>
