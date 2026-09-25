@@ -111,7 +111,11 @@ async def build_authorization_url(session: AsyncSession, browser_nonce: str | No
     )
     await session.commit()
 
-    scopes = ["openid", "profile", "email", "w_member_social"]
+    # OIDC provides the identity baseline. r_basicprofile is additionally
+    # requested because LinkedIn's Profile API uses it for authenticated-member
+    # headline and public-profile fields. It is only effective when the
+    # application has been granted the corresponding LinkedIn product access.
+    scopes = ["openid", "profile", "email", "w_member_social", "r_basicprofile"]
     if settings.linkedin_analytics_oauth_enabled:
         scopes.extend(["r_member_postAnalytics", "r_member_profileAnalytics"])
 
