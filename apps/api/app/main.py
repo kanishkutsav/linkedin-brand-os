@@ -876,6 +876,13 @@ async def create_draft(
     current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     profile = await AuthService.get_or_create_profile(session, current_user)
+    if (
+        not profile.professional_title
+        or not profile.industry
+        or not profile.tone
+        or profile.experience_years is None
+    ):
+        raise HTTPException(status_code=400, detail="Complete Professional Title, Industry, Desired Tone and Years of Experience before creating content.")
     brand_memory = await BrandIntelligenceService(session).get_memory(profile.id)
     if brand_memory is None or brand_memory.status != "READY":
         raise HTTPException(status_code=400, detail="Complete Brand DNA setup before creating content.")
