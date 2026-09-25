@@ -225,12 +225,14 @@ useEffect(() => {
             method: 'POST',
             headers: headers(authToken),
           });
-          if (syncRes.ok) {
-            const refreshedBrandRes = await fetch(API_BASE + '/api/brand/status', { headers: headers(authToken) });
-            if (refreshedBrandRes.ok) brandJson = await refreshedBrandRes.json();
+          const syncJson = await syncRes.json().catch(() => ({}));
+          if (!syncRes.ok) {
+            throw new Error(getApiError(syncJson, 'LinkedIn profile sync failed. Please reconnect LinkedIn.'));
           }
-        } catch {
-          // Profile sync is best-effort. Existing Brand DNA remains usable.
+          const refreshedBrandRes = await fetch(API_BASE + '/api/brand/status', { headers: headers(authToken) });
+          if (refreshedBrandRes.ok) brandJson = await refreshedBrandRes.json();
+        } catch (syncError) {
+          setError(syncError instanceof Error ? syncError.message : 'LinkedIn profile sync failed. Please reconnect LinkedIn.');
         }
       }
 
