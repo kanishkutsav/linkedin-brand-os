@@ -971,6 +971,16 @@ async def create_draft(
     await session.commit()
     await session.refresh(version)
 
+    await BrandLearningService(session).record_event(
+        profile_id=profile.id,
+        event_type="CONTENT_DRAFT",
+        source_type="manual_content",
+        source_id=version.id,
+        content=req.body,
+        metadata={"title": req.title, "topic": req.topic, "guard_passed": guard.passed},
+    )
+    await session.commit()
+
     approval = None
     if guard.passed:
         approval = await ApprovalService(session).request(version)
