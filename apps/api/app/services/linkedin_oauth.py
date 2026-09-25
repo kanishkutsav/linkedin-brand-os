@@ -61,19 +61,18 @@ def _best_effort_profile(access_token: str, userinfo: dict) -> dict:
     authentication.
     """
     profile = dict(userinfo or {})
+    profile_api_error = None
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Linkedin-Version": settings.linkedin_api_version,
+        "X-Restli-Protocol-Version": "2.0.0",
+    }
     try:
-        # Keep this projection limited to fields documented as part of
-        # LinkedIn's authenticated-member basic profile. Including fields such
-        # as industryId/industryName in this projection can make the entire
-        # /v2/me request fail for an app that only has r_basicprofile access,
-        # which would incorrectly hide the headline too.
+        # Keep this projection limited to LinkedIn's documented authenticated-
+        # member basic profile fields. Industry is not part of r_basicprofile.
         member = _request_json(
             "https://api.linkedin.com/v2/me?projection=(id,headline,localizedHeadline,vanityName)",
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Linkedin-Version": settings.linkedin_api_version,
-                "X-Restli-Protocol-Version": "2.0.0",
-            },
+            headers=headers,
             timeout=5,
         )
         if isinstance(member, dict):
@@ -81,10 +80,27 @@ def _best_effort_profile(access_token: str, userinfo: dict) -> dict:
                 if key not in profile or not profile.get(key):
                     profile[key] = value
     except HTTPException as exc:
-        # OIDC identity remains usable when the Profile API permission is not
-        # available. Keep the failure visible in server logs rather than
-        # silently making the UI look like LinkedIn returned an empty profile.
-        logger.warning("LinkedIn basic profile lookup unavailable: %s", exc.detail)
+        profile_api_error = exc.detail
+        # Retry the documented current-member endpoint without a projection.
+        # This protects us from projection/version differences while preserving
+        # the same authenticated-member permission boundary.
+        try:
+            member = _request_json(
+                "https://api.linkedin.com/v2/me",
+                headers=headers,
+                timeout=5,
+            )
+            if isinstance(member, dict):
+                for key, value in member.items():
+                    if key not in profile or not profile.get(key):
+                        profile[key] = value
+                profile_api_error = None
+        except HTTPException as fallback_exc:
+            profile_api_error = fallback_exc.detail
+            logger.warning("LinkedIn basic profile lookup unavailable: %s", fallback_exc.detail)
+
+    if profile_api_error:
+        profile["_linkedin_profile_api_error"] = profile_api_error
     return profile
 
 
