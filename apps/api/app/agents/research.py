@@ -155,7 +155,8 @@ class ResearchService:
                 excerpt = html.unescape(description_match.group(1)).strip() if description_match else ""
 
             if excerpt:
-                return source | {"source_excerpt": excerpt}
+                canonical_url = str(response.url) or url
+                return source | {"url": canonical_url, "source_excerpt": excerpt}
         except Exception:
             pass
         return source
