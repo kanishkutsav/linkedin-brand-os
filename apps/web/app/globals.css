@@ -435,6 +435,7 @@ a { color: inherit; }
 
 
 /* Mobile app shell + install experience */
+/* Production deploy verification marker */
 .mobile-bottom-nav,
 .mobile-more-backdrop,
 .mobile-more-sheet,
