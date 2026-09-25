@@ -204,7 +204,7 @@ class ResearchService:
         historical = await brand.get_posts(profile_id, limit=12)
         learning_memory = context.get("learning_memory") or {}
         learned_queries = [
-            str(item.get("content") or "").strip()
+            str(item.get("content") or "").strip()[:240]
             for item in (learning_memory.get("memories") or [])
             if item.get("type") in {"topic", "interest"} and str(item.get("content") or "").strip()
         ][:2]
