@@ -7,7 +7,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LearningEvent
+from app.models.models import ApprovalRequest, ContentItem, ContentVersion, FeedbackEntry, HistoricalPost, LearningEvent
 
 
 class RetentionService:
@@ -23,11 +23,13 @@ class RetentionService:
         published_trimmed = await self._trim_published_history(session)
         workflow_trimmed = await self._trim_old_content_versions(session)
         learning_events_deleted = await self._delete_processed_learning_events(session)
+        feedback_payloads_trimmed = await self._trim_old_feedback_payloads(session)
         await session.commit()
         return {
             "published_history_bodies_trimmed": published_trimmed,
             "workflow_bodies_trimmed": workflow_trimmed,
             "processed_learning_events_deleted": learning_events_deleted,
+            "old_feedback_payloads_trimmed": feedback_payloads_trimmed,
         }
 
     async def _trim_published_history(self, session: AsyncSession) -> int:
@@ -134,5 +136,17 @@ class RetentionService:
                 LearningEvent.processed_at.is_not(None),
                 LearningEvent.processed_at < cutoff,
             )
+        )
+        return int(result.rowcount or 0)
+
+    async def _trim_old_feedback_payloads(self, session: AsyncSession) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=settings.learning_event_retention_days)
+        result = await session.execute(
+            update(FeedbackEntry)
+            .where(
+                FeedbackEntry.created_at < cutoff,
+                FeedbackEntry.payload.is_not(None),
+            )
+            .values(payload=None)
         )
         return int(result.rowcount or 0)
