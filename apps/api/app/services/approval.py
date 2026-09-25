@@ -86,7 +86,16 @@ class ApprovalService:
 
     async def approve(self, approval_id: int, profile_id: int):
         approval = await self._get_owned_approval(approval_id, profile_id)
-        if not approval or approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
+        if not approval:
+            raise ValueError("Approval not found")
+        # Approval is idempotent: once a reviewer approves a version, repeated
+        # clicks/retries return the existing approval instead of reopening or
+        # mutating the locked content.
+        if approval.status == "APPROVED":
+            return approval
+        if approval.status in {"EXECUTED", "PUBLISHING"}:
+            raise ValueError("This post has already been approved and is locked.")
+        if approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
             raise ValueError("Approval is not in an approvable state")
         if approval.expires_at and approval.expires_at <= datetime.now(timezone.utc):
             approval.status = "EXPIRED"
