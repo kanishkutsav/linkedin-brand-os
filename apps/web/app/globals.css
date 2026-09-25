@@ -331,10 +331,9 @@ a { color: inherit; }
   .metrics { grid-template-columns: repeat(3,1fr); }
 }
 @media (max-width: 760px) {
-  .sidebar { position: fixed; left: -270px; width: 252px; min-width: 252px; transition: left .22s ease; box-shadow: 20px 0 50px rgba(16,24,40,.18); }
-  .sidebar.open { left: 0; }
-  .mobile-menu { display: grid; place-items: center; }
-  .mobile-overlay { display: block; position: fixed; inset: 0; z-index: 25; background: rgba(5,10,22,.42); backdrop-filter: blur(3px); }
+  .sidebar { display: none; }
+  .mobile-menu { display: none; }
+  .mobile-overlay { display: none; }
   .topbar { padding: 0 15px; height: 62px; }
   .topbar .eyebrow { display: none; }
   .page { padding: 18px 14px 28px; }
