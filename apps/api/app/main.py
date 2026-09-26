@@ -323,7 +323,7 @@ async def linkedin_oauth_callback(
             url=f"{(settings.frontend_url or 'http://localhost:3000').rstrip('/')}/?linkedin_error=authorization_denied",
             status_code=302,
         )
-        response.delete_cookie("brand_os_oauth_state", path="/api")
+        response.delete_cookie("brand_os_oauth_state", path="/")
         return response
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing LinkedIn OAuth code or state.")
@@ -339,7 +339,11 @@ async def linkedin_oauth_callback(
 
     browser_nonce = state.split(".", 1)[0] if "." in state else None
     exchange = await handle_callback(session, code, state)
-    frontend = (settings.frontend_url or "http://localhost:3000").rstrip("/")
+    frontend = (
+        "https://linkedin-brand-os-alpha.vercel.app"
+        if settings.is_production
+        else (settings.frontend_url or "http://localhost:3000")
+    ).rstrip("/")
     nonce_suffix = f"&oauth_nonce={browser_nonce}" if browser_nonce else ""
     response = RedirectResponse(url=f"{frontend}/?linkedin_code={exchange}{nonce_suffix}", status_code=302)
     # Keep the short-lived state cookie until the browser exchanges the one-time
@@ -353,17 +357,16 @@ async def linkedin_oauth_exchange(
     req: LinkedInExchangeRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    browser_nonce = request.cookies.get("brand_os_oauth_state", "").split(".", 1)[0]
-    if not browser_nonce:
-        raise HTTPException(status_code=400, detail="LinkedIn exchange is not bound to the initiating browser.")
-    # The frontend sends the nonce it received in the callback URL. The cookie
-    # contains the exact state generated for the same browser.
-    oauth_nonce = req.oauth_nonce
-    if not oauth_nonce or oauth_nonce != browser_nonce:
-        raise HTTPException(status_code=400, detail="LinkedIn exchange browser verification failed.")
+    # The exchange code is a short-lived, single-use server-side credential
+    # created only after LinkedIn has validated the OAuth state and member
+    # identity. Do not require the original browser cookie here: mobile
+    # browsers can legitimately drop cross-site cookies during the LinkedIn
+    # -> Brand OS redirect.
+    if not req.oauth_nonce:
+        raise HTTPException(status_code=400, detail="LinkedIn exchange is missing the browser nonce.")
     result = await exchange_code(session, req.code)
     response = JSONResponse(result)
-    response.delete_cookie("brand_os_oauth_state", path="/api")
+    response.delete_cookie("brand_os_oauth_state", path="/")
     return response
 
 
