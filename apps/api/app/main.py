@@ -135,9 +135,14 @@ async def lifespan(app: FastAPI):
                 await conn.execute(text('ALTER TABLE brand_memory DROP COLUMN "audience_json"'))
             except Exception:
                 logger.warning("Could not drop retired brand_memory.audience_json")
-    agent_scheduler.start()
+    # Vercel functions are ephemeral. Supabase Cron owns scheduled execution
+    # in the Vercel deployment, so never start an in-process scheduler there.
+    vercel_runtime = os.getenv("VERCEL", "").lower() == "1"
+    if settings.agent_in_process_schedule_enabled and not vercel_runtime:
+        agent_scheduler.start()
     yield
-    await agent_scheduler.stop()
+    if settings.agent_in_process_schedule_enabled and not vercel_runtime:
+        await agent_scheduler.stop()
     await engine.dispose()
 
 
@@ -258,6 +263,22 @@ async def health() -> dict[str, object]:
         "agent_enabled": settings.agent_enabled,
         "agent_modes": ["daily_discovery", "event_driven", "scheduled_calendar"],
     }
+
+
+@app.get("/health/ready")
+async def readiness() -> dict[str, object]:
+    """Dependency-aware readiness probe for controlled Render fallback/cutover."""
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return {
+            "status": "ready",
+            "database": "ok",
+            "environment": settings.environment,
+        }
+    except Exception:
+        logger.exception("Readiness check failed")
+        raise HTTPException(status_code=503, detail="Service dependencies are not ready")
 
 
 @app.get("/api/auth/linkedin/start")
@@ -693,8 +714,38 @@ async def run_scheduled_job(
     job_name: str,
     _: None = Depends(_require_scheduled_job_key),
 ):
-    if job_name not in {"discovery", "calendar", "retention"}:
+    jobs = ScheduledJobs(SessionLocal)
+    if job_name not in {"discovery", "calendar", "retention", "learning"}:
         raise HTTPException(status_code=404, detail="Unknown scheduled job.")
+
+    if job_name == "learning":
+        if settings.durable_learning_worker_enabled:
+            local_date = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+            async with SessionLocal() as session:
+                job = await enqueue_job(
+                    session,
+                    job_type="brand_learning_event",
+                    payload={"scheduled_date": local_date},
+                    idempotency_key=f"scheduled:learning:{local_date}",
+                )
+                await session.commit()
+            return {
+                "ok": True,
+                "job": job_name,
+                "accepted": True,
+                "queued": True,
+                "job_id": job.id if job else None,
+            }
+
+        async with SessionLocal() as session:
+            try:
+                processed = await jobs.process_learning(session, limit=50)
+                await session.commit()
+                logger.info("Scheduled learning job completed: processed=%s", processed)
+            except Exception:
+                await session.rollback()
+                logger.exception("Scheduled learning job failed.")
+        return
 
     if settings.durable_scheduled_worker_enabled:
         local_date = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
@@ -1113,8 +1164,8 @@ async def execute_approval(
             image_bytes = await image.read()
             if not image_bytes:
                 raise ValueError("The selected image is empty.")
-            if len(image_bytes) > 10 * 1024 * 1024:
-                raise ValueError("Image must be 10 MB or smaller.")
+            if len(image_bytes) > 4 * 1024 * 1024:
+                raise ValueError("Image must be 4 MB or smaller.")
 
         publish_adapter = OfficialLinkedInAdapter(connection.access_token, connection.member_sub)
         publish_result = await ApprovalService(session).execute(
@@ -1124,15 +1175,58 @@ async def execute_approval(
             image_bytes=image_bytes,
             image_mime=image_mime,
         )
+        # Return a durable publication confirmation so the UI can render
+        # success without inferring it from a transient HTTP response.
+        result = await session.execute(
+            select(ApprovalRequest).where(ApprovalRequest.id == approval_id)
+        )
+        saved_approval = result.scalar_one_or_none()
         return {
             "id": approval_id,
             "status": "EXECUTED" if publish_result.success else "APPROVED",
             "published": publish_result.success,
             "external_id": publish_result.external_id,
+            "image_urn": getattr(publish_result, "image_urn", None),
+            "published_at": saved_approval.published_at if saved_approval else None,
             "message": publish_result.message,
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/approvals/{approval_id}/publication")
+async def publication_confirmation(
+    approval_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin", "reviewer", "owner", "user")),
+):
+    """Return the durable publication result for a user-owned approval."""
+    result = await session.execute(
+        select(ApprovalRequest)
+        .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
+        .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+        .where(
+            ApprovalRequest.id == approval_id,
+            ContentItem.profile_id == int(current_user.id),
+        )
+    )
+    approval = result.scalar_one_or_none()
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+
+    return {
+        "id": approval.id,
+        "status": approval.status,
+        "published": approval.status == "EXECUTED",
+        "external_id": approval.published_external_id,
+        "image_urn": approval.published_image_urn,
+        "published_at": approval.published_at,
+        "message": (
+            "Published to LinkedIn."
+            if approval.status == "EXECUTED"
+            else "This post has not been published to LinkedIn."
+        ),
+    }
 
 
 @app.post("/api/approvals/{approval_id}/edit")
