@@ -37,6 +37,7 @@ def redirect_uri() -> str:
         # Keep production LinkedIn OAuth on the original stable Brand OS URL.
         return "https://linkedin-brand-os-alpha.vercel.app/api/auth/linkedin/callback"
     # The alpha hostname is the canonical production Brand OS URL.
+    # Production deploy trigger: keep OAuth hostname stable across Vercel aliases.
     if settings.linkedin_redirect_uri:
         return settings.linkedin_redirect_uri.rstrip("/")
     base = (settings.api_base_url or settings.render_external_url or "").rstrip("/")
