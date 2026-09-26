@@ -1,0 +1,114 @@
+name: Phase 2 QA
+# CI verification trigger: keep this workflow on every QA-main change.
+
+on:
+  push:
+    branches: ["main", "phase2-qa", "phase6-durable-worker-complete", "phase7-8-qa"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      PYTHONPATH: ${{ github.workspace }}/apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
+      - name: Compile Python
+        run: python -m compileall -q app tests
+      - name: Run backend tests
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./qa.db
+          SCHEDULED_JOB_KEY: qa-test-key
+        run: pytest -q tests
+
+  scheduler-sql:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Phase 2 migration shape
+        run: |
+          test -s supabase/migrations/20260925_phase2_scheduler.sql
+          grep -q "brand-os-daily-discovery" supabase/migrations/20260925_phase2_scheduler.sql
+          grep -q "brand-os-calendar-generation" supabase/migrations/20260925_phase2_scheduler.sql
+          grep -q "brand-os-daily-retention" supabase/migrations/20260925_phase2_scheduler.sql
+          grep -q "brand_os_render_url" supabase/migrations/20260925_phase2_scheduler.sql
+          grep -q "brand_os_job_key" supabase/migrations/20260925_phase2_scheduler.sql
+          grep -q "X-Brand-OS-Job-Key" supabase/migrations/20260925_phase2_scheduler.sql
+          test -s supabase/migrations/20260925_phase2_scheduler_rollback.sql
+
+  runtime-3-14:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Compile application under production Python
+        working-directory: apps/api
+        run: python -m compileall -q app tests
+
+  durable-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Phase 6 durable queue migration
+        run: |
+          test -s supabase/migrations/20260926_phase6_durable_jobs.sql
+          grep -q "idempotency_key" supabase/migrations/20260926_phase6_durable_jobs.sql
+          grep -q "available_at" supabase/migrations/20260926_phase6_durable_jobs.sql
+          grep -q "locked_at" supabase/migrations/20260926_phase6_durable_jobs.sql
+          grep -q "attempts" supabase/migrations/20260926_phase6_durable_jobs.sql
+          test -s supabase/migrations/20260926_phase6_durable_jobs_rollback.sql
+
+
+  phase7-linkedin-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Phase 7 LinkedIn migration
+        run: |
+          test -s supabase/migrations/20260926_phase7_linkedin_publish.sql
+          grep -q "linkedin_connections" supabase/migrations/20260926_phase7_linkedin_publish.sql
+          grep -q "linkedin_oauth_states" supabase/migrations/20260926_phase7_linkedin_publish.sql
+          grep -q "linkedin_oauth_exchanges" supabase/migrations/20260926_phase7_linkedin_publish.sql
+          grep -q "published_external_id" supabase/migrations/20260926_phase7_linkedin_publish.sql
+          grep -q "published_image_urn" supabase/migrations/20260926_phase7_linkedin_publish.sql
+          grep -q "published_at" supabase/migrations/20260926_phase7_linkedin_publish.sql
+          test -s supabase/migrations/20260926_phase7_linkedin_publish_rollback.sql
+          test -s apps/api/app/db/migrations/20260926_phase7_linkedin_publish.sql
+          test -s apps/api/app/db/migrations/20260926_phase7_linkedin_publish_rollback.sql
+
+  phase8-cutover-artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Phase 8 cutover gates
+        run: |
+          test -s docs/phase8-production-cutover.md
+          grep -q "scheduled jobs" docs/phase8-production-cutover.md
+          grep -q "Multi-user isolation" docs/phase8-production-cutover.md
+          grep -q "Render OFF procedure" docs/phase8-production-cutover.md
+          grep -q "healthCheckPath: /health/ready" render.yaml
+          test -s api/index.py
+          test -s requirements.txt
+          test -s vercel.json
+          grep -q '"outputDirectory": "apps/web/.next"' vercel.json
+          grep -q "NEXT_PUBLIC_API_URL" apps/web/app/page.tsx
+          grep -q " : '';" apps/web/app/page.tsx
+          ! grep -q "onrender.com" apps/web/vercel.json
+          test -s supabase/migrations/20260926_phase8_vercel_cutover.sql
+          test -s supabase/migrations/20260926_phase8_vercel_cutover_rollback.sql
+          grep -q "brand-os-learning-processing" supabase/migrations/20260926_phase8_vercel_cutover.sql
+          grep -q "/api/internal/scheduled-jobs/learning" supabase/migrations/20260926_phase8_vercel_cutover.sql
