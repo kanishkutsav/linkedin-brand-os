@@ -1,5 +1,27 @@
 {
   "version": 2,
-  "buildCommand": "npm run build",
-  "outputDirectory": "apps/web/.next"
+  "services": {
+    "frontend": {
+      "root": "apps/web/",
+      "framework": "nextjs"
+    },
+    "backend": {
+      "root": "apps/api/",
+      "entrypoint": "app.main:app"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": {
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "frontend"
+      }
+    }
+  ]
 }
