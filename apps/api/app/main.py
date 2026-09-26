@@ -154,6 +154,18 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def restore_vercel_api_prefix(request: Request, call_next):
+    """Vercel Services strips the public /api prefix before invoking this service."""
+    if os.getenv("VERCEL", "").lower() == "1":
+        path = request.scope.get("path", "")
+        if not path.startswith("/api"):
+            restored = "/api" + (path if path.startswith("/") else f"/{path}")
+            request.scope["path"] = restored
+            request.scope["raw_path"] = restored.encode("utf-8")
+    return await call_next(request)
+
+
 
 class DraftRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
