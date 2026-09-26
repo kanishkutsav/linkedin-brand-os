@@ -92,52 +92,46 @@ agent_scheduler = AgentScheduler(SessionLocal)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    absolute_path = _resolve_sqlite_path()
-    if _database_needs_reset() and absolute_path and os.path.exists(absolute_path):
-        os.remove(absolute_path)
+    # Vercel uses the already-migrated Supabase schema. Avoid per-invocation
+    # DDL and local SQLite file work in ephemeral functions.
+    vercel_runtime = os.getenv("VERCEL", "").lower() == "1"
+    if not vercel_runtime:
+        absolute_path = _resolve_sqlite_path()
+        if _database_needs_reset() and absolute_path and os.path.exists(absolute_path):
+            os.remove(absolute_path)
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        columns = await conn.run_sync(lambda sync_conn: {
-            column["name"] for column in inspect(sync_conn).get_columns("user_profiles")
-        })
-        if "experience_years" not in columns:
-            await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN experience_years FLOAT"))
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            columns = await conn.run_sync(lambda sync_conn: {
+                column["name"] for column in inspect(sync_conn).get_columns("user_profiles")
+            })
+            if "experience_years" not in columns:
+                await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN experience_years FLOAT"))
 
-        approval_columns = await conn.run_sync(lambda sync_conn: {
-            column["name"] for column in inspect(sync_conn).get_columns("approval_requests")
-        })
-        if "published_image_urn" not in approval_columns:
-            await conn.execute(text("ALTER TABLE approval_requests ADD COLUMN published_image_urn VARCHAR(255)"))
+            approval_columns = await conn.run_sync(lambda sync_conn: {
+                column["name"] for column in inspect(sync_conn).get_columns("approval_requests")
+            })
+            if "published_image_urn" not in approval_columns:
+                await conn.execute(text("ALTER TABLE approval_requests ADD COLUMN published_image_urn VARCHAR(255)"))
 
-        # Drop the retired self-declared audience, goals and positioning fields.
-        # They are no longer part of Brand DNA and must not remain as an
-        # alternative source of user context.
-        retired_columns = {
-            "audience",
-            "goals",
-            "brand_positioning",
-        }
-        for column_name in retired_columns.intersection(columns):
-            try:
-                await conn.execute(text(f'ALTER TABLE user_profiles DROP COLUMN "{column_name}"'))
-            except Exception:
-                # Older SQLite builds may not support DROP COLUMN. The ORM
-                # schema and application queries already ignore these fields,
-                # so a deployment on such a database remains isolated and safe.
-                logger.warning("Could not drop retired user_profiles.%s", column_name)
+            retired_columns = {"audience", "goals", "brand_positioning"}
+            for column_name in retired_columns.intersection(columns):
+                try:
+                    await conn.execute(text(f'ALTER TABLE user_profiles DROP COLUMN "{column_name}"'))
+                except Exception:
+                    logger.warning("Could not drop retired user_profiles.%s", column_name)
 
-        brand_memory_columns = await conn.run_sync(lambda sync_conn: {
-            column["name"] for column in inspect(sync_conn).get_columns("brand_memory")
-        })
-        if "audience_json" in brand_memory_columns:
-            try:
-                await conn.execute(text('ALTER TABLE brand_memory DROP COLUMN "audience_json"'))
-            except Exception:
-                logger.warning("Could not drop retired brand_memory.audience_json")
+            brand_memory_columns = await conn.run_sync(lambda sync_conn: {
+                column["name"] for column in inspect(sync_conn).get_columns("brand_memory")
+            })
+            if "audience_json" in brand_memory_columns:
+                try:
+                    await conn.execute(text('ALTER TABLE brand_memory DROP COLUMN "audience_json"'))
+                except Exception:
+                    logger.warning("Could not drop retired brand_memory.audience_json")
+
     # Vercel functions are ephemeral. Supabase Cron owns scheduled execution
     # in the Vercel deployment, so never start an in-process scheduler there.
-    vercel_runtime = os.getenv("VERCEL", "").lower() == "1"
     if settings.agent_in_process_schedule_enabled and not vercel_runtime:
         agent_scheduler.start()
     yield
