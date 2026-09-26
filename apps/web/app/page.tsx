@@ -1,3 +1,4 @@
+/* Production deployment marker: frontend and FastAPI service ship together. */
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
