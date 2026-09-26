@@ -301,9 +301,11 @@ async def linkedin_oauth_start(
         value=state,
         max_age=600,
         httponly=True,
-        secure=bool(settings.environment == "production"),
-        samesite="lax",
-        path="/api",
+        secure=settings.is_production,
+        # LinkedIn is a cross-site OAuth provider. None+Secure is supported
+        # by modern browsers and avoids embedded/mobile browser cookie loss.
+        samesite="none" if settings.is_production else "lax",
+        path="/",
     )
     return response
 
@@ -326,9 +328,14 @@ async def linkedin_oauth_callback(
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing LinkedIn OAuth code or state.")
 
+    # The server-side state record is the authoritative one-time OAuth
+    # transaction. Do not require the browser cookie here because some mobile
+    # browsers and embedded OAuth handoffs can drop cookies across the
+    # LinkedIn -> Brand OS redirect. The frontend separately validates the
+    # browser nonce before exchanging the one-time code for a Brand OS session.
     expected_state = request.cookies.get("brand_os_oauth_state") if request else None
-    if not expected_state or not secrets.compare_digest(expected_state, state):
-        raise HTTPException(status_code=400, detail="Invalid LinkedIn OAuth state.")
+    if expected_state and not secrets.compare_digest(expected_state, state):
+        logger.warning("LinkedIn OAuth state cookie mismatch; continuing with server-side state validation.")
 
     browser_nonce = state.split(".", 1)[0] if "." in state else None
     exchange = await handle_callback(session, code, state)
