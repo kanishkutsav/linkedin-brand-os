@@ -203,6 +203,10 @@ useEffect(() => {
     const oauthNonce = params.get('oauth_nonce');
     const savedToken = window.localStorage.getItem(STORAGE_KEY);
     if (code) {
+      // This page is the completion point for the OAuth transaction. Clear the
+      // "in progress" marker immediately so a failed exchange never traps the
+      // user behind a retry lock.
+      window.localStorage.removeItem('brand-os-oauth-started-at');
       const expectedNonce = window.localStorage.getItem('brand-os-oauth-nonce');
       window.history.replaceState({}, document.title, window.location.pathname);
       if (!expectedNonce || !oauthNonce || expectedNonce !== oauthNonce) {
@@ -372,12 +376,11 @@ useEffect(() => {
     setNotice('Use your browser menu to install Brand OS or add it to your home screen.');
   };
   const connectLinkedIn = () => {
-    const existing = window.localStorage.getItem('brand-os-oauth-nonce');
-    const startedAt = Number(window.localStorage.getItem('brand-os-oauth-started-at') || 0);
-    if (existing && Date.now() - startedAt < 10 * 60 * 1000) {
-      setError('A LinkedIn connection is already in progress. Finish that sign-in or wait a few minutes before starting another.');
-      return;
-    }
+    // Starting a fresh OAuth attempt always replaces any stale browser state.
+    // This is important on mobile browsers where an interrupted LinkedIn
+    // handoff can leave localStorage behind indefinitely.
+    window.localStorage.removeItem('brand-os-oauth-nonce');
+    window.localStorage.removeItem('brand-os-oauth-started-at');
     const nonce = window.crypto?.randomUUID?.() || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
     window.localStorage.setItem('brand-os-oauth-nonce', nonce);
     window.localStorage.setItem('brand-os-oauth-started-at', String(Date.now()));
