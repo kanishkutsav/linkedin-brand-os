@@ -1,42 +1,36 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.database import SessionLocal
-from app.jobs.durable_handlers import build_durable_job_handlers
 from app.jobs.durable_worker import DurableJobWorker
+from app.models.models import DurableJob
+from app.services.brand_learning import BrandLearningService
+
+
+async def _learning(session: AsyncSession, job: DurableJob, payload: dict) -> dict:
+    processed = await BrandLearningService(session).process_pending(limit=10)
+    return {"processed_events": processed}
+
+
+def build_durable_job_handlers() -> dict[str, Any]:
+    return {"brand_learning_event": _learning}
 
 
 def allowed_job_types() -> set[str]:
     allowed: set[str] = set()
     if settings.durable_learning_worker_enabled:
         allowed.add("brand_learning_event")
-    if settings.durable_ai_worker_enabled:
-        allowed.update({
-            "research_discovery",
-            "content_improvement",
-            "manual_content_generation",
-            "approval_regeneration",
-        })
-    if settings.durable_scheduled_worker_enabled:
-        allowed.update({
-            "scheduled_discovery",
-            "scheduled_calendar",
-            "scheduled_retention",
-        })
     return allowed
 
 
 async def main() -> None:
-    if not any((
-        settings.durable_learning_worker_enabled,
-        settings.durable_ai_worker_enabled,
-        settings.durable_scheduled_worker_enabled,
-    )):
-        raise RuntimeError(
-            "No durable worker is enabled. Set an explicit durable_*_worker_enabled flag before starting the worker."
-        )
+    if not settings.durable_learning_worker_enabled:
+        raise RuntimeError("Durable learning worker is disabled.")
 
     worker = DurableJobWorker(
         SessionLocal,
