@@ -323,7 +323,7 @@ async def linkedin_oauth_callback(
             url=f"{(settings.frontend_url or 'http://localhost:3000').rstrip('/')}/?linkedin_error=authorization_denied",
             status_code=302,
         )
-        response.delete_cookie("brand_os_oauth_state", path="/api")
+        response.delete_cookie("brand_os_oauth_state", path="/")
         return response
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing LinkedIn OAuth code or state.")
