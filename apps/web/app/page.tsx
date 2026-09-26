@@ -210,6 +210,7 @@ useEffect(() => {
         setError('LinkedIn sign-in could not be verified in this browser. Please start the connection again.');
         return;
       }
+      window.localStorage.removeItem('brand-os-oauth-started-at');
       fetch(`${API_BASE}/api/auth/linkedin/exchange`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -219,6 +220,7 @@ useEffect(() => {
         if (!res.ok) throw new Error(getApiError(data, 'LinkedIn connection failed'));
         window.localStorage.setItem(STORAGE_KEY, data.token);
         window.localStorage.removeItem('brand-os-oauth-nonce');
+        window.localStorage.removeItem('brand-os-oauth-started-at');
         setToken(data.token);
         setNotice('LinkedIn account connected successfully.');
       }).catch((e) => {
@@ -370,8 +372,15 @@ useEffect(() => {
     setNotice('Use your browser menu to install Brand OS or add it to your home screen.');
   };
   const connectLinkedIn = () => {
+    const existing = window.localStorage.getItem('brand-os-oauth-nonce');
+    const startedAt = Number(window.localStorage.getItem('brand-os-oauth-started-at') || 0);
+    if (existing && Date.now() - startedAt < 10 * 60 * 1000) {
+      setError('A LinkedIn connection is already in progress. Finish that sign-in or wait a few minutes before starting another.');
+      return;
+    }
     const nonce = window.crypto?.randomUUID?.() || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
     window.localStorage.setItem('brand-os-oauth-nonce', nonce);
+    window.localStorage.setItem('brand-os-oauth-started-at', String(Date.now()));
     window.location.href = '/api/auth/linkedin/start?browser_nonce=' + encodeURIComponent(nonce);
   };
   const cancelBrandEdit = async () => { await fetchData(); setBrandEditing(false); };
