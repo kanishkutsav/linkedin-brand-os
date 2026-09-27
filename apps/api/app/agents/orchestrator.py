@@ -127,23 +127,45 @@ class AgentOrchestrator:
         service = ModelRouterService()
         if brand_context is None:
             brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id, query=f"{topic} {objective}".strip())
-        return await service.create_post(
-            profile={
-                "name": profile.display_name,
-                "title": profile.professional_title,
-                "industry": profile.industry,
-                "experience_years": profile.experience_years,
-                "tone": profile.tone,
-                "brand_intelligence": brand_context,
-            },
-            topic=topic,
-            pillar=pillar,
-            objective=objective,
-            evidence=evidence or [],
-            voice=await self._voice(),
-            feedback=feedback,
-            current_draft=current_draft,
-        )
+        try:
+            return await service.create_post(
+                profile={
+                    "name": profile.display_name,
+                    "title": profile.professional_title,
+                    "industry": profile.industry,
+                    "experience_years": profile.experience_years,
+                    "tone": profile.tone,
+                    "brand_intelligence": brand_context,
+                },
+                topic=topic,
+                pillar=pillar,
+                objective=objective,
+                evidence=evidence or [],
+                voice=await self._voice(),
+                feedback=feedback,
+                current_draft=current_draft,
+            )
+        except Exception:
+            # The product must remain usable when a free-tier model provider is
+            # rate-limited or temporarily unavailable. This fallback is deliberately
+            # generic and grounded only in the user's supplied topic and profile.
+            return {
+                "title": title,
+                "angle": f"A practical lens on {topic}.",
+                "body": (
+                    f"{title}\\n\\n"
+                    f"A practical way to think about {topic.lower()} is to focus on the decisions "
+                    f"that matter most, rather than trying to optimize everything at once.\\n\\n"
+                    f"Three questions help:\\n"
+                    f"1. What problem are we actually trying to solve?\\n"
+                    f"2. What evidence should shape the decision?\\n"
+                    f"3. What still needs human judgment?\\n\\n"
+                    f"The useful outcome is not more activity. It is a clearer way to decide what "
+                    f"deserves attention, what can be simplified, and what should stay under review."
+                ),
+                "claims": [],
+                "confidence": "low",
+            }
 
     async def _create_candidate(
         self,
