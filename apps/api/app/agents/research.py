@@ -56,8 +56,8 @@ class ResearchService:
                     items.append({"title": title, "url": link, "published_at": pub, "source": source_name, "query": query})
             return items
 
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, headers={"User-Agent": "BrandOS/1.0"}) as client:
-            batches = await asyncio.gather(*(fetch_query(client, query) for query in queries[:3]), return_exceptions=True)
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True, headers={"User-Agent": "BrandOS/1.0"}) as client:
+            batches = await asyncio.gather(*(fetch_query(client, query) for query in queries[:2]), return_exceptions=True)
 
         seen: set[str] = set()
         items: list[dict] = []
@@ -172,11 +172,11 @@ class ResearchService:
         if not sources:
             return sources
         async with httpx.AsyncClient(
-            timeout=3.5,
+            timeout=2.5,
             follow_redirects=True,
             headers={"User-Agent": "BrandOS/1.0"},
         ) as client:
-            enrichable = sources[:6]
+            enrichable = sources[:4]
             results = await asyncio.gather(
                 *(self._source_context(client, source) for source in enrichable),
                 return_exceptions=True,
@@ -244,7 +244,7 @@ class ResearchService:
         # Keep live research responsive on mobile and serverless runtimes.
         # RSS/GDELT metadata is already sufficient for fallback evidence, while
         # only a small set of sources needs article-body enrichment for ranking.
-        live_sources = deduped_sources[:10]
+        live_sources = deduped_sources[:8]
         live_sources = await self._enrich_source_context(live_sources)
 
         if requested_topic:
@@ -309,7 +309,7 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
         try:
             data = await asyncio.wait_for(
                 ModelRouterService().generate_json(system, prompt, max_output_tokens=1800),
-                timeout=12.0,
+                timeout=8.0,
             )
             opportunities = data.get("opportunities") or []
         except Exception:

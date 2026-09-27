@@ -922,10 +922,9 @@ async def improve_content(
         raise HTTPException(status_code=400, detail="Complete Brand Intelligence setup first.")
 
     # Polishing stays fast and uses the saved Brand DNA plus relevant learning memory.
-    brand_context = await brand_service.generation_context(
-        profile.id,
-        query=f"{req.title} {req.topic}".strip(),
-    )
+    # Interactive polish should never wait on the embedding/semantic-search path.
+    # Recent learning memory and Brand DNA are enough to polish a user draft quickly.
+    brand_context = await brand_service.generation_context(profile.id, query=None)
     voice_result = await session.execute(
         select(VoiceMemory).where(VoiceMemory.profile_id == profile.id).limit(1)
     )

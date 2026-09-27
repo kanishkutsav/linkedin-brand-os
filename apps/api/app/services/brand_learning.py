@@ -25,6 +25,17 @@ def _vector_literal(values: list[float]) -> str:
     return "[" + ",".join(f"{float(v):.8f}" for v in values) + "]"
 
 
+def _json_safe(value: Any):
+    """Convert DB/provider values into JSON-safe primitives recursively."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 class BrandLearningService:
     """User-isolated long-term learning layer.
 
@@ -325,9 +336,7 @@ Return:
                 semantic_events = []
                 for row in event_rows.all():
                     item = dict(row._mapping)
-                    if item.get("created_at") is not None:
-                        item["created_at"] = item["created_at"].isoformat() if hasattr(item["created_at"], "isoformat") else str(item["created_at"])
-                    semantic_events.append(item)
+                    semantic_events.append(_json_safe(item))
 
                 memory_rows = await self.session.execute(
                     text("""
@@ -349,9 +358,7 @@ Return:
                 semantic_memories = []
                 for row in memory_rows.all():
                     item = dict(row._mapping)
-                    if item.get("updated_at") is not None:
-                        item["updated_at"] = item["updated_at"].isoformat() if hasattr(item["updated_at"], "isoformat") else str(item["updated_at"])
-                    semantic_memories.append(item)
+                    semantic_memories.append(_json_safe(item))
 
         return {
             "memories": [

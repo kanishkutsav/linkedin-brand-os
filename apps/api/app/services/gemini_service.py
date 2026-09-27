@@ -94,7 +94,7 @@ class ModelRouterService:
 
         # Free-tier routing should fail over quickly instead of holding the UI
         # for the old 90-second provider timeout.
-        async with httpx.AsyncClient(timeout=14.0) as client:
+        async with httpx.AsyncClient(timeout=7.0) as client:
             response = await client.post(
                 settings.openrouter_base_url.rstrip("/") + "/chat/completions",
                 headers=headers,
@@ -131,7 +131,7 @@ class ModelRouterService:
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=14.0) as client:
+        async with httpx.AsyncClient(timeout=7.0) as client:
             response = await client.post(
                 settings.groq_base_url.rstrip("/") + "/chat/completions",
                 headers=headers,
@@ -155,14 +155,17 @@ class ModelRouterService:
         max_output_tokens: int,
     ) -> dict:
         client = genai.Client(api_key=settings.gemini_api_key)
-        response = await client.aio.models.generate_content(
-            model=settings.gemini_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json",
-                max_output_tokens=max_output_tokens,
+        response = await asyncio.wait_for(
+            client.aio.models.generate_content(
+                model=settings.gemini_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                    max_output_tokens=max_output_tokens,
+                ),
             ),
+            timeout=7.0,
         )
         content = getattr(response, "text", None)
         if not content:
