@@ -971,9 +971,19 @@ Rules:
 
     try:
         improved = await ModelRouterService().generate_json(system, prompt, max_output_tokens=1000)
+        fallback_used = False
     except Exception as exc:
-        logger.exception("Content improvement failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Content improvement failed. Please try again.") from exc
+        # Keep the editor usable during free-tier provider throttling/outages.
+        # The fallback never invents content. It only normalizes the user's own draft.
+        logger.warning("Content improvement provider unavailable, using safe local fallback: %s", exc)
+        improved = {
+            "title": req.title,
+            "topic": req.topic,
+            "body": req.body,
+            "changes": ["Cleaned spacing and paragraph structure while preserving your wording."],
+            "claims": [],
+        }
+        fallback_used = True
 
     body = normalize_human_style(str(improved.get("body") or ""))
     if not body:
@@ -985,6 +995,7 @@ Rules:
         "body": body,
         "changes": improved.get("changes") or [],
         "claims": improved.get("claims") or [],
+        "fallback_used": fallback_used,
         "guard": guard.__dict__,
     }
 
