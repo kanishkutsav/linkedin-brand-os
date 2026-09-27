@@ -176,14 +176,15 @@ class ResearchService:
             follow_redirects=True,
             headers={"User-Agent": "BrandOS/1.0"},
         ) as client:
+            enrichable = sources[:6]
             results = await asyncio.gather(
-                *(self._source_context(client, source) for source in sources[:16]),
+                *(self._source_context(client, source) for source in enrichable),
                 return_exceptions=True,
             )
         enriched = []
-        for source, result in zip(sources[:16], results):
+        for source, result in zip(enrichable, results):
             enriched.append(result if isinstance(result, dict) else source)
-        return enriched + sources[16:]
+        return enriched + sources[len(enrichable):]
 
     async def research_and_rank(
         self,
