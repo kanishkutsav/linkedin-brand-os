@@ -366,7 +366,9 @@ class AgentOrchestrator:
         profile = await self._profile()
         brand = BrandIntelligenceService(self.session)
         positioning = profile.professional_title or profile.industry or "professional expertise"
-        context = await brand.generation_context(profile.id, query=f"{positioning} fresh practical perspective".strip())
+        # Manual generation should stay responsive on serverless runtimes.
+        # Use durable Brand DNA + recent learning memory without a live embedding call.
+        context = await brand.generation_context(profile.id, query=None)
         historical = await brand.get_posts(profile.id, limit=5)
 
         # Build a deterministic, brand-grounded topic seed from persisted
