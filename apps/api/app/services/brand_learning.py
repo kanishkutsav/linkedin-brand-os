@@ -322,7 +322,12 @@ Return:
                         "count": semantic_limit,
                     },
                 )
-                semantic_events = [dict(row._mapping) for row in event_rows.all()]
+                semantic_events = []
+                for row in event_rows.all():
+                    item = dict(row._mapping)
+                    if item.get("created_at") is not None:
+                        item["created_at"] = item["created_at"].isoformat() if hasattr(item["created_at"], "isoformat") else str(item["created_at"])
+                    semantic_events.append(item)
 
                 memory_rows = await self.session.execute(
                     text("""
@@ -341,7 +346,12 @@ Return:
                         "count": semantic_limit,
                     },
                 )
-                semantic_memories = [dict(row._mapping) for row in memory_rows.all()]
+                semantic_memories = []
+                for row in memory_rows.all():
+                    item = dict(row._mapping)
+                    if item.get("updated_at") is not None:
+                        item["updated_at"] = item["updated_at"].isoformat() if hasattr(item["updated_at"], "isoformat") else str(item["updated_at"])
+                    semantic_memories.append(item)
 
         return {
             "memories": [
