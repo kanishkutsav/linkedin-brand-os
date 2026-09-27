@@ -100,6 +100,25 @@ class TestPhase7LinkedIn(unittest.TestCase):
     def test_linkedin_api_version_is_configurable(self):
         self.assertTrue(settings.linkedin_api_version)
 
+    def test_linkedin_redirect_uses_configured_callback_in_production(self):
+        from app.services.linkedin_oauth import redirect_uri
+
+        original_environment = settings.environment
+        original_app_env = settings.app_env
+        original_redirect = settings.linkedin_redirect_uri
+        try:
+            settings.environment = "production"
+            settings.app_env = "production"
+            settings.linkedin_redirect_uri = "https://linkedin-brand-os-kanishkutsav.vercel.app/api/auth/linkedin/callback"
+            self.assertEqual(
+                redirect_uri(),
+                "https://linkedin-brand-os-kanishkutsav.vercel.app/api/auth/linkedin/callback",
+            )
+        finally:
+            settings.environment = original_environment
+            settings.app_env = original_app_env
+            settings.linkedin_redirect_uri = original_redirect
+
 
 if __name__ == "__main__":
     unittest.main()
