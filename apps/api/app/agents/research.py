@@ -172,18 +172,19 @@ class ResearchService:
         if not sources:
             return sources
         async with httpx.AsyncClient(
-            timeout=6.0,
+            timeout=3.5,
             follow_redirects=True,
             headers={"User-Agent": "BrandOS/1.0"},
         ) as client:
+            enrichable = sources[:6]
             results = await asyncio.gather(
-                *(self._source_context(client, source) for source in sources[:16]),
+                *(self._source_context(client, source) for source in enrichable),
                 return_exceptions=True,
             )
         enriched = []
-        for source, result in zip(sources[:16], results):
+        for source, result in zip(enrichable, results):
             enriched.append(result if isinstance(result, dict) else source)
-        return enriched + sources[16:]
+        return enriched + sources[len(enrichable):]
 
     async def research_and_rank(
         self,
@@ -240,7 +241,10 @@ class ResearchService:
             if source["url"] not in seen_urls:
                 seen_urls.add(source["url"])
                 deduped_sources.append(source)
-        live_sources = deduped_sources[:20]
+        # Keep live research responsive on mobile and serverless runtimes.
+        # RSS/GDELT metadata is already sufficient for fallback evidence, while
+        # only a small set of sources needs article-body enrichment for ranking.
+        live_sources = deduped_sources[:10]
         live_sources = await self._enrich_source_context(live_sources)
 
         if requested_topic:
@@ -303,7 +307,10 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
 """
 
         try:
-            data = await ModelRouterService().generate_json(system, prompt, max_output_tokens=2200)
+            data = await asyncio.wait_for(
+                ModelRouterService().generate_json(system, prompt, max_output_tokens=1800),
+                timeout=12.0,
+            )
             opportunities = data.get("opportunities") or []
         except Exception:
             # Research should remain useful even when a configured LLM provider

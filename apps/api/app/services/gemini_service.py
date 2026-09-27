@@ -94,7 +94,7 @@ class ModelRouterService:
 
         # Free-tier routing should fail over quickly instead of holding the UI
         # for the old 90-second provider timeout.
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=14.0) as client:
             response = await client.post(
                 settings.openrouter_base_url.rstrip("/") + "/chat/completions",
                 headers=headers,
@@ -131,7 +131,7 @@ class ModelRouterService:
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=25.0) as client:
+        async with httpx.AsyncClient(timeout=14.0) as client:
             response = await client.post(
                 settings.groq_base_url.rstrip("/") + "/chat/completions",
                 headers=headers,
