@@ -172,7 +172,7 @@ class ResearchService:
         if not sources:
             return sources
         async with httpx.AsyncClient(
-            timeout=6.0,
+            timeout=3.5,
             follow_redirects=True,
             headers={"User-Agent": "BrandOS/1.0"},
         ) as client:
@@ -240,7 +240,10 @@ class ResearchService:
             if source["url"] not in seen_urls:
                 seen_urls.add(source["url"])
                 deduped_sources.append(source)
-        live_sources = deduped_sources[:20]
+        # Keep live research responsive on mobile and serverless runtimes.
+        # RSS/GDELT metadata is already sufficient for fallback evidence, while
+        # only a small set of sources needs article-body enrichment for ranking.
+        live_sources = deduped_sources[:10]
         live_sources = await self._enrich_source_context(live_sources)
 
         if requested_topic:
@@ -303,7 +306,10 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
 """
 
         try:
-            data = await ModelRouterService().generate_json(system, prompt, max_output_tokens=2200)
+            data = await asyncio.wait_for(
+                ModelRouterService().generate_json(system, prompt, max_output_tokens=1800),
+                timeout=12.0,
+            )
             opportunities = data.get("opportunities") or []
         except Exception:
             # Research should remain useful even when a configured LLM provider
