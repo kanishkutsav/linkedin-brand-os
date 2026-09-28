@@ -162,7 +162,12 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
     headline = str(profile_data.get("headline") or profile_data.get("localizedHeadline") or "").strip()[:500] or None
     picture_url = str(profile_data.get("picture") or "").strip() or None
     locale_value = profile_data.get("locale")
-    locale = str(locale_value).strip()[:30] if locale_value else None
+    if isinstance(locale_value, dict):
+        language = str(locale_value.get("language") or "").strip()
+        country = str(locale_value.get("country") or "").strip()
+        locale = "-".join(part for part in (language, country) if part)[:30] or None
+    else:
+        locale = str(locale_value).strip()[:30] if locale_value else None
     vanity_name = str(profile_data.get("vanityName") or "").strip()[:255] or None
 
     if not email or not member_sub:
