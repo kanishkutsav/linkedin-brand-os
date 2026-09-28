@@ -636,20 +636,16 @@ Rules:
     profile.brand_bootstrap_completed = True
     await session.commit()
 
-    ready = bool(profile.professional_title and profile.industry and profile.tone)
-    memory_payload = None
-    if ready:
-        try:
-            memory_payload = await BrandIntelligenceService(session).analyze(profile.id)
-        except Exception as exc:
-            # The profile bootstrap remains saved even if the analysis provider
-            # is temporarily unavailable. The user can retry from Brand DNA.
-            logger.warning("LinkedIn Brand DNA analysis deferred: %s", exc)
+    # Do not build Brand Intelligence before the user reviews the draft.
+    # This keeps onboarding to at most one lightweight inference call and
+    # preserves the user's final say over the saved Brand DNA.
+    ready_for_review = bool(profile.professional_title and profile.industry and profile.tone)
 
     return {
         "bootstrapped": True,
         "already_completed": False,
-        "ready": bool(memory_payload),
+        "ready": False,
+        "ready_for_review": ready_for_review,
         "profile": {
             "display_name": profile.display_name,
             "professional_title": profile.professional_title,
@@ -657,7 +653,6 @@ Rules:
             "experience_years": profile.experience_years,
             "tone": profile.tone,
         },
-        "brand_memory": memory_payload,
         "linkedin_profile": {
             "headline": connection.linkedin_headline,
             "picture_url": connection.linkedin_picture_url,
