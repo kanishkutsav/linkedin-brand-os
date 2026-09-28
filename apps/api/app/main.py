@@ -159,12 +159,17 @@ async def lifespan(app: FastAPI):
                 except Exception:
                     logger.warning("Could not drop retired brand_memory.audience_json")
 
-    try:
-        async with SessionLocal() as security_session:
-            await migrate_plaintext_linkedin_tokens(security_session)
-    except Exception:
-        logger.exception("LinkedIn token migration failed")
-        raise
+    # Token encryption is part of the persistence path for new LinkedIn
+    # connections. Do not make Vercel cold-starts depend on a best-effort
+    # legacy-token migration query: a transient database/connectivity issue
+    # must never take the entire ASGI function offline. Local development can
+    # still perform the migration against its persistent local database.
+    if not vercel_runtime:
+        try:
+            async with SessionLocal() as security_session:
+                await migrate_plaintext_linkedin_tokens(security_session)
+        except Exception:
+            logger.exception("LinkedIn token migration failed during local startup")
 
     # Vercel functions are ephemeral. Supabase Cron owns scheduled execution
     # in the Vercel deployment, so never start an in-process scheduler there.
