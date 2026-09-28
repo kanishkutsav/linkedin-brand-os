@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -201,159 +202,230 @@ async def sync_missing_profile_data(session: AsyncSession, user_id: int) -> dict
 
 
 async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
-    result = await session.execute(
-        select(LinkedInOAuthState).where(
-            LinkedInOAuthState.state_hash == _hash(state),
-            LinkedInOAuthState.expires_at > _utc_now(),
+    """Complete the LinkedIn authorization-code flow without leaving 500s opaque.
+
+    The OAuth state remains reserved until the LinkedIn exchange and local
+    persistence both succeed. This prevents a transient downstream failure from
+    consuming the browser's only usable authorization transaction.
+    """
+    state_row = None
+    try:
+        result = await session.execute(
+            select(LinkedInOAuthState).where(
+                LinkedInOAuthState.state_hash == _hash(state),
+                LinkedInOAuthState.expires_at > _utc_now(),
+            )
         )
-    )
-    state_row = result.scalar_one_or_none()
-    if state_row is None:
-        raise HTTPException(status_code=400, detail="Invalid or expired LinkedIn OAuth state.")
+        state_row = result.scalar_one_or_none()
+        if state_row is None:
+            raise HTTPException(status_code=400, detail="Invalid or expired LinkedIn OAuth state.")
 
-    browser_nonce_hash = state_row.browser_nonce_hash
-    await session.delete(state_row)
-    await session.commit()
+        browser_nonce_hash = state_row.browser_nonce_hash
 
-    token_payload = await asyncio.to_thread(
-        _request_json,
-        LINKEDIN_TOKEN_URL,
-        data={
-            "grant_type": "authorization_code",
-            "code": code,
-            "client_id": settings.linkedin_client_id,
-            "client_secret": settings.linkedin_client_secret,
-            "redirect_uri": redirect_uri(),
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
+        # Exchange the authorization code before mutating local OAuth state.
+        # LinkedIn requires the redirect_uri to exactly match the URI used when
+        # the authorization code was issued.
+        try:
+            token_payload = await asyncio.to_thread(
+                _request_json,
+                LINKEDIN_TOKEN_URL,
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "client_id": settings.linkedin_client_id,
+                    "client_secret": settings.linkedin_client_secret,
+                    "redirect_uri": redirect_uri(),
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        except HTTPException:
+            logger.warning("LinkedIn OAuth token exchange rejected the authorization code")
+            raise
+        except Exception as exc:
+            logger.exception("LinkedIn OAuth token exchange failed type=%s", type(exc).__name__)
+            raise HTTPException(status_code=502, detail="LinkedIn token exchange failed.") from exc
 
-    access_token = token_payload.get("access_token")
-    if not access_token:
-        raise HTTPException(status_code=502, detail="LinkedIn did not return an access token.")
+        access_token = token_payload.get("access_token")
+        if not access_token:
+            logger.error("LinkedIn OAuth token response did not contain an access token")
+            raise HTTPException(status_code=502, detail="LinkedIn did not return an access token.")
 
-    expires_in = token_payload.get("expires_in")
-    token_expires_at = _utc_now() + timedelta(seconds=int(expires_in)) if expires_in else None
+        expires_in = token_payload.get("expires_in")
+        try:
+            token_expires_at = _utc_now() + timedelta(seconds=int(expires_in)) if expires_in else None
+        except (TypeError, ValueError):
+            logger.warning("LinkedIn OAuth token response contained an invalid expires_in value")
+            token_expires_at = None
 
-    userinfo = await asyncio.to_thread(
-        _request_json,
-        LINKEDIN_USERINFO_URL,
-        headers={"Authorization": f"Bearer {access_token}"},
-    )
-    profile_data = dict(userinfo or {})
-    oidc_claims = _decode_jwt_payload(token_payload.get("id_token"))
-    for key, value in oidc_claims.items():
-        if key not in profile_data or not profile_data.get(key):
-            profile_data[key] = value
+        # OIDC's ID token is the primary identity source. LinkedIn documents
+        # sub/name/email claims in the ID token and makes email optional in
+        # userinfo, so userinfo should enrich identity rather than be a hard
+        # dependency for successful authentication.
+        oidc_claims = _decode_jwt_payload(token_payload.get("id_token"))
+        profile_data = dict(oidc_claims or {})
+        if not profile_data.get("sub") or not profile_data.get("email") or not profile_data.get("name"):
+            try:
+                userinfo = await asyncio.to_thread(
+                    _request_json,
+                    LINKEDIN_USERINFO_URL,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                for key, value in dict(userinfo or {}).items():
+                    if key not in profile_data or not profile_data.get(key):
+                        profile_data[key] = value
+            except HTTPException as exc:
+                if not profile_data.get("sub") or not profile_data.get("email"):
+                    logger.warning(
+                        "LinkedIn userinfo unavailable and OIDC identity is incomplete status=%s",
+                        exc.status_code,
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail="LinkedIn member identity could not be retrieved.",
+                    ) from exc
+                logger.warning("LinkedIn userinfo enrichment unavailable; continuing with OIDC claims")
 
-    email = AuthService.normalize_email(profile_data.get("email"))
-    member_sub = profile_data.get("sub")
-    display_name = profile_data.get("name") or "LinkedIn Member"
-    # LinkedIn OIDC can expose a richer profile payload depending on the
-    # provisioned profile permissions. Keep the fields that are useful for
-    # onboarding when they are present, but never make them mandatory for auth.
-    headline = str(profile_data.get("headline") or profile_data.get("localizedHeadline") or "").strip()[:500] or None
-    picture_url = str(profile_data.get("picture") or "").strip() or None
-    locale_value = profile_data.get("locale")
-    if isinstance(locale_value, dict):
-        language = str(locale_value.get("language") or "").strip()
-        country = str(locale_value.get("country") or "").strip()
-        locale = "-".join(part for part in (language, country) if part)[:30] or None
-    else:
-        locale = str(locale_value).strip()[:30] if locale_value else None
-    vanity_name = str(profile_data.get("vanityName") or "").strip()[:255] or None
+        email = AuthService.normalize_email(profile_data.get("email"))
+        member_sub = str(profile_data.get("sub") or "").strip()
+        display_name = str(profile_data.get("name") or "LinkedIn Member").strip()[:150] or "LinkedIn Member"
 
-    if not email or not member_sub:
-        raise HTTPException(status_code=403, detail="LinkedIn did not return the required member identity.")
+        # LinkedIn OIDC can expose a richer profile payload depending on the
+        # provisioned permissions. These fields are optional and never gate auth.
+        headline = str(profile_data.get("headline") or profile_data.get("localizedHeadline") or "").strip()[:500] or None
+        picture_url = str(profile_data.get("picture") or "").strip() or None
+        locale_value = profile_data.get("locale")
+        if isinstance(locale_value, dict):
+            language = str(locale_value.get("language") or "").strip()
+            country = str(locale_value.get("country") or "").strip()
+            locale = "-".join(part for part in (language, country) if part)[:30] or None
+        else:
+            locale = str(locale_value).strip()[:30] if locale_value else None
+        vanity_name = str(profile_data.get("vanityName") or "").strip()[:255] or None
 
-    # The Supabase/Postgres auth_users table is the single source of truth.
-    # Adding an email there is sufficient to authorize a new user.
-    user_result = await session.execute(
-        select(AuthUser).where(
-            AuthUser.email == email,
-            AuthUser.is_active.is_(True),
-            AuthUser.is_whitelisted.is_(True),
+        if not email or not member_sub:
+            raise HTTPException(status_code=403, detail="LinkedIn did not return the required member identity.")
+
+        # The application database is the authorization source of truth.
+        user_result = await session.execute(
+            select(AuthUser).where(
+                AuthUser.email == email,
+                AuthUser.is_active.is_(True),
+                AuthUser.is_whitelisted.is_(True),
+            )
         )
-    )
-    user = user_result.scalar_one_or_none()
-    if user is None:
+        user = user_result.scalar_one_or_none()
+        if user is None:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not authorized to use this application. Please contact the administrator.",
+            )
+
+        # A LinkedIn member identity can only belong to one application user.
+        # Detect the conflict before the INSERT/UPDATE so it never becomes an
+        # opaque database 500.
+        connection_result = await session.execute(
+            select(LinkedInConnection).where(LinkedInConnection.member_sub == member_sub)
+        )
+        connection_by_member = connection_result.scalar_one_or_none()
+        if connection_by_member is not None and int(connection_by_member.user_id) != int(user.id):
+            logger.warning("LinkedIn member identity is already linked to another application user")
+            raise HTTPException(
+                status_code=409,
+                detail="This LinkedIn account is already connected to another Suvacya account.",
+            )
+
+        user.display_name = display_name
+        user.is_active = True
+        user.is_whitelisted = True
+
+        profile = await session.get(UserProfile, int(user.id))
+        if profile is None:
+            profile = UserProfile(id=int(user.id), display_name=display_name, role=user.role or "user")
+            session.add(profile)
+        else:
+            profile.display_name = display_name
+
+        if headline and not profile.professional_title:
+            profile.professional_title = headline[:200]
+        if not profile.tone:
+            profile.tone = "Clear, practical and credible"
+
+        connection = connection_by_member
+        if connection is None:
+            by_user_result = await session.execute(
+                select(LinkedInConnection).where(LinkedInConnection.user_id == user.id)
+            )
+            connection = by_user_result.scalar_one_or_none()
+
+        encrypted_token = encrypt_linkedin_token(access_token)
+        if connection is None:
+            connection = LinkedInConnection(
+                user_id=user.id,
+                member_sub=member_sub,
+                access_token=encrypted_token,
+                token_expires_at=token_expires_at,
+                linkedin_email=email,
+                linkedin_name=display_name,
+                linkedin_headline=headline,
+                linkedin_picture_url=picture_url,
+                linkedin_locale=locale,
+                linkedin_vanity_name=vanity_name,
+                linkedin_profile_synced_at=_utc_now(),
+            )
+            session.add(connection)
+        else:
+            connection.member_sub = member_sub
+            connection.access_token = encrypted_token
+            connection.token_expires_at = token_expires_at
+            connection.linkedin_email = email
+            connection.linkedin_name = display_name
+
+            metadata_added = False
+            for attr, value in (
+                ("linkedin_headline", headline),
+                ("linkedin_picture_url", picture_url),
+                ("linkedin_locale", locale),
+                ("linkedin_vanity_name", vanity_name),
+            ):
+                if value and not getattr(connection, attr):
+                    setattr(connection, attr, value)
+                    metadata_added = True
+            if metadata_added:
+                connection.linkedin_profile_synced_at = _utc_now()
+
+        exchange_code = secrets.token_urlsafe(32)
+        session.add(
+            LinkedInOAuthExchange(
+                code_hash=_hash(exchange_code),
+                user_id=user.id,
+                expires_at=_utc_now() + timedelta(minutes=5),
+                used=False,
+                browser_nonce_hash=browser_nonce_hash,
+            )
+        )
+
+        # Consume the OAuth state only after every durable write is ready.
+        await session.delete(state_row)
+        await session.commit()
+        return exchange_code
+
+    except HTTPException:
+        await session.rollback()
+        raise
+    except IntegrityError as exc:
+        await session.rollback()
+        logger.exception("LinkedIn OAuth persistence failed due to database integrity error")
         raise HTTPException(
-            status_code=403,
-            detail="You are not authorized to use this application. Please contact the administrator.",
-        )
-
-    user.display_name = display_name
-    user.is_active = True
-    user.is_whitelisted = True
-
-    profile = await session.get(UserProfile, int(user.id))
-    if profile is None:
-        profile = UserProfile(id=int(user.id), display_name=display_name, role=user.role or "user")
-        session.add(profile)
-    else:
-        profile.display_name = display_name
-
-    # Preserve anything the user has already entered. LinkedIn only fills
-    # missing onboarding context and never overwrites confirmed Brand DNA.
-    if headline and not profile.professional_title:
-        profile.professional_title = headline[:200]
-    if not profile.tone:
-        profile.tone = "Clear, practical and credible"
-
-    connection_result = await session.execute(
-        select(LinkedInConnection).where(LinkedInConnection.user_id == user.id)
-    )
-    connection = connection_result.scalar_one_or_none()
-    if connection is None:
-        connection = LinkedInConnection(
-            user_id=user.id,
-            member_sub=member_sub,
-            access_token=encrypt_linkedin_token(access_token),
-            token_expires_at=token_expires_at,
-            linkedin_email=email,
-            linkedin_name=display_name,
-            linkedin_headline=headline,
-            linkedin_picture_url=picture_url,
-            linkedin_locale=locale,
-            linkedin_vanity_name=vanity_name,
-            linkedin_profile_synced_at=_utc_now(),
-        )
-        session.add(connection)
-    else:
-        connection.member_sub = member_sub
-        connection.access_token = encrypt_linkedin_token(access_token)
-        connection.token_expires_at = token_expires_at
-        connection.linkedin_email = email
-        connection.linkedin_name = display_name
-
-        # Existing connections keep any previously stored profile metadata.
-        # A reconnect may supply newer optional claims, but it must not replace
-        # values we already have. Missing fields are filled opportunistically.
-        metadata_added = False
-        for attr, value in (
-            ("linkedin_headline", headline),
-            ("linkedin_picture_url", picture_url),
-            ("linkedin_locale", locale),
-            ("linkedin_vanity_name", vanity_name),
-        ):
-            if value and not getattr(connection, attr):
-                setattr(connection, attr, value)
-                metadata_added = True
-        if metadata_added:
-            connection.linkedin_profile_synced_at = _utc_now()
-
-    exchange_code = secrets.token_urlsafe(32)
-    session.add(
-        LinkedInOAuthExchange(
-            code_hash=_hash(exchange_code),
-            user_id=user.id,
-            expires_at=_utc_now() + timedelta(minutes=5),
-            used=False,
-            browser_nonce_hash=browser_nonce_hash,
-        )
-    )
-    await session.commit()
-    return exchange_code
+            status_code=409,
+            detail="LinkedIn connection could not be saved because it conflicts with an existing connection.",
+        ) from exc
+    except Exception as exc:
+        await session.rollback()
+        logger.exception("LinkedIn OAuth callback failed type=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=500,
+            detail="LinkedIn sign-in could not be completed. Please try again.",
+        ) from exc
 
 
 async def exchange_code(session: AsyncSession, code: str, browser_nonce: str) -> dict:
