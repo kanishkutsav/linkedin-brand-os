@@ -186,6 +186,12 @@ async def sync_missing_profile_data(session: AsyncSession, user_id: int) -> dict
         "updated": bool(updated_fields),
         "updated_fields": updated_fields,
         "missing_fields": missing_fields,
+        "profile": {
+            "headline": connection.linkedin_headline,
+            "picture_url": connection.linkedin_picture_url,
+            "locale": connection.linkedin_locale,
+            "vanity_name": connection.linkedin_vanity_name,
+        },
     }
 
 
