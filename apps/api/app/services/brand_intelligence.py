@@ -245,9 +245,8 @@ Return:
             not profile.professional_title
             or not profile.industry
             or not profile.tone
-            or profile.experience_years is None
         ):
-            raise ValueError("Complete Professional Title, Industry, Desired Tone and Years of Experience before generating content.")
+            raise ValueError("Complete Professional Title, Industry and Desired Tone before generating content.")
 
         count_result = await self.session.execute(
             select(func.count(HistoricalPost.id)).where(HistoricalPost.profile_id == profile_id)
