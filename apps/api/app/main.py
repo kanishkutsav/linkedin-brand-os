@@ -234,10 +234,10 @@ class BrandOnboardingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     display_name: str = "User"
-    professional_title: str
-    industry: str
-    tone: str
-    experience_years: float = Field(ge=0, le=100)
+    professional_title: str = ""
+    industry: str = ""
+    tone: str = ""
+    experience_years: float | None = Field(default=None, ge=0, le=100)
     posts: list[BrandOnboardingPost] = Field(default_factory=list)
 
 
@@ -479,7 +479,6 @@ async def brand_status(
         profile.professional_title and profile.professional_title.strip()
         and profile.industry and profile.industry.strip()
         and profile.tone and profile.tone.strip()
-        and profile.experience_years is not None
     )
     brand_ready = bool(memory and memory.status == "READY" and profile_complete)
     return {
@@ -497,6 +496,9 @@ async def brand_status(
             "industry": profile.industry if profile else None,
             "experience_years": profile.experience_years if profile else None,
             "tone": profile.tone if profile else None,
+        },
+        "linkedin_profile": {
+            "connected": bool((await session.execute(select(LinkedInConnection.id).where(LinkedInConnection.user_id == int(profile.id)).limit(1))).scalar_one_or_none()),
         },
         "source_posts": [
             {"id": post.id, "body": post.body, "published_at": post.published_at, "source": post.source}
@@ -541,8 +543,6 @@ async def brand_onboard(
     current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
 ):
 
-    if len(req.posts) < 3:
-        raise HTTPException(status_code=400, detail="At least 3 previous posts are required to build Brand Intelligence.")
     if len(req.posts) > 10:
         raise HTTPException(status_code=400, detail="You can import a maximum of 10 previous posts.")
     if any(not post.body.strip() for post in req.posts):
@@ -550,40 +550,48 @@ async def brand_onboard(
 
     profile = await AuthService.get_or_create_profile(session, current_user)
 
-    # Brand DNA is fully user-controlled. LinkedIn is used only for account
-    # connection and publishing, never as the source of Brand DNA profile fields.
+    # LinkedIn-assisted onboarding is additive. Existing user-entered Brand DNA
+    # remains authoritative, while blank fields can be supplied from the current
+    # onboarding draft. Experience is optional because LinkedIn's open profile
+    # scopes do not expose employment history.
     profile.display_name = req.display_name.strip()[:150] or current_user.display_name or profile.display_name or "User"
-    profile.professional_title = req.professional_title.strip()[:200]
-    profile.industry = req.industry.strip()[:200]
-    profile.experience_years = float(req.experience_years)
-    profile.tone = req.tone.strip()[:200]
+    if req.professional_title.strip():
+        profile.professional_title = req.professional_title.strip()[:200]
+    if req.industry.strip():
+        profile.industry = req.industry.strip()[:200]
+    if req.experience_years is not None:
+        profile.experience_years = float(req.experience_years)
+    if req.tone.strip():
+        profile.tone = req.tone.strip()[:200]
     profile.role = profile.role or current_user.role or "user"
     await session.commit()
 
-    # The editable 3–10 source posts are a current snapshot. Replace only the
-    # user-imported set on refresh; keep Brand OS published posts as durable evidence.
-    await session.execute(
-        delete(HistoricalPost).where(
-            HistoricalPost.profile_id == int(profile.id),
-            HistoricalPost.source == "user_import",
-        )
-    )
-    await session.commit()
-
+    # Historical posts are optional. If the user supplies them, replace only
+    # the editable user-import set. An empty submission preserves existing
+    # imported evidence rather than deleting it.
+    import_result = {"created": 0, "skipped": 0, "total": 0}
     service = BrandIntelligenceService(session)
-    import_result = await service.import_posts(
-        [
-            {
-                "body": post.body,
-                "published_at": post.published_at,
-                "external_id": post.external_id,
-                "metadata": post.metadata,
-                "source": "user_import",
-            }
-            for post in req.posts
-        ],
-        profile_id=profile.id,
-    )
+    if req.posts:
+        await session.execute(
+            delete(HistoricalPost).where(
+                HistoricalPost.profile_id == int(profile.id),
+                HistoricalPost.source == "user_import",
+            )
+        )
+        await session.commit()
+        import_result = await service.import_posts(
+            [
+                {
+                    "body": post.body,
+                    "published_at": post.published_at,
+                    "external_id": post.external_id,
+                    "metadata": post.metadata,
+                    "source": "user_import",
+                }
+                for post in req.posts
+            ],
+            profile_id=profile.id,
+        )
     try:
         memory = await service.analyze(profile.id)
     except ValueError as exc:
@@ -599,7 +607,7 @@ async def brand_onboard(
 async def brand_initialize_legacy():
     raise HTTPException(
         status_code=410,
-        detail="Automatic Brand DNA initialization is disabled. Enter your Brand DNA details and use the onboarding form.",
+        detail="Automatic Brand DNA initialization is disabled. Use LinkedIn-assisted onboarding and review the generated Brand DNA.",
     )
 
 
