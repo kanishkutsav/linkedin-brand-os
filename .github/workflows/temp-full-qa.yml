@@ -7,7 +7,7 @@ on:
 jobs:
   backend:
     env:
-      PYTHONPATH: apps/api
+      PYTHONPATH: .
     runs-on: ubuntu-latest
     defaults:
       run:
