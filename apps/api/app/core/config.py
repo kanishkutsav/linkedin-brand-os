@@ -26,27 +26,13 @@ class Settings(BaseSettings):
     linkedin_analytics_oauth_enabled: bool = False
 
     # LLM provider routing
-    # Groq is the primary free-inference provider. OpenRouter and Gemini are fallbacks.
+    # OpenRouter is the primary free-inference provider.
     openrouter_api_key: str | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_model: str = "openrouter/free"
-    ai_allowed_providers: str = "groq,openrouter,gemini"
+    ai_allowed_providers: str = "openrouter,groq,gemini"
 
-    groq_content_model: str = "openai/gpt-oss-120b"
-    groq_research_model: str = "openai/gpt-oss-120b"
-    groq_learning_model: str = "openai/gpt-oss-120b"
-    openrouter_content_model: str = "openrouter/free"
-    openrouter_research_model: str = "openrouter/free"
-    openrouter_learning_model: str = "openrouter/free"
-    gemini_content_model: str = "gemini-3.8-flash"
-    gemini_research_model: str = "gemini-3.8-flash"
-    gemini_learning_model: str = "gemini-3.8-flash"
-
-    def model_for(self, provider: str, task: str) -> str:
-        task_name = task if task in {"content", "research", "learning"} else "content"
-        return getattr(self, f"{provider}_{task_name}_model", getattr(self, f"{provider}_model"))
-
-    # Groq is the primary provider. GPT-OSS 120B is currently available on
+    # Groq is the callback provider. GPT-OSS 120B is currently available on
     # Groq's free tier with rate limits; paid usage begins only after upgrading.
     groq_api_key: str | None = None
     groq_base_url: str = "https://api.groq.com/openai/v1"
@@ -71,6 +57,19 @@ class Settings(BaseSettings):
     agent_calendar_minute: int = 15
     agent_in_process_schedule_enabled: bool = True
     scheduled_job_key: str | None = None
+
+    adzuna_app_id: str | None = None
+    adzuna_app_key: str | None = None
+    adzuna_country: str = "in"
+    jooble_api_key: str | None = None
+    jooble_country: str = "in"
+    jooble_base_url: str = "https://in.jooble.org/api"
+    themuse_api_key: str | None = None
+    themuse_base_url: str = "https://www.themuse.com/api/public"
+    remotive_enabled: bool = True
+    job_search_cache_seconds: int = 300
+    job_search_max_results: int = 40
+    admin_email: str = "kanishka.utsav@gmail.com"
 
     # Durable background worker. Disabled by default until explicit cutover.
     durable_learning_worker_enabled: bool = False

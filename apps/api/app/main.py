@@ -36,13 +36,14 @@ from app.models.models import (
     ApprovalRequest, AuditLog, AuthSession, AuthUser, AgentRun, BrandMemory, ContentItem,
     ContentOpportunity, ContentVersion, DurableJob, FeedbackEntry, HistoricalPost,
     LearningEvent, LearningMemory, LinkedInConnection, LinkedInOAuthExchange, LinkedInOAuthState,
-    ResearchSource, UserProfile, VoiceMemory,
+    ResearchSource, UserProfile, VoiceMemory, ObservabilityEvent, UserFeedback, JobSearchCache,
 )
 from app.services.approval import ApprovalService
 from app.services.auth_service import AppUser, AuthService
 from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback, sync_missing_profile_data
 from app.services.linkedin_analytics import LinkedInAnalyticsService
 from app.services.gemini_service import ModelRouterService
+from app.services.jobs import search_jobs
 from app.services.security import (
     CSRF_COOKIE, SESSION_COOKIE, clear_session_cookies, client_key, decrypt_linkedin_token, encrypt_linkedin_token,
     endpoint_limit, migrate_plaintext_linkedin_tokens, rate_limiter, request_token,
@@ -159,17 +160,21 @@ async def lifespan(app: FastAPI):
                 except Exception:
                     logger.warning("Could not drop retired brand_memory.audience_json")
 
-    # Token encryption is part of the persistence path for new LinkedIn
-    # connections. Do not make Vercel cold-starts depend on a best-effort
-    # legacy-token migration query: a transient database/connectivity issue
-    # must never take the entire ASGI function offline. Local development can
-    # still perform the migration against its persistent local database.
-    if not vercel_runtime:
-        try:
-            async with SessionLocal() as security_session:
-                await migrate_plaintext_linkedin_tokens(security_session)
-        except Exception:
-            logger.exception("LinkedIn token migration failed during local startup")
+    async with engine.begin() as conn:
+        await conn.run_sync(lambda sync_conn: Base.metadata.create_all(
+            sync_conn,
+            tables=[ObservabilityEvent.__table__, UserFeedback.__table__, JobSearchCache.__table__],
+            checkfirst=True,
+        ))
+        await conn.execute(text("UPDATE auth_users SET role = 'user' WHERE role = 'admin' AND lower(email) != lower(:email)"), {"email": settings.admin_email})
+        await conn.execute(text("UPDATE auth_users SET role = 'admin' WHERE lower(email) = lower(:email)"), {"email": settings.admin_email})
+
+    try:
+        async with SessionLocal() as security_session:
+            await migrate_plaintext_linkedin_tokens(security_session)
+    except Exception:
+        logger.exception("LinkedIn token migration failed")
+        raise
 
     # Vercel functions are ephemeral. Supabase Cron owns scheduled execution
     # in the Vercel deployment, so never start an in-process scheduler there.
@@ -357,6 +362,159 @@ class AccountDeletionRequest(BaseModel):
 
     confirmation: str
 
+
+
+class FeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    feedback_type: str = Field(min_length=2, max_length=40)
+    subject: str = Field(min_length=2, max_length=200)
+    description: str = Field(min_length=2, max_length=5000)
+    context: str | None = Field(default=None, max_length=1000)
+
+
+class FeedbackStatusRequest(BaseModel):
+    status: str
+    priority: str | None = None
+
+
+@app.get("/api/jobs/search")
+async def jobs_search(query: str | None = None, session: AsyncSession = Depends(get_session),
+                      current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    return await search_jobs(session, profile.professional_title or "", profile.experience_years, profile.industry or "", query)
+
+
+@app.post("/api/feedback")
+async def submit_feedback(req: FeedbackRequest, session: AsyncSession = Depends(get_session),
+                          current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
+    if req.feedback_type not in {"BUG", "FEATURE", "GENERAL", "OTHER"}:
+        raise HTTPException(status_code=400, detail="Unsupported feedback type.")
+    feedback = UserFeedback(user_id=int(current_user.id), feedback_type=req.feedback_type,
+                            subject=req.subject.strip(), description=req.description.strip(),
+                            context=(req.context or "").strip()[:1000] or None)
+    session.add(feedback)
+    session.add(AuditLog(event_type="FEEDBACK_SUBMITTED", actor=str(current_user.id),
+                         payload=json.dumps({"feedback_type": req.feedback_type, "subject": req.subject[:200]})))
+    await session.commit()
+    return {"id": feedback.id, "status": feedback.status}
+
+
+@app.get("/api/feedback")
+async def list_my_feedback(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
+    rows = (await session.execute(select(UserFeedback).where(UserFeedback.user_id == int(current_user.id)).order_by(UserFeedback.created_at.desc()).limit(50))).scalars().all()
+    return {"items": [{"id": x.id, "type": x.feedback_type, "subject": x.subject, "description": x.description,
+                       "status": x.status, "priority": x.priority, "created_at": x.created_at} for x in rows]}
+
+
+@app.get("/api/admin/overview")
+async def admin_overview(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    total_users = len((await session.execute(select(AuthUser.id))).scalars().all())
+    active_users = len((await session.execute(select(AuthUser.id).where(AuthUser.is_active == True))).scalars().all())
+    total_events = len((await session.execute(select(ObservabilityEvent.id))).scalars().all())
+    failed = len((await session.execute(select(ObservabilityEvent.id).where(ObservabilityEvent.status == "FAILED"))).scalars().all())
+    total_feedback = len((await session.execute(select(UserFeedback.id))).scalars().all())
+    open_feedback = len((await session.execute(select(UserFeedback.id).where(UserFeedback.status.in_(["NEW", "REVIEWING", "PLANNED", "IN_PROGRESS"])))).scalars().all())
+    return {"users": {"total": total_users, "active": active_users},
+            "reliability": {"events": total_events, "failed_requests": failed, "error_rate": failed / total_events if total_events else 0},
+            "feedback": {"total": total_feedback, "open": open_feedback},
+            "ai_providers": {"groq": bool(settings.groq_api_key), "openrouter": bool(settings.openrouter_api_key), "gemini": bool(settings.gemini_api_key)},
+            "job_providers": {"Adzuna": bool(settings.adzuna_app_id and settings.adzuna_app_key), "Jooble": bool(settings.jooble_api_key), "The Muse": bool(settings.themuse_api_key), "Remotive": bool(settings.remotive_enabled)}}
+
+
+@app.get("/api/admin/users")
+async def admin_users(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    users = (await session.execute(select(AuthUser).order_by(AuthUser.created_at.desc()).limit(500))).scalars().all()
+    return {"items": [{"id": u.id, "email": u.email, "display_name": u.display_name, "role": u.role,
+                       "active": u.is_active, "whitelisted": u.is_whitelisted, "created_at": u.created_at} for u in users]}
+
+
+@app.get("/api/admin/activity")
+async def admin_activity(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    rows = (await session.execute(select(ObservabilityEvent).order_by(ObservabilityEvent.created_at.desc()).limit(300))).scalars().all()
+    return {"items": [{"id": x.id, "user_id": x.user_id, "correlation_id": x.correlation_id, "event_type": x.event_type,
+                       "activity_type": x.activity_type, "status": x.status, "failure_category": x.failure_category,
+                       "http_status": x.http_status, "latency_ms": x.latency_ms, "provider": x.provider,
+                       "fallback_used": x.fallback_used, "final_provider": x.final_provider, "created_at": x.created_at,
+                       "details": json.loads(x.details_json or "{}")} for x in rows]}
+
+
+@app.get("/api/admin/feedback")
+async def admin_feedback(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    rows = (await session.execute(select(UserFeedback).order_by(UserFeedback.created_at.desc()).limit(300))).scalars().all()
+    return {"items": [{"id": x.id, "user_id": x.user_id, "type": x.feedback_type, "subject": x.subject,
+                       "description": x.description, "context": x.context, "status": x.status, "priority": x.priority,
+                       "created_at": x.created_at, "updated_at": x.updated_at} for x in rows]}
+
+
+@app.patch("/api/admin/feedback/{feedback_id}")
+async def admin_update_feedback(feedback_id: int, req: FeedbackStatusRequest, session: AsyncSession = Depends(get_session),
+                                current_user: AppUser = Depends(require_roles("admin"))):
+    if req.status not in {"NEW", "REVIEWING", "PLANNED", "IN_PROGRESS", "RESOLVED", "DUPLICATE", "NOT_PLANNED"}:
+        raise HTTPException(status_code=400, detail="Invalid feedback status.")
+    if req.priority and req.priority not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
+        raise HTTPException(status_code=400, detail="Invalid feedback priority.")
+    item = (await session.execute(select(UserFeedback).where(UserFeedback.id == feedback_id))).scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=404, detail="Feedback not found.")
+    item.status = req.status
+    if req.priority:
+        item.priority = req.priority
+    session.add(AuditLog(event_type="FEEDBACK_UPDATED", actor=str(current_user.id),
+                         payload=json.dumps({"feedback_id": feedback_id, "status": req.status, "priority": req.priority})))
+    await session.commit()
+    return {"id": item.id, "status": item.status, "priority": item.priority}
+
+
+@app.get("/api/admin/ai-providers")
+async def admin_ai_providers(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    rows = (await session.execute(select(ObservabilityEvent).where(ObservabilityEvent.provider.is_not(None)).order_by(ObservabilityEvent.created_at.desc()).limit(300))).scalars().all()
+    return {"configured": {"groq": bool(settings.groq_api_key), "openrouter": bool(settings.openrouter_api_key), "gemini": bool(settings.gemini_api_key)},
+            "recent": [{"provider": x.provider, "model": x.model, "status": x.status, "failure_category": x.failure_category,
+                        "latency_ms": x.latency_ms, "fallback_used": x.fallback_used, "created_at": x.created_at} for x in rows]}
+
+@app.middleware("http")
+async def observability_controls(request: Request, call_next):
+    path = request.scope.get("path", "")
+    if not path.startswith("/api/") or path.startswith("/api/health"):
+        return await call_next(request)
+    started = datetime.now(timezone.utc)
+    correlation_id = request.headers.get("x-correlation-id") or secrets.token_hex(12)
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        try:
+            token = request_token(request)
+            async with SessionLocal() as telemetry_session:
+                user_id = None
+                if token:
+                    user = await AuthService.get_user_from_token(telemetry_session, token)
+                    if user and str(user.id).isdigit():
+                        user_id = int(user.id)
+                elapsed = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+                method = request.method.upper()
+                activity = "OTHER"
+                if "/content/" in path: activity = "GENERATE"
+                elif "/research/" in path: activity = "RESEARCH"
+                elif "/approvals/" in path: activity = "PUBLISH"
+                elif "/learning/" in path: activity = "LEARNING"
+                elif "/linkedin/" in path: activity = "LINKEDIN_CONNECT"
+                elif "/auth/" in path: activity = "AUTHENTICATION"
+                elif "/jobs" in path: activity = "JOB_SEARCH"
+                status = "SUCCESS" if status_code < 400 else "FAILED"
+                category = "RATE_LIMIT" if status_code == 429 else ("AUTHENTICATION_ERROR" if status_code == 401 else ("AUTHORIZATION_ERROR" if status_code == 403 else ("UNKNOWN" if status_code >= 500 else None)))
+                telemetry_session.add(ObservabilityEvent(
+                    user_id=user_id, correlation_id=correlation_id,
+                    event_type="RequestSucceeded" if status == "SUCCESS" else "RequestFailed",
+                    activity_type=activity, status=status, user_visible_failure=status == "FAILED",
+                    failure_category=category, http_status=status_code, latency_ms=elapsed,
+                    details_json=json.dumps({"method": method, "path": path[:180]}, ensure_ascii=False),
+                ))
+                await telemetry_session.commit()
+        except Exception:
+            logger.exception("Observability event recording failed")
 
 @app.get("/health")
 async def health() -> dict[str, object]:
@@ -862,7 +1020,7 @@ Rules:
             ensure_ascii=False,
         )
         try:
-            inferred = await ModelRouterService().generate_json(system, prompt, max_output_tokens=500, task="content")
+            inferred = await ModelRouterService().generate_json(system, prompt, max_output_tokens=500)
         except Exception as exc:
             logger.warning("LinkedIn Brand DNA bootstrap model unavailable: %s", exc)
 
@@ -1243,11 +1401,7 @@ async def research_discover(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Live research failed: %s", exc)
-        return {
-            "opportunities": [],
-            "fallback": True,
-            "message": "Live sources are temporarily unavailable and no cached research is available yet. You can retry shortly.",
-        }
+        raise HTTPException(status_code=502, detail="Live research failed. The public source feed or configured LLM provider was unavailable. Please try again.") from exc
 
 
 @app.get("/api/research/opportunities")
@@ -1424,7 +1578,7 @@ Rules:
     }, ensure_ascii=False)
 
     try:
-        improved = await ModelRouterService().generate_json(system, prompt, max_output_tokens=1000, task="content")
+        improved = await ModelRouterService().generate_json(system, prompt, max_output_tokens=1000)
         fallback_used = False
     except Exception as exc:
         # Keep the editor usable during free-tier provider throttling/outages.
@@ -1671,7 +1825,6 @@ async def execute_approval(
             "id": approval_id,
             "status": "EXECUTED" if publish_result.success else "APPROVED",
             "published": publish_result.success,
-            "confirmed": publish_result.success,
             "external_id": publish_result.external_id,
             "image_urn": getattr(publish_result, "image_urn", None),
             "published_at": saved_approval.published_at if saved_approval else None,

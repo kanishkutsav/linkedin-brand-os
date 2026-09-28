@@ -288,6 +288,50 @@ class LearningMemory(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
+class ObservabilityEvent(Base):
+    __tablename__ = "observability_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True, nullable=True)
+    correlation_id: Mapped[str] = mapped_column(String(80), index=True)
+    event_type: Mapped[str] = mapped_column(String(60), index=True)
+    activity_type: Mapped[str | None] = mapped_column(String(60), index=True, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), index=True, default="SUCCESS")
+    user_visible_failure: Mapped[bool] = mapped_column(Boolean, default=False)
+    provider: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    model: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    failure_category: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=1)
+    fallback_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    final_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class UserFeedback(Base):
+    __tablename__ = "user_feedback"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), index=True, nullable=False)
+    feedback_type: Mapped[str] = mapped_column(String(40), index=True)
+    subject: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text)
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="NEW", index=True)
+    priority: Mapped[str] = mapped_column(String(20), default="MEDIUM", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class JobSearchCache(Base):
+    __tablename__ = "job_search_cache"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cache_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    payload_json: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class DurableJob(Base):
     __tablename__ = "durable_jobs"
     id: Mapped[int] = mapped_column(primary_key=True)
