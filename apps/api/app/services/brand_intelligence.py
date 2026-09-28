@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import BrandMemory, HistoricalPost, UserProfile, VoiceMemory
+from app.models.models import BrandMemory, HistoricalPost, LinkedInConnection, UserProfile, VoiceMemory
 from app.services.gemini_service import ModelRouterService
 from app.services.brand_learning import BrandLearningService
 
@@ -106,6 +106,16 @@ class BrandIntelligenceService:
         total_post_count = int(count_result.scalar_one() or 0)
 
         service = ModelRouterService()
+        linkedin_result = await self.session.execute(
+            select(LinkedInConnection).where(LinkedInConnection.user_id == profile_id).limit(1)
+        )
+        linkedin = linkedin_result.scalar_one_or_none()
+        linkedin_context = {
+            "headline": linkedin.linkedin_headline if linkedin else None,
+            "locale": linkedin.linkedin_locale if linkedin else None,
+            "vanity_name": linkedin.linkedin_vanity_name if linkedin else None,
+            "profile_connected": bool(linkedin),
+        }
         examples = [
             {
                 "id": post.id,
@@ -151,6 +161,7 @@ Return:
                     "experience_years": profile.experience_years,
                     "tone": profile.tone,
                 },
+                "linkedin_profile": linkedin_context,
                 "historical_posts": examples,
                 "post_count": total_post_count,
                 "analysis_limit": 10,
