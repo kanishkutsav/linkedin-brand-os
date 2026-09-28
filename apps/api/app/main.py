@@ -862,7 +862,7 @@ Rules:
             ensure_ascii=False,
         )
         try:
-            inferred = await ModelRouterService().generate_json(system, prompt, max_output_tokens=500)
+            inferred = await ModelRouterService().generate_json(system, prompt, max_output_tokens=500, task="content")
         except Exception as exc:
             logger.warning("LinkedIn Brand DNA bootstrap model unavailable: %s", exc)
 
@@ -1424,7 +1424,7 @@ Rules:
     }, ensure_ascii=False)
 
     try:
-        improved = await ModelRouterService().generate_json(system, prompt, max_output_tokens=1000)
+        improved = await ModelRouterService().generate_json(system, prompt, max_output_tokens=1000, task="content")
         fallback_used = False
     except Exception as exc:
         # Keep the editor usable during free-tier provider throttling/outages.
