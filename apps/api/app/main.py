@@ -572,6 +572,29 @@ async def brand_bootstrap(
     if not profile.tone:
         profile.tone = "Clear, practical and credible"
 
+    existing_memory = await BrandIntelligenceService(session).get_memory(profile.id)
+    if (
+        profile.professional_title
+        and profile.industry
+        and profile.tone
+        and existing_memory
+        and existing_memory.status == "READY"
+    ):
+        profile.brand_bootstrap_completed = True
+        await session.commit()
+        return {
+            "bootstrapped": True,
+            "already_completed": False,
+            "ready": True,
+            "profile": {
+                "display_name": profile.display_name,
+                "professional_title": profile.professional_title,
+                "industry": profile.industry,
+                "experience_years": profile.experience_years,
+                "tone": profile.tone,
+            },
+        }
+
     inferred = {}
     if connection.linkedin_headline or profile.professional_title:
         system = """You create a conservative first-pass Brand DNA profile from a user's
