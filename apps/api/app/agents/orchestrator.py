@@ -295,7 +295,7 @@ class AgentOrchestrator:
 
     async def run_discovery(self, trigger: str = "scheduled_daily") -> dict:
         profile = await self._profile()
-        opportunities = await ResearchService(self.session).research_and_rank(profile_id=profile.id, candidate_limit=8)
+        opportunities = await ResearchService(self.session).research_and_rank(profile_id=profile.id, candidate_limit=10)
 
         created: list[int] = []
         selected = opportunities[:3]
@@ -327,7 +327,7 @@ class AgentOrchestrator:
 
     async def run_calendar(self, trigger: str = "scheduled_calendar") -> dict:
         profile = await self._profile()
-        opportunities = await ResearchService(self.session).research_and_rank(profile_id=profile.id, candidate_limit=6)
+        opportunities = await ResearchService(self.session).research_and_rank(profile_id=profile.id, candidate_limit=10)
 
         created: list[int] = []
         for opportunity in opportunities[:2]:
