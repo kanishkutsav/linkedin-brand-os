@@ -154,6 +154,14 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
     email = AuthService.normalize_email(profile_data.get("email"))
     member_sub = profile_data.get("sub")
     display_name = profile_data.get("name") or "LinkedIn Member"
+    # LinkedIn OIDC can expose a richer profile payload depending on the
+    # provisioned profile permissions. Keep the fields that are useful for
+    # onboarding when they are present, but never make them mandatory for auth.
+    headline = str(profile_data.get("headline") or profile_data.get("localizedHeadline") or "").strip()[:500] or None
+    picture_url = str(profile_data.get("picture") or "").strip() or None
+    locale_value = profile_data.get("locale")
+    locale = str(locale_value).strip()[:30] if locale_value else None
+    vanity_name = str(profile_data.get("vanityName") or "").strip()[:255] or None
 
     if not email or not member_sub:
         raise HTTPException(status_code=403, detail="LinkedIn did not return the required member identity.")
@@ -178,15 +186,19 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
     user.is_active = True
     user.is_whitelisted = True
 
-    # LinkedIn is used for authentication and supported publishing only.
-    # Brand DNA fields are always supplied by the user in the Brand DNA form.
-
     profile = await session.get(UserProfile, int(user.id))
     if profile is None:
         profile = UserProfile(id=int(user.id), display_name=display_name, role=user.role or "user")
         session.add(profile)
     else:
         profile.display_name = display_name
+
+    # Preserve anything the user has already entered. LinkedIn only fills
+    # missing onboarding context and never overwrites confirmed Brand DNA.
+    if headline and not profile.professional_title:
+        profile.professional_title = headline[:200]
+    if not profile.tone:
+        profile.tone = "Clear, practical and credible"
 
     connection_result = await session.execute(
         select(LinkedInConnection).where(LinkedInConnection.user_id == user.id)
@@ -200,6 +212,11 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
             token_expires_at=token_expires_at,
             linkedin_email=email,
             linkedin_name=display_name,
+            linkedin_headline=headline,
+            linkedin_picture_url=picture_url,
+            linkedin_locale=locale,
+            linkedin_vanity_name=vanity_name,
+            linkedin_profile_synced_at=_utc_now(),
         )
         session.add(connection)
     else:
@@ -208,6 +225,11 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
         connection.token_expires_at = token_expires_at
         connection.linkedin_email = email
         connection.linkedin_name = display_name
+        connection.linkedin_headline = headline
+        connection.linkedin_picture_url = picture_url
+        connection.linkedin_locale = locale
+        connection.linkedin_vanity_name = vanity_name
+        connection.linkedin_profile_synced_at = _utc_now()
 
     exchange_code = secrets.token_urlsafe(32)
     session.add(
