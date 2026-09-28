@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_model: str = "openrouter/free"
+    ai_allowed_providers: str = "openrouter,groq,gemini"
 
     # Groq is the callback provider. GPT-OSS 120B is currently available on
     # Groq's free tier with rate limits; paid usage begins only after upgrading.
@@ -44,6 +45,7 @@ class Settings(BaseSettings):
     learning_embedding_model: str = "gemini-embedding-001"
     published_post_retention_limit: int = 10
     learning_event_retention_days: int = 30
+    linkedin_token_encryption_keys: str = ""
 
     agent_enabled: bool = True
     agent_timezone: str = "Asia/Kolkata"
