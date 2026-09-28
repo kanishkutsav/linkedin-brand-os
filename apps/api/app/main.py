@@ -347,8 +347,8 @@ async def linkedin_oauth_callback(
     # The server-side state record is the authoritative one-time OAuth
     # transaction. Do not require the browser cookie here because some mobile
     # browsers and embedded OAuth handoffs can drop cookies across the
-    # LinkedIn -> Brand OS redirect. The frontend separately validates the
-    # browser nonce before exchanging the one-time code for a Brand OS session.
+    # LinkedIn -> Suvacya redirect. The frontend separately validates the
+    # browser nonce before exchanging the one-time code for a Suvacya session.
     expected_state = request.cookies.get("brand_os_oauth_state") if request else None
     if expected_state and not secrets.compare_digest(expected_state, state):
         logger.warning("LinkedIn OAuth state cookie mismatch; continuing with server-side state validation.")
@@ -377,7 +377,7 @@ async def linkedin_oauth_exchange(
     # created only after LinkedIn has validated the OAuth state and member
     # identity. Do not require the original browser cookie here: mobile
     # browsers can legitimately drop cross-site cookies during the LinkedIn
-    # -> Brand OS redirect.
+    # -> Suvacya redirect.
     if not req.oauth_nonce:
         raise HTTPException(status_code=400, detail="LinkedIn exchange is missing the browser nonce.")
     result = await exchange_code(session, req.code)
@@ -1053,7 +1053,7 @@ async def build_research_evidence(
 async def save_learning_thought(req: LearningThoughtRequest, session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
     content = (req.content or "").strip()
     if len(content) < 10:
-        raise HTTPException(status_code=400, detail="Write a little more so Brand OS has a useful idea to learn from.")
+        raise HTTPException(status_code=400, detail="Write a little more so Suvacya has a useful idea to learn from.")
     if len(content) > 20000:
         raise HTTPException(status_code=400, detail="Thoughts are limited to 20,000 characters.")
     profile = await AuthService.get_or_create_profile(session, current_user)
@@ -1089,7 +1089,7 @@ async def improve_content(
     current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     if not req.body.strip():
-        raise HTTPException(status_code=400, detail="Enter a draft before asking Brand OS to improve it.")
+        raise HTTPException(status_code=400, detail="Enter a draft before asking Suvacya to improve it.")
     profile = await AuthService.get_or_create_profile(session, current_user)
     if profile is None:
         raise HTTPException(status_code=400, detail="Complete Brand DNA setup first.")
