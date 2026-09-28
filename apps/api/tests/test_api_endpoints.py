@@ -38,23 +38,18 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("tone", response.json())
 
-    def test_profile_and_dashboard_flow(self):
+    def test_legacy_profile_write_is_disabled(self):
         profile_response = self.client.post(
             "/api/profile",
             json={
                 "display_name": "Ava",
                 "professional_title": "AI strategy lead",
                 "industry": "B2B SaaS",
-                "audience": "product leaders",
-                "goals": ["build authority", "increase signal"],
-                "brand_positioning": "clear, practical, anti-hype",
                 "tone": "direct and grounded",
+                "experience_years": 8,
             },
         )
-        self.assertEqual(profile_response.status_code, 200)
-        dashboard_response = self.client.get("/api/dashboard/approvals")
-        self.assertEqual(dashboard_response.status_code, 200)
-        self.assertIn("pending_approvals", dashboard_response.json())
+        self.assertEqual(profile_response.status_code, 410)
 
     def test_approval_edit_and_reject_flow(self):
         draft = self.client.post(
