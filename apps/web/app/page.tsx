@@ -50,7 +50,7 @@ type PersonalThought = {
   status?: string;
   created_at?: string | null;
 };
-type Tab = 'Dashboard' | 'Research' | 'Content Studio' | 'LinkedIn Posts' | 'Analytics' | 'Brand DNA';
+type Tab = 'Dashboard' | 'Research' | 'Content Studio' | 'LinkedIn Posts' | 'Analytics' | 'Brand DNA' | 'Profile';
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -64,6 +64,7 @@ const nav = [
   ['LinkedIn Posts', ExternalLink, 'Published posts'],
   ['Analytics', BarChart3, 'Performance'],
   ['Brand DNA', Settings, 'Brand DNA'],
+  ['Profile', UserRound, 'Account & connection'],
 ] as const;
 
 export default function Home() {
@@ -116,6 +117,12 @@ export default function Home() {
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [oauthCompleting, setOauthCompleting] = useState(false);
+  const initialWorkspaceLoaded = useRef(false);
+  const [initialWorkspaceLoading, setInitialWorkspaceLoading] = useState(true);
+  const [publishImage, setPublishImage] = useState<File | null>(null);
+  const [publishImagePreview, setPublishImagePreview] = useState<string | null>(null);
   const [learningStatus, setLearningStatus] = useState({ pending_events: 0, memory_count: 0 });
   const [personalThoughts, setPersonalThoughts] = useState<PersonalThought[]>([]);
   const [dashboardCounts, setDashboardCounts] = useState({
@@ -235,6 +242,7 @@ useEffect(() => {
     const code = params.get('linkedin_code');
     const oauthNonce = params.get('oauth_nonce');
     if (code) {
+      setOauthCompleting(true);
       const readOAuthCookie = () => document.cookie.split('; ').find((part) => part.startsWith('suvacya_oauth_nonce='))?.slice('suvacya_oauth_nonce='.length) || '';
       // sessionStorage is tab-scoped and can be lost when LinkedIn returns
       // through a new tab/window. The short-lived first-party cookie provides
@@ -259,19 +267,28 @@ useEffect(() => {
         window.sessionStorage.removeItem('brand-os-oauth-started-at');
         document.cookie = 'suvacya_oauth_nonce=; Max-Age=0; Path=/; SameSite=Lax' + (window.location.protocol === 'https:' ? '; Secure' : '');
         setToken('cookie');
+        setAuthLoading(false);
+        setOauthCompleting(false);
         setNotice('LinkedIn account connected successfully.');
       }).catch((e) => {
         window.sessionStorage.removeItem('brand-os-oauth-nonce');
+        setOauthCompleting(false);
+        setAuthLoading(false);
         setError(e instanceof Error ? e.message : 'LinkedIn connection failed');
       });
       return;
     }
-    apiFetch(API_BASE + '/api/auth/me').then((res) => { if (res.ok) setToken('cookie'); }).catch(() => undefined);
+    apiFetch(API_BASE + '/api/auth/me').then((res) => {
+      if (res.ok) setToken('cookie');
+      setAuthLoading(false);
+    }).catch(() => setAuthLoading(false));
   }, []);
 
   const fetchData = async (authToken: string | null = token) => {
     if (!authToken) return;
+    const isInitialLoad = !initialWorkspaceLoaded.current;
     setLoading(true);
+    if (isInitialLoad) setInitialWorkspaceLoading(true);
     try {
       // Load the core workspace first. Optional panels must never block the
       // dashboard/Brand DNA from appearing.
@@ -390,6 +407,10 @@ useEffect(() => {
       if (nextQueue.length && !nextQueue.some((i) => i.id === selectedId)) setSelectedId(nextQueue[0].id);
 
       setLoading(false);
+      if (isInitialLoad) {
+        initialWorkspaceLoaded.current = true;
+        setInitialWorkspaceLoading(false);
+      }
 
       // Optional workspace panels load independently. A slow research feed or
       // analytics query must not blank/freeze the main workspace.
@@ -414,6 +435,7 @@ useEffect(() => {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load dashboard data');
       setLoading(false);
+      if (isInitialLoad) setInitialWorkspaceLoading(false);
     }
   };
   useEffect(() => { fetchData(token); }, [token]);
@@ -430,7 +452,7 @@ useEffect(() => {
     return queue.filter((item) => {
       const normalizedStatus = String(item.status || '').trim().toUpperCase();
       const statusMatch = statusFilter === 'PENDING'
-        ? ['PENDING', 'APPROVED', 'PUBLISHING'].includes(normalizedStatus)
+        ? ['PENDING', 'EDITED', 'REGENERATED', 'APPROVED', 'PUBLISHING'].includes(normalizedStatus)
         : statusFilter === 'NEEDS_REVIEW'
           ? ['EDITED', 'REGENERATED'].includes(normalizedStatus)
           : normalizedStatus === statusFilter;
@@ -494,6 +516,29 @@ useEffect(() => {
     window.location.href = '/api/auth/linkedin/start?browser_nonce=' + encodeURIComponent(nonce);
   };
   const cancelBrandEdit = async () => { await fetchData(); setBrandEditing(false); };
+  const refreshWorkspace = () => {
+    setError(null);
+    void fetchData();
+  };
+
+  const deleteAccount = async () => {
+    const confirmation = window.prompt('This permanently deletes your Suvacya account and application data. Type DELETE to confirm.');
+    if (confirmation !== 'DELETE') return;
+    try {
+      const csrf = document.cookie.split('; ').find((part) => part.startsWith('__Host-suvacya-csrf='))?.split('=').slice(1).join('=') || document.cookie.split('; ').find((part) => part.startsWith('suvacya-csrf='))?.split('=').slice(1).join('=') || '';
+      const res = await apiFetch(API_BASE + '/api/account', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
+        body: JSON.stringify({ confirmation }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(getApiError(data, 'Account deletion failed'));
+      window.location.href = '/';
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Account deletion failed');
+    }
+  };
+
   const logout = async () => {
     try {
       if (token) {
@@ -566,9 +611,19 @@ useEffect(() => {
         setStatusFilter('PENDING');
       }
       if (action === 'execute') setStatusFilter('EXECUTED');
-      setOperationProgress(action === 'approve' || action === 'execute' ? 82 : 88);
-      setOperationStage(action === 'regenerate' ? 'Refreshing the approval queue…' : 'Refreshing the workspace…');
-      await fetchData();
+      if (action === 'execute') {
+        if (publishImagePreview) URL.revokeObjectURL(publishImagePreview);
+        setPublishImage(null);
+        setPublishImagePreview(null);
+        setQueue((current) => current.map((item) => item.id === selectedApproval.id ? { ...item, status: 'EXECUTED' } : item));
+        setDashboardCounts((current) => ({ ...current, approved: Math.max(0, current.approved - 1), published: current.published + 1, pending_filter: Math.max(0, current.pending_filter - 1) }));
+        setStatusFilter('EXECUTED');
+      } else if (action === 'regenerate') {
+        setQueue((current) => current.map((item) => item.id === selectedApproval.id ? { ...item, status: 'REGENERATED' } : item));
+      } else if (action === 'approve') {
+        setQueue((current) => current.map((item) => item.id === selectedApproval.id ? { ...item, status: 'APPROVED' } : item));
+        setDashboardCounts((current) => ({ ...current, awaiting_approval: Math.max(0, current.awaiting_approval - 1), approved: current.approved + 1 }));
+      }
       setOperationProgress(100);
       setOperationStage('Done');
       setNoticeTtl(action === 'regenerate' ? 1800 : 4500);
@@ -581,6 +636,7 @@ useEffect(() => {
               ? 'Published to LinkedIn successfully.'
               : 'Action completed successfully.'
       );
+      void fetchData();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Approval action failed');
     } finally {
@@ -602,12 +658,10 @@ useEffect(() => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, 'Content generation failed'));
-      setGenerationProgress(84);
-      setGenerationStage('Refreshing the approval queue…');
-      await fetchData();
       setGenerationProgress(100);
       setGenerationStage('Done');
       go('Dashboard');
+      void fetchData();
       setNotice(
         data.approval_queued
           ? 'New content suggestion generated and added to the approval queue.'
@@ -772,13 +826,16 @@ useEffect(() => {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, 'Draft creation failed'));
       setDraftTitle(''); setDraftTopic(''); setDraftBody('');
-      await fetchData(); go('Dashboard');
+      go('Dashboard');
       setNotice(data.approval_id ? 'Draft created and added to the HITL approval queue.' : 'Draft created but guardrails require edits.');
+      void fetchData();
     } catch (e) { setError(e instanceof Error ? e.message : 'Draft creation failed'); }
     finally { setIsBusy(false); }
   };
 
+  if (authLoading || oauthCompleting) return <FullScreenLoading label={oauthCompleting ? 'Signing you in…' : 'Loading…'} />;
   if (!token) return <LoginScreen error={error} onConnect={connectLinkedIn} />;
+  if (initialWorkspaceLoading) return <FullScreenLoading label="Loading…" />;
 
   return (
     <div className="app-shell">
@@ -795,16 +852,6 @@ useEffect(() => {
         ))}
         <div className="sidebar-spacer" />
         <div className="connection-card">
-          <div className="connection-row">
-            <span className={`connection-dot ${linkedin.connected ? 'live' : ''}`} />
-            <span className="connection-title">{linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}</span>
-          </div>
-          <div className="connection-meta">{linkedin.connected ? 'Official API connection is ready.' : 'Connect through official OAuth to enable publishing.'}</div>
-          <button className="button ghost-dark" style={{ width: '100%', marginTop: 9 }} onClick={connectLinkedIn}>
-            <Link2 size={13} /> {linkedin.connected ? 'Reconnect' : 'Connect'}
-          </button>
-        </div>
-        <div className="connection-card">
           <div className="connection-row"><ShieldCheck size={15} color="#4c8fef" /><span className="connection-title">Human approval gate</span></div>
           <div className="connection-meta">No external LinkedIn action is executed without your explicit approval.</div>
         </div>
@@ -818,8 +865,7 @@ useEffect(() => {
             <div><div className="eyebrow">Workspace / {tab}</div><div className="topbar-title">{tab === 'Dashboard' ? 'Command center' : nav.find((x) => x[0] === tab)?.[2]}</div></div>
           </div>
           <div className="topbar-actions">
-            <button className="icon-button" title="Refresh workspace" onClick={() => fetchData()}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
-            <div className="avatar" title={profile.display_name || 'Profile'}>
+            <button className="avatar profile-avatar-button" title="Open Profile" onClick={() => go('Profile')} aria-label="Open Profile">
               {linkedinAvatarUrl && !linkedinAvatarFailed ? (
                 <img
                   src={linkedinAvatarUrl}
@@ -828,7 +874,7 @@ useEffect(() => {
                   referrerPolicy="no-referrer"
                 />
               ) : initials}
-            </div>
+            </button>
           </div>
         </header>
 
@@ -896,6 +942,9 @@ useEffect(() => {
                   reviewNote={reviewNote} setReviewNote={setReviewNote}
                   isBusy={isBusy} busyAction={busyAction} operationProgress={operationProgress} operationStage={operationStage}
                   onAction={runApprovalAction}
+                  publishImage={publishImage}
+                  publishImagePreview={publishImagePreview}
+                  onPublishImageChange={(file: File | null, preview: string | null) => { setPublishImage(file); setPublishImagePreview(preview); }}
                 />
               </section>
             </>
@@ -905,6 +954,42 @@ useEffect(() => {
           {tab === 'Content Studio' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
           {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
+          {tab === 'Profile' && (
+            <section className="settings-stack">
+              <div className="page-header">
+                <div>
+                  <div className="page-kicker"><UserRound size={13}/> Account</div>
+                  <h1 className="page-title">Your profile & connections.</h1>
+                  <p className="page-description">Manage account-level actions in one place. Brand DNA and privacy controls stay focused on their own responsibilities.</p>
+                </div>
+              </div>
+              <section className="panel settings-card">
+                <h2 className="settings-title">Profile</h2>
+                <p className="settings-copy">Your Suvacya account identity.</p>
+                <div className="profile-grid">
+                  <div className="form-group"><span className="form-label">Name</span><div className="readonly-field">{profile.display_name || 'User'}</div></div>
+                  <div className="form-group"><span className="form-label">Role</span><div className="readonly-field">{profile.role || 'user'}</div></div>
+                </div>
+              </section>
+              <section className="panel settings-card">
+                <h2 className="settings-title">LinkedIn connection</h2>
+                <p className="settings-copy">{linkedin.connected
+                  ? <>Signed in as <b>{profile.display_name}</b>. Your official LinkedIn connection is active and available for supported publishing workflows.</>
+                  : 'Connect LinkedIn to prefill the starting Brand DNA where available and enable supported publishing actions.'}</p>
+                <button className="button" onClick={connectLinkedIn}><Link2 size={14}/>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
+              </section>
+              <section className="panel settings-card">
+                <h2 className="settings-title">Workspace refresh</h2>
+                <p className="settings-copy">Refresh the dashboard data explicitly whenever you want the latest saved workflow state.</p>
+                <button className="button" onClick={refreshWorkspace} disabled={loading}><RefreshCw size={14} className={loading ? 'spin' : ''}/>{loading ? 'Refreshing…' : 'Refresh dashboard'}</button>
+              </section>
+              <section className="panel settings-card danger-account-card">
+                <h2 className="settings-title">Delete account</h2>
+                <p className="settings-copy">Permanently delete your Suvacya account and application data. This action cannot be undone.</p>
+                <button className="button danger" onClick={deleteAccount}><X size={14}/> Delete account</button>
+              </section>
+            </section>
+          )}
           {tab === 'Brand DNA' && (
             <SettingsView
               brand={brand}
@@ -923,8 +1008,6 @@ useEffect(() => {
               removePost={removeHistoricalPost}
               building={isBuildingBrand}
               onBuild={buildBrand}
-              linkedin={linkedin}
-              onConnect={connectLinkedIn}
               editing={brandEditing}
               setEditing={setBrandEditing}              onCancel={cancelBrandEdit}
               personalThoughts={personalThoughts}
@@ -987,12 +1070,8 @@ useEffect(() => {
             <div className="mobile-more-grid">
               <button onClick={() => go('Analytics')}><BarChart3 size={18} /><span>Analytics</span></button>
               <button onClick={() => go('Brand DNA')}><Settings size={18} /><span>Brand DNA</span></button>
-              <button onClick={() => { closeMore(); connectLinkedIn(); }}><Link2 size={18} /><span>{linkedin.connected ? 'LinkedIn' : 'Connect LinkedIn'}</span></button>
+              <button onClick={() => go('Profile')}><UserRound size={18} /><span>Profile</span></button>
               <button onClick={installSuvacya} disabled={isStandalone}><Download size={18} /><span>{isStandalone ? 'Installed' : 'Install Suvacya'}</span></button>
-            </div>
-            <div className="mobile-more-status">
-              <span className={`connection-dot ${linkedin.connected ? 'live' : ''}`} />
-              <div><strong>{linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}</strong><span>{linkedin.connected ? 'Official API connection is ready.' : 'Connect through official OAuth to enable publishing.'}</span></div>
             </div>
             <button className="mobile-more-signout" onClick={logout}><LogOut size={17} /> Sign out</button>
             <div className="mobile-more-footer">Suvacya · by Kanishka</div>
@@ -1058,15 +1137,17 @@ function MiniStat({ icon: Icon, label, value }: any) {
 
 // Production copy sync marker: ensure latest UI copy is included in deployment.
 function ApprovalWorkspace(props: any) {
-  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, dashboardCounts, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction } = props;
-  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, dashboardCounts, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction, publishImage, publishImagePreview, onPublishImageChange } = props;
   const [mobileReviewOpen, setMobileReviewOpen] = useState(false);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const previousSelectedId = useRef<number | null>(null);
 
   useEffect(() => {
-    setSelectedImage(null);
-    setImagePreview(null);
-  }, [selectedId]);
+    if (previousSelectedId.current !== null && previousSelectedId.current !== selectedId) {
+      if (publishImagePreview) URL.revokeObjectURL(publishImagePreview);
+      onPublishImageChange(null, null);
+    }
+    previousSelectedId.current = selectedId;
+  }, [selectedId, publishImagePreview, onPublishImageChange]);
 
   const chooseImage = (file: File | null) => {
     if (!file) return;
@@ -1074,13 +1155,13 @@ function ApprovalWorkspace(props: any) {
       window.alert('Only JPEG or PNG images are supported.');
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
+    if (file.size > 4 * 1024 * 1024) {
       window.alert('Image must be 4 MB or smaller.');
       return;
     }
-    if (imagePreview) URL.revokeObjectURL(imagePreview);
-    setSelectedImage(file);
-    setImagePreview(URL.createObjectURL(file));
+    if (publishImagePreview) URL.revokeObjectURL(publishImagePreview);
+    const preview = URL.createObjectURL(file);
+    onPublishImageChange(file, preview);
   };
 
   return (
@@ -1161,15 +1242,15 @@ function ApprovalWorkspace(props: any) {
                   <div className="review-label" style={{ marginBottom: 7 }}>Optional photograph</div>
                   <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG or PNG image (up to 4 MB). The image is sent directly to LinkedIn during execution and is not stored by Suvacya.</div>
                   <input type="file" accept="image/jpeg,image/png" onChange={(e) => chooseImage(e.target.files?.[0] || null)} disabled={isBusy} />
-                  {imagePreview && (
+                  {publishImagePreview && (
                     <div style={{ marginTop: 10 }}>
-                      <img src={imagePreview} alt="Selected LinkedIn post image preview" style={{ display: 'block', width: '100%', maxHeight: 280, objectFit: 'contain', borderRadius: 10, background: '#f1f5f9' }} />
-                      <button className="link-button" style={{ marginTop: 7 }} onClick={() => { if (imagePreview) URL.revokeObjectURL(imagePreview); setImagePreview(null); setSelectedImage(null); }}>Remove image</button>
+                      <img src={publishImagePreview} alt="Selected LinkedIn post image preview" style={{ display: 'block', width: '100%', maxHeight: 280, objectFit: 'contain', borderRadius: 10, background: '#f1f5f9' }} />
+                      <button className="link-button" style={{ marginTop: 7 }} onClick={() => { if (publishImagePreview) URL.revokeObjectURL(publishImagePreview); onPublishImageChange(null, null); }}>Remove image</button>
                     </div>
                   )}
                 </div>
                 <div className="review-actions" style={{ marginTop: 14 }}>
-                  <button className="button success progress-button" disabled={isBusy} onClick={() => onAction('execute', selectedImage)}>
+                  <button className="button success progress-button" disabled={isBusy} onClick={() => onAction('execute', publishImage)}>
                     <span className="button-content"><ExternalLink size={14}/> {busyAction === 'execute' ? operationStage || 'Publishing…' : 'Execute'}</span>
                     {busyAction === 'execute' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
                   </button>
@@ -1477,7 +1558,7 @@ function SettingsView(props: any) {
   const {
     brand, profile, brandTitle, setBrandTitle, brandIndustry, setBrandIndustry,
     brandExperienceYears, setBrandExperienceYears, brandTone, setBrandTone,
-    posts, updatePost, addPost, removePost, building, onBuild, linkedin, onConnect,
+    posts, updatePost, addPost, removePost, building, onBuild,
     editing, setEditing, onCancel, personalThoughts = [], onDeletePersonalThoughts,
     expandedThoughtId, setExpandedThoughtId, selectedThoughtIds = [], setSelectedThoughtIds,
     thoughtSelectionMode = false, setThoughtSelectionMode
@@ -1486,7 +1567,7 @@ function SettingsView(props: any) {
   const count = posts.filter((x: string) => x.trim()).length;
   const experienceValue = brandExperienceYears === '' ? '' : String(brandExperienceYears);
   const linkedinProfile = brand.linkedin_profile || {};
-  const hasLinkedInProfile = Boolean(linkedinProfile.connected || linkedin.connected);
+  const hasLinkedInProfile = Boolean(linkedinProfile.connected);
   const linkedinPicture = linkedinProfile.picture_url || '';
   const linkedinPhotoAvailable = Boolean(linkedinPicture);
 
@@ -1787,59 +1868,25 @@ function SettingsView(props: any) {
 
       <section className="panel settings-card" style={{ marginTop: 16 }}>
         <h2 className="settings-title">Privacy & Data</h2>
-        <p className="settings-copy">Review your data controls, export your application data, or permanently delete your Suvacya account.</p>
+        <p className="settings-copy">Review privacy information and account data controls. Account deletion and LinkedIn connection management are available from Profile.</p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-          <button className="button" onClick={async () => {
-            try {
-              const csrf = document.cookie.split('; ').find((part) => part.startsWith('__Host-suvacya-csrf='))?.split('=').slice(1).join('=') || document.cookie.split('; ').find((part) => part.startsWith('suvacya-csrf='))?.split('=').slice(1).join('=') || '';
-              const res = await fetch(API_BASE + '/api/account/export', { credentials: 'include', headers: csrf ? { 'X-CSRF-Token': csrf } : {} });
-              const data = await res.json();
-              if (!res.ok) throw new Error(getApiError(data, 'Data export failed'));
-              const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-              const url = URL.createObjectURL(blob);
-              const anchor = document.createElement('a');
-              anchor.href = url;
-              anchor.download = 'suvacya-data-export.json';
-              anchor.click();
-              URL.revokeObjectURL(url);
-              window.alert('Your Suvacya data export is ready.');
-            } catch (e) {
-              window.alert(e instanceof Error ? e.message : 'Data export failed');
-            }
-          }}><Download size={14}/> Export my data</button>
           <a className="button" href="/privacy">Privacy Policy</a>
           <a className="button" href="/terms">Terms</a>
-          <button className="button" style={{ color: '#b91c1c' }} onClick={async () => {
-            const confirmation = window.prompt('This permanently deletes your Suvacya account and application data. Type DELETE to confirm.');
-            if (confirmation !== 'DELETE') return;
-            try {
-              const csrf = document.cookie.split('; ').find((part) => part.startsWith('__Host-suvacya-csrf='))?.split('=').slice(1).join('=') || document.cookie.split('; ').find((part) => part.startsWith('suvacya-csrf='))?.split('=').slice(1).join('=') || '';
-              const res = await fetch(API_BASE + '/api/account', {
-                method: 'DELETE',
-                credentials: 'include',
-                headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
-                body: JSON.stringify({ confirmation }),
-              });
-              const data = await res.json().catch(() => ({}));
-              if (!res.ok) throw new Error(getApiError(data, 'Account deletion failed'));
-              window.location.href = '/';
-            } catch (e) {
-              window.alert(e instanceof Error ? e.message : 'Account deletion failed');
-            }
-          }}><X size={14}/> Delete account</button>
         </div>
       </section>
 
-      <section className="panel settings-card" style={{ marginTop: 16 }}>
-        <h2 className="settings-title">LinkedIn connection</h2>
-        <p className="settings-copy">
-          Signed in as <b>{profile.display_name}</b>. {linkedin.connected
-            ? 'Your official LinkedIn connection is active. Suvacya uses only the profile information LinkedIn makes available to the current app permissions.'
-            : 'Connect LinkedIn to prefill the starting Brand DNA where available and enable supported publishing actions.'}
-        </p>
-        <button className="button" onClick={onConnect}><Link2 size={14}/>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
-      </section>
     </>
+  );
+}
+
+function FullScreenLoading({ label = 'Loading…' }: { label?: string }) {
+  return (
+    <main className="full-screen-loading" aria-live="polite" aria-busy="true">
+      <div className="full-screen-loading-card">
+        <div className="brand-mark"><Sparkles size={18} /></div>
+        <div className="full-screen-loading-label">{label}</div>
+      </div>
+    </main>
   );
 }
 

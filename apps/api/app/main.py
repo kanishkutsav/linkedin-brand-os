@@ -1243,7 +1243,11 @@ async def research_discover(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Live research failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Live research failed. The public source feed or configured LLM provider was unavailable. Please try again.") from exc
+        return {
+            "opportunities": [],
+            "fallback": True,
+            "message": "Live sources are temporarily unavailable and no cached research is available yet. You can retry shortly.",
+        }
 
 
 @app.get("/api/research/opportunities")
@@ -1667,6 +1671,7 @@ async def execute_approval(
             "id": approval_id,
             "status": "EXECUTED" if publish_result.success else "APPROVED",
             "published": publish_result.success,
+            "confirmed": publish_result.success,
             "external_id": publish_result.external_id,
             "image_urn": getattr(publish_result, "image_urn", None),
             "published_at": saved_approval.published_at if saved_approval else None,
