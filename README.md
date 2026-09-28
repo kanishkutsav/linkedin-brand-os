@@ -1,4 +1,4 @@
-# LinkedIn Personal Brand OS
+# Suvacya — Personal Brand Manager
 
 HITL-first AI personal-brand manager. AI prepares; human decides; approved actions execute only through a compliant integration.
 
