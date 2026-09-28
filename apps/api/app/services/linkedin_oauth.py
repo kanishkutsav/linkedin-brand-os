@@ -367,7 +367,7 @@ async def exchange_code(session: AsyncSession, code: str) -> dict:
     user_result = await session.execute(select(AuthUser).where(AuthUser.id == exchange.user_id))
     user = user_result.scalar_one_or_none()
     if user is None or not user.is_active or not user.is_whitelisted:
-        raise HTTPException(status_code=403, detail="Brand OS user is no longer active or whitelisted.")
+        raise HTTPException(status_code=403, detail="Suvacya user is no longer active or whitelisted.")
 
     token = await AuthService.create_session(
         session,

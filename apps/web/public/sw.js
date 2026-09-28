@@ -1,4 +1,4 @@
-const CACHE_NAME = 'brand-os-shell-v1';
+const CACHE_NAME = 'suvacya-shell-v2';
 const APP_SHELL = ['/'];
 
 self.addEventListener('install', (event) => {
