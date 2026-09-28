@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import secrets
@@ -77,11 +78,15 @@ async def build_authorization_url(session: AsyncSession, browser_nonce: str | No
             detail="LinkedIn OAuth is not configured. Add LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET in Render.",
         )
 
+    browser_nonce = browser_nonce or secrets.token_urlsafe(32)
+    if len(browser_nonce) > 200:
+        raise HTTPException(status_code=400, detail="Invalid OAuth browser nonce.")
     random_state = secrets.token_urlsafe(32)
-    state = f"{browser_nonce}.{random_state}" if browser_nonce else random_state
+    state = f"{random_state}.{browser_nonce}"
     session.add(
         LinkedInOAuthState(
             state_hash=_hash(state),
+            browser_nonce_hash=_hash(browser_nonce),
             expires_at=_utc_now() + timedelta(minutes=10),
         )
     )
@@ -138,7 +143,7 @@ async def sync_missing_profile_data(session: AsyncSession, user_id: int) -> dict
         userinfo = await asyncio.to_thread(
             _request_json,
             LINKEDIN_USERINFO_URL,
-            headers={"Authorization": f"Bearer {connection.access_token}"},
+            headers={"Authorization": f"Bearer {decrypt_linkedin_token(connection.access_token)[0]}"},
         )
     except HTTPException as exc:
         logger.info("LinkedIn missing-profile sync skipped for user %s: %s", user_id, exc.detail)
@@ -206,6 +211,7 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
     if state_row is None:
         raise HTTPException(status_code=400, detail="Invalid or expired LinkedIn OAuth state.")
 
+    browser_nonce_hash = state_row.browser_nonce_hash
     await session.delete(state_row)
     await session.commit()
 
@@ -302,7 +308,7 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
         connection = LinkedInConnection(
             user_id=user.id,
             member_sub=member_sub,
-            access_token=access_token,
+            access_token=encrypt_linkedin_token(access_token),
             token_expires_at=token_expires_at,
             linkedin_email=email,
             linkedin_name=display_name,
@@ -315,7 +321,7 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
         session.add(connection)
     else:
         connection.member_sub = member_sub
-        connection.access_token = access_token
+        connection.access_token = encrypt_linkedin_token(access_token)
         connection.token_expires_at = token_expires_at
         connection.linkedin_email = email
         connection.linkedin_name = display_name
@@ -343,13 +349,14 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
             user_id=user.id,
             expires_at=_utc_now() + timedelta(minutes=5),
             used=False,
+            browser_nonce_hash=browser_nonce_hash,
         )
     )
     await session.commit()
     return exchange_code
 
 
-async def exchange_code(session: AsyncSession, code: str) -> dict:
+async def exchange_code(session: AsyncSession, code: str, browser_nonce: str) -> dict:
     result = await session.execute(
         select(LinkedInOAuthExchange).where(
             LinkedInOAuthExchange.code_hash == _hash(code),
@@ -360,6 +367,9 @@ async def exchange_code(session: AsyncSession, code: str) -> dict:
     exchange = result.scalar_one_or_none()
     if exchange is None:
         raise HTTPException(status_code=400, detail="Invalid or expired LinkedIn exchange code.")
+
+    if not browser_nonce or not hmac.compare_digest(exchange.browser_nonce_hash, _hash(browser_nonce)):
+        raise HTTPException(status_code=400, detail="LinkedIn browser verification failed.")
 
     exchange.used = True
     await session.commit()
