@@ -746,7 +746,7 @@ useEffect(() => {
                     <h1>{brand.ready ? 'Turn your expertise into a recognizable point of view.' : 'Start by teaching Brand OS your voice.'}</h1>
                     <p>{brand.ready
                       ? 'Research, content strategy, drafting and review — orchestrated around your brand voice, with you always in control of what reaches LinkedIn.'
-                      : 'Enter your professional title, industry, desired tone and years of experience. Then add 3–10 previous LinkedIn posts so Brand OS can learn your writing style.'}</p>
+                      : 'Review the Brand DNA we prefilled from LinkedIn. Previous posts are optional and can be added later to strengthen your writing style.'}</p>
                     <div className="hero-actions">
                       <button
                         className="button primary progress-button"
