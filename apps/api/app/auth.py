@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.database import get_session
 from app.services.auth_service import AppUser, AuthService
+from app.services.security import request_token
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -22,13 +23,15 @@ async def _resolve_user(request: Request, credentials: HTTPAuthorizationCredenti
         if normalized in {"owner", "admin", "reviewer", "user"}:
             return AppUser(id=normalized, email=f"{normalized}@local.test", role=normalized)
 
-    auth_header = request.headers.get("authorization")
-    if auth_header and auth_header.lower().startswith("bearer "):
-        token = auth_header.split(" ", 1)[1].strip()
-        if token:
-            user = await AuthService.get_user_from_token(session, token)
-            if user:
-                return user
+    # Browser sessions are stored in the HttpOnly session cookie. The
+    # frontend deliberately does not expose that token to JavaScript, so
+    # role-protected endpoints must resolve the same cookie-backed session
+    # used by /api/auth/me and /api/linkedin/status.
+    cookie_or_bearer = request_token(request)
+    if cookie_or_bearer:
+        user = await AuthService.get_user_from_token(session, cookie_or_bearer)
+        if user:
+            return user
 
     return None
 
