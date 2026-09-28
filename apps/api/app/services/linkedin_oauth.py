@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.models import AuthUser, LinkedInConnection, LinkedInOAuthExchange, LinkedInOAuthState, UserProfile
 from app.services.auth_service import AppUser, AuthService
+from app.services.security import encrypt_linkedin_token
 
 
 logger = logging.getLogger(__name__)
