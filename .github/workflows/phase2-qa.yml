@@ -3,7 +3,7 @@ name: Phase 2 QA
 
 on:
   push:
-    branches: ["main", "phase2-qa", "phase6-durable-worker-complete", "phase7-8-qa", "feat/linkedin-auto-brand-dna"]
+    branches: ["main", "phase2-qa", "phase6-durable-worker-complete", "phase7-8-qa"]
   pull_request:
     branches: ["main"]
 
