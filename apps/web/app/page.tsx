@@ -420,7 +420,7 @@ useEffect(() => {
   useEffect(() => { setLinkedinAvatarFailed(false); }, [linkedinAvatarUrl]);
   const closeMore = () => setMoreOpen(false);
   const isIosDevice = () => /iphone|ipad|ipod/i.test(window.navigator.userAgent) || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
-  const installBrandOS = async () => {
+  const installSuvacya = async () => {
     if (isStandalone) return;
     if (installPrompt) {
       const prompt = installPrompt;
@@ -911,7 +911,7 @@ useEffect(() => {
               <button onClick={() => go('Analytics')}><BarChart3 size={18} /><span>Analytics</span></button>
               <button onClick={() => go('Brand DNA')}><Settings size={18} /><span>Brand DNA</span></button>
               <button onClick={() => { closeMore(); connectLinkedIn(); }}><Link2 size={18} /><span>{linkedin.connected ? 'LinkedIn' : 'Connect LinkedIn'}</span></button>
-              <button onClick={installBrandOS} disabled={isStandalone}><Download size={18} /><span>{isStandalone ? 'Installed' : 'Install Suvacya'}</span></button>
+              <button onClick={installSuvacya} disabled={isStandalone}><Download size={18} /><span>{isStandalone ? 'Installed' : 'Install Suvacya'}</span></button>
             </div>
             <div className="mobile-more-status">
               <span className={`connection-dot ${linkedin.connected ? 'live' : ''}`} />
