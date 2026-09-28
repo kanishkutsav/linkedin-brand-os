@@ -257,33 +257,31 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
             logger.warning("LinkedIn OAuth token response contained an invalid expires_in value")
             token_expires_at = None
 
-        # OIDC's ID token is the primary identity source. LinkedIn documents
-        # sub/name/email claims in the ID token and makes email optional in
-        # userinfo, so userinfo should enrich identity rather than be a hard
-        # dependency for successful authentication.
+        # Keep LinkedIn userinfo as the authoritative member identity source.
+        # The ID token is only used as an enrichment source after userinfo succeeds,
+        # preserving the existing trust model without treating an unverified JWT
+        # payload as an authorization credential.
+        try:
+            userinfo = await asyncio.to_thread(
+                _request_json,
+                LINKEDIN_USERINFO_URL,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        except HTTPException as exc:
+            logger.warning(
+                "LinkedIn userinfo request failed status=%s",
+                exc.status_code,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="LinkedIn member identity could not be retrieved.",
+            ) from exc
+
+        profile_data = dict(userinfo or {})
         oidc_claims = _decode_jwt_payload(token_payload.get("id_token"))
-        profile_data = dict(oidc_claims or {})
-        if not profile_data.get("sub") or not profile_data.get("email") or not profile_data.get("name"):
-            try:
-                userinfo = await asyncio.to_thread(
-                    _request_json,
-                    LINKEDIN_USERINFO_URL,
-                    headers={"Authorization": f"Bearer {access_token}"},
-                )
-                for key, value in dict(userinfo or {}).items():
-                    if key not in profile_data or not profile_data.get(key):
-                        profile_data[key] = value
-            except HTTPException as exc:
-                if not profile_data.get("sub") or not profile_data.get("email"):
-                    logger.warning(
-                        "LinkedIn userinfo unavailable and OIDC identity is incomplete status=%s",
-                        exc.status_code,
-                    )
-                    raise HTTPException(
-                        status_code=502,
-                        detail="LinkedIn member identity could not be retrieved.",
-                    ) from exc
-                logger.warning("LinkedIn userinfo enrichment unavailable; continuing with OIDC claims")
+        for key, value in oidc_claims.items():
+            if key not in profile_data or not profile_data.get(key):
+                profile_data[key] = value
 
         email = AuthService.normalize_email(profile_data.get("email"))
         member_sub = str(profile_data.get("sub") or "").strip()
