@@ -43,7 +43,7 @@ from app.services.auth_service import AppUser, AuthService
 from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback, sync_missing_profile_data
 from app.services.linkedin_analytics import LinkedInAnalyticsService
 from app.services.gemini_service import ModelRouterService
-from app.services.jobs import search_jobs
+from app.services.jobs import resolve_job_location, search_jobs
 from app.services.security import (
     CSRF_COOKIE, SESSION_COOKIE, clear_session_cookies, client_key, decrypt_linkedin_token, encrypt_linkedin_token,
     endpoint_limit, migrate_plaintext_linkedin_tokens, rate_limiter, request_token,
@@ -166,8 +166,12 @@ async def lifespan(app: FastAPI):
             tables=[ObservabilityEvent.__table__, UserFeedback.__table__, JobSearchCache.__table__],
             checkfirst=True,
         ))
-        await conn.execute(text("UPDATE auth_users SET role = 'user' WHERE role = 'admin' AND lower(email) != lower(:email)"), {"email": settings.admin_email})
-        await conn.execute(text("UPDATE auth_users SET role = 'admin' WHERE lower(email) = lower(:email)"), {"email": settings.admin_email})
+        auth_users_exists = await conn.run_sync(
+            lambda sync_conn: inspect(sync_conn).has_table("auth_users")
+        )
+        if auth_users_exists:
+            await conn.execute(text("UPDATE auth_users SET role = 'user' WHERE role = 'admin' AND lower(email) != lower(:email)"), {"email": settings.admin_email})
+            await conn.execute(text("UPDATE auth_users SET role = 'admin' WHERE lower(email) = lower(:email)"), {"email": settings.admin_email})
 
     try:
         async with SessionLocal() as security_session:
@@ -378,10 +382,30 @@ class FeedbackStatusRequest(BaseModel):
 
 
 @app.get("/api/jobs/search")
-async def jobs_search(query: str | None = None, session: AsyncSession = Depends(get_session),
-                      current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
+async def jobs_search(
+    request: Request,
+    query: str | None = None,
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
+):
     profile = await AuthService.get_or_create_profile(session, current_user)
-    return await search_jobs(session, profile.professional_title or "", profile.experience_years, profile.industry or "", query)
+    linkedin_result = await session.execute(
+        select(LinkedInConnection).where(LinkedInConnection.user_id == int(current_user.id))
+    )
+    linkedin_connection = linkedin_result.scalar_one_or_none()
+    location = resolve_job_location(
+        request,
+        linkedin_connection.linkedin_locale if linkedin_connection else None,
+        default_country=settings.adzuna_country,
+    )
+    return await search_jobs(
+        session,
+        profile.professional_title or "",
+        profile.experience_years,
+        profile.industry or "",
+        query,
+        location=location,
+    )
 
 
 @app.post("/api/feedback")

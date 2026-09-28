@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, ArrowUpRight, BarChart3, BrainCircuit, Briefcase, Check, ChevronRight, CircleCheck,
   Clock3, Command, Download, ExternalLink, FileText, Gauge, Globe2, LayoutDashboard, Link2,
-  LogOut, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings,
+  LoaderCircle, LogOut, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings,
   ShieldAlert, ShieldCheck, Sparkles, Target, TrendingUp, UserRound, WandSparkles, MessageSquare, X, Zap
 } from 'lucide-react';
 
@@ -61,16 +61,18 @@ const nav = [
   ['Dashboard', LayoutDashboard, 'Command center'],
   ['Research', Search, 'Find opportunities'],
   ['Content Studio', FileText, 'Draft & refine'],
+  ['Jobs', Briefcase, 'Job opportunities'],
   ['LinkedIn Posts', ExternalLink, 'Published posts'],
+  ['Feedback', MessageSquare, 'Share feedback'],
   ['Analytics', BarChart3, 'Performance'],
   ['Brand DNA', Settings, 'Brand DNA'],
-  ['Jobs', Briefcase, 'Job opportunities'],
-  ['Feedback', MessageSquare, 'Share feedback'],
   ['Admin', ShieldAlert, 'Operations & reliability'],
 ] as const;
 
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [pendingRequests, setPendingRequests] = useState(0);
   const [profile, setProfile] = useState<Profile>({ display_name: 'User', role: 'owner' });
   const [linkedinAvatarFailed, setLinkedinAvatarFailed] = useState(false);
   const [linkedin, setLinkedin] = useState<LinkedInStatus>({ connected: false });
@@ -130,9 +132,9 @@ export default function Home() {
   const [expandedThoughtId, setExpandedThoughtId] = useState<number | null>(null);
   const [selectedThoughtIds, setSelectedThoughtIds] = useState<number[]>([]);
   const [thoughtSelectionMode, setThoughtSelectionMode] = useState(false);
-  const [jobs, setJobs] = useState<any[]>([]); const [jobProviders, setJobProviders] = useState<any[]>([]); const [jobQuery, setJobQuery] = useState(''); const [jobsLoading, setJobsLoading] = useState(false); const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<any[]>([]); const [jobProviders, setJobProviders] = useState<any[]>([]); const [jobLocation, setJobLocation] = useState<any>(null); const [jobQuery, setJobQuery] = useState(''); const [jobsLoading, setJobsLoading] = useState(false); const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [feedbackType, setFeedbackType] = useState('FEATURE'); const [feedbackSubject, setFeedbackSubject] = useState(''); const [feedbackDescription, setFeedbackDescription] = useState(''); const [feedbackContext, setFeedbackContext] = useState(''); const [feedbackSending, setFeedbackSending] = useState(false);
-  const [adminOverview, setAdminOverview] = useState<any>(null); const [adminActivity, setAdminActivity] = useState<any[]>([]); const [adminFeedback, setAdminFeedback] = useState<any[]>([]); const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  const [adminOverview, setAdminOverview] = useState<any>(null); const [adminActivity, setAdminActivity] = useState<any[]>([]); const [adminFeedback, setAdminFeedback] = useState<any[]>([]); const [adminUsers, setAdminUsers] = useState<any[]>([]); const [adminLoading, setAdminLoading] = useState(false);
 
   const headers = (authToken = token) => (authToken && authToken !== 'cookie') ? { Authorization: `Bearer ${authToken}` } : {};
 
@@ -144,7 +146,9 @@ export default function Home() {
       const csrf = readCookie('__Host-suvacya-csrf') || readCookie('suvacya-csrf');
       if (csrf) requestHeaders.set('X-CSRF-Token', csrf);
     }
-    return fetch(input, { ...init, headers: requestHeaders, credentials: 'include' });
+    setPendingRequests((count) => count + 1);
+    return fetch(input, { ...init, headers: requestHeaders, credentials: 'include' })
+      .finally(() => setPendingRequests((count) => Math.max(0, count - 1)));
   };
 
   useEffect(() => {
@@ -247,6 +251,7 @@ useEffect(() => {
       if (!expectedNonce || !oauthNonce || expectedNonce !== oauthNonce) {
         window.sessionStorage.removeItem('brand-os-oauth-nonce');
         setError('LinkedIn sign-in could not be verified in this browser. Please start the connection again.');
+        setAuthChecking(false);
         return;
       }
       window.sessionStorage.removeItem('brand-os-oauth-started-at');
@@ -264,10 +269,13 @@ useEffect(() => {
       }).catch((e) => {
         window.sessionStorage.removeItem('brand-os-oauth-nonce');
         setError(e instanceof Error ? e.message : 'LinkedIn connection failed');
-      });
+      }).finally(() => setAuthChecking(false));
       return;
     }
-    apiFetch(API_BASE + '/api/auth/me').then((res) => { if (res.ok) setToken('cookie'); }).catch(() => undefined);
+    apiFetch(API_BASE + '/api/auth/me')
+      .then((res) => { if (res.ok) setToken('cookie'); })
+      .catch(() => undefined)
+      .finally(() => setAuthChecking(false));
   }, []);
 
   const fetchData = async (authToken: string | null = token) => {
@@ -419,8 +427,36 @@ useEffect(() => {
     }
   };
   useEffect(() => { fetchData(token); }, [token]);
-  const loadJobs = async () => { if (!token) return; setJobsLoading(true); try { const q = jobQuery.trim() ? '?query=' + encodeURIComponent(jobQuery.trim()) : ''; const res = await apiFetch(API_BASE + '/api/jobs/search' + q, { headers: headers() }); const data = await res.json(); if (!res.ok) throw new Error(getApiError(data, 'Job search is temporarily unavailable.')); setJobs(data.jobs || []); setJobProviders(data.providers || []); } catch (e) { setError(e instanceof Error ? e.message : 'Job search is temporarily unavailable.'); } finally { setJobsLoading(false); } };
-  const loadAdmin = async () => { if (!token || profile.role !== 'admin') return; try { const results = await Promise.all(['/api/admin/overview','/api/admin/activity','/api/admin/feedback','/api/admin/users'].map((path) => apiFetch(API_BASE + path, { headers: headers() }))); if (results[0].ok) setAdminOverview(await results[0].json()); if (results[1].ok) setAdminActivity((await results[1].json()).items || []); if (results[2].ok) setAdminFeedback((await results[2].json()).items || []); if (results[3].ok) setAdminUsers((await results[3].json()).items || []); } catch (e) { setError(e instanceof Error ? e.message : 'Admin data could not be loaded.'); } };
+  const loadJobs = async (requestedQuery?: string) => {
+    if (!token) return;
+    const query = (requestedQuery ?? jobQuery).trim();
+    setJobsLoading(true);
+    setJobs([]);
+    try {
+      const q = query ? '?query=' + encodeURIComponent(query) : '';
+      const res = await apiFetch(API_BASE + '/api/jobs/search' + q, { headers: headers() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(getApiError(data, 'Job search is temporarily unavailable.'));
+      setJobs(data.jobs || []);
+      setJobProviders(data.providers || []);
+      setJobLocation(data.location || null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Job search is temporarily unavailable.');
+    } finally {
+      setJobsLoading(false);
+    }
+  };
+  const loadAdmin = async () => { if (!token || profile.role !== 'admin') return; setAdminLoading(true); try { const results = await Promise.all(['/api/admin/overview','/api/admin/activity','/api/admin/feedback','/api/admin/users'].map((path) => apiFetch(API_BASE + path, { headers: headers() }))); if (results[0].ok) setAdminOverview(await results[0].json()); if (results[1].ok) setAdminActivity((await results[1].json()).items || []); if (results[2].ok) setAdminFeedback((await results[2].json()).items || []); if (results[3].ok) setAdminUsers((await results[3].json()).items || []); } catch (e) { setError(e instanceof Error ? e.message : 'Admin data could not be loaded.'); } finally { setAdminLoading(false); } };
+  const updateAdminFeedback = async (id: number, status: string, priority: string) => {
+    if (!token || profile.role !== 'admin') return;
+    const response = await apiFetch(API_BASE + '/api/admin/feedback/' + id, {
+      method: 'PATCH',
+      headers: { ...headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, priority }),
+    });
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || 'Feedback could not be updated.');
+    await loadAdmin();
+  };
   useEffect(() => { if (tab === 'Jobs' && token && !jobs.length) void loadJobs(); if (tab === 'Admin' && token && profile.role === 'admin') void loadAdmin(); }, [tab, token, profile.role]);
   useEffect(() => {
     const selected = queue.find((item) => item.id === selectedId);
@@ -495,6 +531,47 @@ useEffect(() => {
     window.location.href = '/api/auth/linkedin/start?browser_nonce=' + encodeURIComponent(nonce);
   };
   const cancelBrandEdit = async () => { await fetchData(); setBrandEditing(false); };
+  const exportAccountData = async () => {
+    try {
+      const csrf = readCookie('__Host-suvacya-csrf') || readCookie('suvacya-csrf');
+      const res = await apiFetch(API_BASE + '/api/account/export', {
+        credentials: 'include',
+        headers: csrf ? { 'X-CSRF-Token': csrf } : {},
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(getApiError(data, 'Data export failed'));
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'suvacya-data-export.json';
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setNotice('Your Suvacya data export is ready.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Data export failed');
+    }
+  };
+
+  const deleteAccount = async () => {
+    const confirmation = window.prompt('This permanently deletes your Suvacya account and application data. Type DELETE to confirm.');
+    if (confirmation !== 'DELETE') return;
+    try {
+      const csrf = readCookie('__Host-suvacya-csrf') || readCookie('suvacya-csrf');
+      const res = await apiFetch(API_BASE + '/api/account', {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
+        body: JSON.stringify({ confirmation }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(getApiError(data, 'Account deletion failed'));
+      window.location.href = '/';
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Account deletion failed');
+    }
+  };
+
   const logout = async () => {
     try {
       if (token) {
@@ -779,6 +856,32 @@ useEffect(() => {
     finally { setIsBusy(false); }
   };
 
+  const globalLoading = pendingRequests > 0 || loading || jobsLoading || adminLoading || isBusy || isGenerating || isResearching || isImproving || isBuildingBrand || savingThought || feedbackSending || authChecking;
+  const globalLoadingMessage = authChecking
+    ? 'Loading your workspace…'
+    : adminLoading
+      ? 'Loading admin data…'
+      : jobsLoading
+        ? 'Searching jobs…'
+        : isResearching
+          ? 'Researching opportunities…'
+          : isGenerating
+            ? 'Generating content…'
+            : isImproving
+              ? 'Improving your content…'
+              : isBuildingBrand
+                ? 'Updating your Brand DNA…'
+                : feedbackSending
+                  ? 'Submitting feedback…'
+                  : savingThought
+                    ? 'Saving your learning…'
+                    : isBusy
+                      ? 'Processing your request…'
+                      : loading
+                        ? 'Loading your workspace…'
+                        : 'Loading…';
+
+  if (authChecking) return <div style={{ minHeight: '100vh', background: '#f5f8fc' }}><WorkspaceLoading message={globalLoadingMessage} /></div>;
   if (!token) return <LoginScreen error={error} onConnect={connectLinkedIn} />;
 
   return (
@@ -795,16 +898,6 @@ useEffect(() => {
           </button>
         ))}
         <div className="sidebar-spacer" />
-        <div className="connection-card">
-          <div className="connection-row">
-            <span className={`connection-dot ${linkedin.connected ? 'live' : ''}`} />
-            <span className="connection-title">{linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}</span>
-          </div>
-          <div className="connection-meta">{linkedin.connected ? 'Official API connection is ready.' : 'Connect through official OAuth to enable publishing.'}</div>
-          <button className="button ghost-dark" style={{ width: '100%', marginTop: 9 }} onClick={connectLinkedIn}>
-            <Link2 size={13} /> {linkedin.connected ? 'Reconnect' : 'Connect'}
-          </button>
-        </div>
         <div className="connection-card">
           <div className="connection-row"><ShieldCheck size={15} color="#4c8fef" /><span className="connection-title">Human approval gate</span></div>
           <div className="connection-meta">No external LinkedIn action is executed without your explicit approval.</div>
@@ -828,8 +921,12 @@ useEffect(() => {
                 <button onClick={() => { setProfileMenuOpen(false); connectLinkedIn(); }}><Link2 size={14}/> {linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
                 <button onClick={() => { setProfileMenuOpen(false); void fetchData(); }}><RefreshCw size={14}/> Refresh dashboard</button>
                 <button onClick={() => { setProfileMenuOpen(false); go('Feedback'); }}><MessageSquare size={14}/> Send feedback</button>
+                <button onClick={() => { setProfileMenuOpen(false); void exportAccountData(); }}><Download size={14}/> Export my data</button>
+                <a href="/privacy" onClick={() => setProfileMenuOpen(false)}><ShieldCheck size={14}/> Privacy Policy</a>
+                <a href="/terms" onClick={() => setProfileMenuOpen(false)}><FileText size={14}/> Terms</a>
                 {profile.role === 'admin' && <button onClick={() => { setProfileMenuOpen(false); go('Admin'); }}><ShieldAlert size={14}/> Admin panel</button>}
-                <button className="danger" onClick={() => { setProfileMenuOpen(false); logout(); }}><LogOut size={14}/> Sign out</button>
+                <button className="danger" onClick={() => { setProfileMenuOpen(false); void deleteAccount(); }}><X size={14}/> Delete account</button>
+                <button className="danger" onClick={() => { setProfileMenuOpen(false); void logout(); }}><LogOut size={14}/> Sign out</button>
               </div>}
             </div>
           </div>
@@ -838,6 +935,7 @@ useEffect(() => {
         <main className="page">
           {notice && <div className="notice success"><CircleCheck size={15} /><span>{notice}</span></div>}
           {error && <div className="notice error"><X size={15} /><span>{error}</span></div>}
+          {globalLoading && <WorkspaceLoading message={globalLoadingMessage} />}
 
           {tab === 'Dashboard' && (
             <>
@@ -908,9 +1006,9 @@ useEffect(() => {
           {tab === 'Content Studio' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
           {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
-          {tab === 'Jobs' && <JobsView jobs={jobs} providers={jobProviders} query={jobQuery} setQuery={setJobQuery} loading={jobsLoading} expandedId={expandedJobId} setExpandedId={setExpandedJobId} onSearch={loadJobs} />}
+          {tab === 'Jobs' && <JobsView jobs={jobs} location={jobLocation} query={jobQuery} setQuery={setJobQuery} loading={jobsLoading} expandedId={expandedJobId} setExpandedId={setExpandedJobId} onSearch={loadJobs} />}
           {tab === 'Feedback' && <FeedbackView type={feedbackType} setType={setFeedbackType} subject={feedbackSubject} setSubject={setFeedbackSubject} description={feedbackDescription} setDescription={setFeedbackDescription} context={feedbackContext} setContext={setFeedbackContext} sending={feedbackSending} onSubmit={async () => { if (!feedbackSubject.trim() || !feedbackDescription.trim() || !token) return; setFeedbackSending(true); try { const res = await apiFetch(API_BASE + '/api/feedback', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback_type: feedbackType, subject: feedbackSubject, description: feedbackDescription, context: feedbackContext }) }); const data = await res.json(); if (!res.ok) throw new Error(getApiError(data, 'Feedback could not be submitted.')); setFeedbackSubject(''); setFeedbackDescription(''); setFeedbackContext(''); setNotice('Thanks. Your feedback was submitted.'); } catch (e) { setError(e instanceof Error ? e.message : 'Feedback could not be submitted.'); } finally { setFeedbackSending(false); } }} />}
-          {tab === 'Admin' && profile.role === 'admin' && <AdminView overview={adminOverview} activity={adminActivity} feedback={adminFeedback} users={adminUsers} onRefresh={loadAdmin} />}
+          {tab === 'Admin' && profile.role === 'admin' && <AdminView overview={adminOverview} activity={adminActivity} feedback={adminFeedback} users={adminUsers} loading={adminLoading} onRefresh={loadAdmin} onUpdateFeedback={updateAdminFeedback} />}
           {tab === 'Brand DNA' && (
             <SettingsView
               brand={brand}
@@ -995,10 +1093,6 @@ useEffect(() => {
               <button onClick={() => go('Brand DNA')}><Settings size={18} /><span>Brand DNA</span></button>
               <button onClick={() => { closeMore(); connectLinkedIn(); }}><Link2 size={18} /><span>{linkedin.connected ? 'LinkedIn' : 'Connect LinkedIn'}</span></button>
               <button onClick={installSuvacya} disabled={isStandalone}><Download size={18} /><span>{isStandalone ? 'Installed' : 'Install Suvacya'}</span></button>
-            </div>
-            <div className="mobile-more-status">
-              <span className={`connection-dot ${linkedin.connected ? 'live' : ''}`} />
-              <div><strong>{linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}</strong><span>{linkedin.connected ? 'Official API connection is ready.' : 'Connect through official OAuth to enable publishing.'}</span></div>
             </div>
             <button className="mobile-more-signout" onClick={logout}><LogOut size={17} /> Sign out</button>
             <div className="mobile-more-footer">Suvacya · by Kanishka</div>
@@ -1792,61 +1886,22 @@ function SettingsView(props: any) {
         )}
       </section>
 
-      <section className="panel settings-card" style={{ marginTop: 16 }}>
-        <h2 className="settings-title">Privacy & Data</h2>
-        <p className="settings-copy">Review your data controls, export your application data, or permanently delete your Suvacya account.</p>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-          <button className="button" onClick={async () => {
-            try {
-              const csrf = document.cookie.split('; ').find((part) => part.startsWith('__Host-suvacya-csrf='))?.split('=').slice(1).join('=') || document.cookie.split('; ').find((part) => part.startsWith('suvacya-csrf='))?.split('=').slice(1).join('=') || '';
-              const res = await fetch(API_BASE + '/api/account/export', { credentials: 'include', headers: csrf ? { 'X-CSRF-Token': csrf } : {} });
-              const data = await res.json();
-              if (!res.ok) throw new Error(getApiError(data, 'Data export failed'));
-              const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-              const url = URL.createObjectURL(blob);
-              const anchor = document.createElement('a');
-              anchor.href = url;
-              anchor.download = 'suvacya-data-export.json';
-              anchor.click();
-              URL.revokeObjectURL(url);
-              window.alert('Your Suvacya data export is ready.');
-            } catch (e) {
-              window.alert(e instanceof Error ? e.message : 'Data export failed');
-            }
-          }}><Download size={14}/> Export my data</button>
-          <a className="button" href="/privacy">Privacy Policy</a>
-          <a className="button" href="/terms">Terms</a>
-          <button className="button" style={{ color: '#b91c1c' }} onClick={async () => {
-            const confirmation = window.prompt('This permanently deletes your Suvacya account and application data. Type DELETE to confirm.');
-            if (confirmation !== 'DELETE') return;
-            try {
-              const csrf = document.cookie.split('; ').find((part) => part.startsWith('__Host-suvacya-csrf='))?.split('=').slice(1).join('=') || document.cookie.split('; ').find((part) => part.startsWith('suvacya-csrf='))?.split('=').slice(1).join('=') || '';
-              const res = await fetch(API_BASE + '/api/account', {
-                method: 'DELETE',
-                credentials: 'include',
-                headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
-                body: JSON.stringify({ confirmation }),
-              });
-              const data = await res.json().catch(() => ({}));
-              if (!res.ok) throw new Error(getApiError(data, 'Account deletion failed'));
-              window.location.href = '/';
-            } catch (e) {
-              window.alert(e instanceof Error ? e.message : 'Account deletion failed');
-            }
-          }}><X size={14}/> Delete account</button>
-        </div>
-      </section>
 
-      <section className="panel settings-card" style={{ marginTop: 16 }}>
-        <h2 className="settings-title">LinkedIn connection</h2>
-        <p className="settings-copy">
-          Signed in as <b>{profile.display_name}</b>. {linkedin.connected
-            ? 'Your official LinkedIn connection is active. Suvacya uses only the profile information LinkedIn makes available to the current app permissions.'
-            : 'Connect LinkedIn to prefill the starting Brand DNA where available and enable supported publishing actions.'}
-        </p>
-        <button className="button" onClick={onConnect}><Link2 size={14}/>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
-      </section>
     </>
+  );
+}
+
+function WorkspaceLoading({ message = 'Loading your workspace…' }: { message?: string }) {
+  return (
+    <div className="workspace-loading-overlay" role="status" aria-live="polite" aria-busy="true">
+      <div className="workspace-loading-card">
+        <div className="workspace-loading-spinner"><LoaderCircle size={18} className="spin" /></div>
+        <div>
+          <strong>{message}</strong>
+          <span>Fetching the latest data securely from Suvacya.</span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1857,17 +1912,23 @@ function EmptyState({ icon: Icon, title, text, action, onAction }: any) {
 function LinkedInMark({ size = 18, color }: { size?: number; color?: string }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill={color || 'currentColor'} aria-hidden="true"><path d="M6.5 8.2H3.2V20h3.3V8.2ZM4.85 3A1.95 1.95 0 1 0 4.85 6.9 1.95 1.95 0 0 0 4.85 3ZM20.8 13.25c0-3.52-1.88-5.16-4.4-5.16-2.02 0-2.92 1.11-3.43 1.89V8.2H9.67V20h3.3v-5.84c0-1.54.29-3.03 2.2-3.03 1.88 0 1.91 1.76 1.91 3.13V20h3.3l.02-6.75Z"/></svg>;
 }
-function JobsView({ jobs, providers, query, setQuery, loading, expandedId, setExpandedId, onSearch }: any) {
+function JobsView({ jobs, location, query, setQuery, loading, expandedId, setExpandedId, onSearch }: any) {
+  const locationLabel = location?.city && location?.country
+    ? location.city + ', ' + location.country
+    : (location?.country || 'your detected location');
+  const locationSource = location?.source === 'ip'
+    ? 'approximate IP location'
+    : location?.source === 'linkedin'
+      ? 'LinkedIn profile locale'
+      : 'configured default';
   return <>
     <div className="page-header"><div><div className="page-kicker"><Briefcase size={13}/> Career opportunities</div><h1 className="page-title">Job opportunities</h1><p className="page-description">Search openings using your professional title, experience and domain. Suvacya does not apply for jobs on your behalf.</p></div></div>
-    <section className="panel" style={{ padding: 18 }}><div style={{ display: 'flex', gap: 10, alignItems: 'center' }}><input className="input" style={{ flex: 1 }} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void onSearch(); }} placeholder="Search a position, e.g. Product Manager" /><button className="button primary" onClick={() => void onSearch()} disabled={loading}><Search size={14}/>{loading ? 'Searching…' : 'Search jobs'}</button></div><div style={{ marginTop: 10, color: '#7a899d', fontSize: 11 }}>Profile context is used when the search box is empty. Matching is deterministic and does not use AI.</div></section>
-    <section className="panel" style={{ marginTop: 16, padding: 18 }}><div className="panel-head"><div><h2 className="settings-title">Sources</h2><p className="settings-copy">Each provider is independent. Missing API keys do not block this section.</p></div></div><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{providers.map((p: any) => <span className="tag" key={p.provider}>{p.provider} · {p.configured ? (p.error ? 'temporarily unavailable' : 'configured') : 'waiting for API key'}</span>)}</div></section>
+    <section className="panel" style={{ padding: 18 }}><div style={{ display: 'flex', gap: 10, alignItems: 'center' }}><input className="input" style={{ flex: 1 }} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void onSearch(query); }} placeholder="Search a position, e.g. Product Manager" /><button className="button primary" onClick={() => void onSearch(query)} disabled={loading}><Search size={14}/>{loading ? 'Searching…' : 'Search jobs'}</button></div><div style={{ marginTop: 10, color: '#7a899d', fontSize: 11 }}>Profile context is used when the search box is empty. Matching is deterministic and does not use AI.</div><div style={{ marginTop: 9, color: '#5f6f86', fontSize: 11 }}><b>Search location:</b> {locationLabel} <span style={{ color: '#8a98ab' }}>· {locationSource}</span></div></section>
     <section className="panel" style={{ marginTop: 16, padding: 18 }}><div className="panel-head"><div><h2 className="settings-title">Openings</h2><p className="settings-copy">{jobs.length ? jobs.length + ' openings found' : 'No openings returned yet.'}</p></div></div>
-      {jobs.length ? jobs.map((job: any) => { const id = job.provider + ':' + job.provider_job_id; const open = expandedId === id; return <article key={id} className="post-entry" style={{ marginTop: 10 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}><div><div style={{ fontWeight: 800, color: '#10233f' }}>{job.title}</div><div style={{ marginTop: 4, fontSize: 12, color: '#5f6f86' }}>{job.company} · {job.location}{job.experience_level ? ' · ' + job.experience_level : ''}</div></div><span className="tag">{job.provider}</span></div><div style={{ marginTop: 9, display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="button" onClick={() => setExpandedId(open ? null : id)}>{open ? 'Hide description' : 'View description'}</button>{job.application_url ? <a className="button primary" href={job.application_url} target="_blank" rel="noopener noreferrer">Apply externally <ExternalLink size={13}/></a> : null}</div>{open ? <div style={{ marginTop: 12, color: '#334b66', fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{job.description || 'No description supplied by the source.'}</div> : null}</article>; }) : <EmptyState icon={Briefcase} title="No jobs to show yet" text="Add provider keys later or broaden the search. Configured sources populate this section independently." />}
+      {jobs.length ? jobs.map((job: any) => { const id = job.provider + ':' + job.provider_job_id; const open = expandedId === id; return <article key={id} className="post-entry" style={{ marginTop: 10 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}><div><div style={{ fontWeight: 800, color: '#10233f' }}>{job.title}</div><div style={{ marginTop: 4, fontSize: 12, color: '#5f6f86' }}>{job.company} · {job.location}{job.experience_level ? ' · ' + job.experience_level : ''}</div></div></div><div style={{ marginTop: 9, display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="button" onClick={() => setExpandedId(open ? null : id)}>{open ? 'Hide description' : 'View description'}</button>{job.application_url ? <a className="button primary" href={job.application_url} target="_blank" rel="noopener noreferrer">Apply externally <ExternalLink size={13}/></a> : null}</div>{open ? <div style={{ marginTop: 12, color: '#334b66', fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{job.description || 'No description supplied by the source.'}</div> : null}</article>; }) : <EmptyState icon={Briefcase} title="No jobs to show yet" text="Try a broader search or check again later." />}
     </section>
   </>;
 }
-
 function FeedbackView({ type, setType, subject, setSubject, description, setDescription, context, setContext, sending, onSubmit }: any) {
   return <>
     <div className="page-header"><div><div className="page-kicker"><MessageSquare size={13}/> Product feedback</div><h1 className="page-title">Help shape Suvacya</h1><p className="page-description">Suggest a feature, report a bug, or tell us what would make the product more useful.</p></div></div>
@@ -1875,14 +1936,53 @@ function FeedbackView({ type, setType, subject, setSubject, description, setDesc
   </>;
 }
 
-function AdminView({ overview, activity, feedback, users, onRefresh }: any) {
+function AdminView({ overview, activity, feedback, users, loading, onRefresh, onUpdateFeedback }: any) {
+  const [expandedActivity, setExpandedActivity] = useState<string | null>(null);
+  const [expandedUser, setExpandedUser] = useState<number | null>(null);
+  const [feedbackDrafts, setFeedbackDrafts] = useState<Record<number, { status: string; priority: string }>>({});
+  const [savingFeedback, setSavingFeedback] = useState<number | null>(null);
+
+  const LoadingRows = ({ count = 3 }: { count?: number }) => (
+    <div aria-busy="true" aria-label="Loading" className="admin-loading-list">
+      {Array.from({ length: count }).map((_, index) => <div key={index} className="admin-skeleton-row"><div className="loading-shimmer" style={{ height: 11, width: index % 2 ? '58%' : '42%' }} /><div className="loading-shimmer" style={{ height: 8, width: '72%', marginTop: 8 }} /></div>)}
+    </div>
+  );
+  const draftFor = (item: any) => feedbackDrafts[item.id] || { status: item.status, priority: item.priority };
+  const setDraft = (item: any, key: 'status' | 'priority', value: string) => {
+    const current = draftFor(item);
+    setFeedbackDrafts((prev) => ({ ...prev, [item.id]: { ...current, [key]: value } }));
+  };
+  const saveFeedback = async (item: any) => {
+    const draft = draftFor(item);
+    setSavingFeedback(item.id);
+    try {
+      await onUpdateFeedback(item.id, draft.status, draft.priority);
+      setFeedbackDrafts((prev) => { const next = { ...prev }; delete next[item.id]; return next; });
+    } finally { setSavingFeedback(null); }
+  };
+
   return <>
-    <div className="page-header"><div><div className="page-kicker"><ShieldAlert size={13}/> Admin operations</div><h1 className="page-title">Operations & reliability</h1><p className="page-description">Server-side admin controls, activity, failures, feedback and provider readiness.</p></div><button className="button" onClick={() => void onRefresh()}><RefreshCw size={13}/> Refresh</button></div>
-    <div className="metric-grid">{[['Users', overview?.users?.total],['API events', overview?.reliability?.events],['Failed requests', overview?.reliability?.failed_requests],['Open feedback', overview?.feedback?.open]].map(([label,value]) => <div className="metric-card" key={label as string}><span>{label}</span><strong>{value ?? '—'}</strong></div>)}</div>
-    <section className="panel settings-card" style={{ marginTop: 16 }}><h2 className="settings-title">AI providers</h2><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>{Object.entries(overview?.ai_providers || {}).map(([k,v]: any) => <span className="tag" key={k}>{k} · {v ? 'configured' : 'not configured'}</span>)}</div></section>
-    <section className="panel settings-card" style={{ marginTop: 16 }}><h2 className="settings-title">Job providers</h2><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>{Object.entries(overview?.job_providers || {}).map(([k,v]: any) => <span className="tag" key={k}>{k} · {v ? 'available' : 'waiting for key'}</span>)}</div></section>
-    <section className="panel settings-card" style={{ marginTop: 16 }}><h2 className="settings-title">Recent activity & failures</h2>{activity.slice(0,30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}><b>{x.activity_type}</b> · {x.status} · {x.failure_category || 'OK'} · {x.latency_ms ?? 0}ms <span style={{ color:'#8a98ab' }}>#{x.correlation_id}</span></div>)}</section>
-    <section className="panel settings-card" style={{ marginTop: 16 }}><h2 className="settings-title">Feedback inbox</h2>{feedback.slice(0,30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}><b>{x.type}</b> · {x.subject} · {x.status} · {x.priority}<div style={{ marginTop: 5, color:'#5f6f86' }}>{x.description}</div></div>)}</section>
-    <section className="panel settings-card" style={{ marginTop: 16 }}><h2 className="settings-title">Users</h2>{users.slice(0,30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}>{x.display_name || 'User'} · {x.email} · <b>{x.role}</b> · {x.active ? 'active' : 'inactive'}</div>)}</section>
+    <div className="page-header admin-header">
+      <div><div className="page-kicker"><ShieldAlert size={13}/> Admin operations</div><h1 className="page-title">Operations & reliability</h1><p className="page-description">Monitor platform health, investigate failures, review feedback and inspect users.</p></div>
+      <button className="button" onClick={() => void onRefresh()} disabled={loading}><RefreshCw size={13} className={loading ? 'spin' : ''}/> {loading ? 'Refreshing…' : 'Refresh data'}</button>
+    </div>
+
+    {loading && !overview ? <div className="admin-loading-banner" role="status" aria-live="polite"><LoaderCircle size={17} className="spin" /><div><strong>Loading admin data</strong><span>Fetching the latest platform information from the server.</span></div></div> : null}
+
+    <div className="admin-summary-grid">
+      <div className="admin-summary-card"><span>API events</span><strong>{overview?.reliability?.events ?? '—'}</strong><small>Recorded platform events</small></div>
+      <div className="admin-summary-card"><span>Failed requests</span><strong>{overview?.reliability?.failed_requests ?? '—'}</strong><small>Requests requiring attention</small></div>
+      <div className="admin-summary-card"><span>Open feedback</span><strong>{overview?.feedback?.open ?? '—'}</strong><small>Items still in progress</small></div>
+    </div>
+
+    <section className="panel admin-section"><div className="admin-section-head"><div><div className="admin-section-kicker">Infrastructure</div><h2 className="settings-title">AI providers</h2><p className="settings-copy">Current server configuration and availability.</p></div></div>{loading && !overview ? <LoadingRows count={1} /> : <div className="admin-provider-grid">{Object.entries(overview?.ai_providers || {}).map(([k,v]: any) => <div className="admin-provider" key={k}><span className={v ? 'admin-status-dot live' : 'admin-status-dot'} /><b>{k}</b><span>{v ? 'Configured' : 'Not configured'}</span></div>)}</div>}</section>
+
+    <section className="panel admin-section"><div className="admin-section-head"><div><div className="admin-section-kicker">Infrastructure</div><h2 className="settings-title">Job providers</h2><p className="settings-copy">Provider availability is visible to administrators only.</p></div></div>{loading && !overview ? <LoadingRows count={1} /> : <div className="admin-provider-grid">{Object.entries(overview?.job_providers || {}).map(([k,v]: any) => <div className="admin-provider" key={k}><span className={v ? 'admin-status-dot live' : 'admin-status-dot'} /><b>{k}</b><span>{v ? 'Available' : 'Waiting for key'}</span></div>)}</div>}</section>
+
+    <section className="panel admin-section"><div className="admin-section-head"><div><div className="admin-section-kicker">Observability</div><h2 className="settings-title">Recent activity & failures</h2><p className="settings-copy">Latest events with expandable diagnostics.</p></div><span className="admin-count">{activity.length} recent</span></div>{loading && !activity.length ? <LoadingRows count={4} /> : activity.length ? <div className="admin-list">{activity.slice(0,30).map((x:any) => { const id=String(x.id); const open=expandedActivity===id; return <div className="admin-row" key={id}><button className="admin-row-main" onClick={() => setExpandedActivity(open ? null : id)} aria-expanded={open}><span className={x.status === 'FAILED' ? 'admin-status-dot danger' : 'admin-status-dot live'} /><span className="admin-row-primary"><b>{x.activity_type}</b><span>{x.status} · {x.failure_category || 'OK'} · {x.latency_ms ?? 0}ms</span></span><span className="admin-row-chevron">{open ? '−' : '+'}</span></button>{open ? <div className="admin-row-details"><span>Correlation ID: {x.correlation_id || '—'}</span><span>Provider: {x.final_provider || x.provider || '—'}</span><span>HTTP: {x.http_status ?? '—'}</span><span>User: {x.user_id ?? '—'}</span></div> : null}</div>; })}</div> : <div className="admin-empty">No activity recorded yet.</div>}</section>
+
+    <section className="panel admin-section"><div className="admin-section-head"><div><div className="admin-section-kicker">Product feedback</div><h2 className="settings-title">Feedback inbox</h2><p className="settings-copy">Review incoming feedback and update its workflow status or priority.</p></div><span className="admin-count">{feedback.length} total</span></div>{loading && !feedback.length ? <LoadingRows count={3} /> : feedback.length ? <div className="admin-list">{feedback.slice(0,30).map((x:any) => { const draft=draftFor(x); const dirty=draft.status!==x.status || draft.priority!==x.priority; const saving=savingFeedback===x.id; return <div className="admin-feedback-row" key={x.id}><div className="admin-feedback-content"><div className="admin-feedback-title"><b>{x.subject || x.type}</b><span className="tag">{x.type}</span></div><p>{x.description}</p><small>{x.created_at ? new Date(x.created_at).toLocaleString() : '—'}</small></div><div className="admin-feedback-controls"><label>Status<select className="admin-select" value={draft.status} onChange={(e)=>setDraft(x,'status',e.target.value)}><option>NEW</option><option>REVIEWING</option><option>PLANNED</option><option>IN_PROGRESS</option><option>RESOLVED</option><option>DUPLICATE</option><option>NOT_PLANNED</option></select></label><label>Priority<select className="admin-select" value={draft.priority} onChange={(e)=>setDraft(x,'priority',e.target.value)}><option>LOW</option><option>MEDIUM</option><option>HIGH</option><option>CRITICAL</option></select></label><button className="button primary admin-save" disabled={!dirty || saving} onClick={()=>void saveFeedback(x)}>{saving?'Saving…':'Save'}</button></div></div>; })}</div> : <div className="admin-empty">No feedback submitted yet.</div>}</section>
+
+    <section className="panel admin-section"><div className="admin-section-head"><div><div className="admin-section-kicker">Accounts</div><h2 className="settings-title">Users <span className="admin-inline-count">{overview?.users?.total ?? users.length}</span></h2><p className="settings-copy">All registered accounts and their current access state.</p></div></div>{loading && !users.length ? <LoadingRows count={4} /> : users.length ? <div className="admin-list">{users.slice(0,50).map((x:any) => { const open=expandedUser===x.id; return <div className="admin-row" key={x.id}><button className="admin-row-main" onClick={()=>setExpandedUser(open?null:x.id)} aria-expanded={open}><span className={x.active?'admin-status-dot live':'admin-status-dot'} /><span className="admin-row-primary"><b>{x.display_name || 'User'}</b><span>{x.email} · {x.role} · {x.active?'Active':'Inactive'}</span></span><span className="admin-row-chevron">{open?'−':'+'}</span></button>{open?<div className="admin-row-details"><span>Role: {x.role}</span><span>Whitelisted: {x.whitelisted?'Yes':'No'}</span><span>Created: {x.created_at ? new Date(x.created_at).toLocaleString() : '—'}</span></div>:null}</div>; })}</div> : <div className="admin-empty">No users found.</div>}</section>
   </>;
 }
