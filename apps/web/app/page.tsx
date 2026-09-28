@@ -43,7 +43,7 @@ type Opportunity = {
   evidence?: { summary?: string; why_now?: string; source_hints?: string[]; grounding_queries?: string[] };
   source_ids?: number[]; sources?: { title?: string; url?: string; domain?: string }[];
 };
-type Tab = 'Dashboard' | 'Research' | 'Content' | 'LinkedIn Posts' | 'Analytics' | 'Brand DNA';
+type Tab = 'Dashboard' | 'Research' | 'Content Studio' | 'LinkedIn Posts' | 'Analytics' | 'Brand DNA';
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -53,7 +53,7 @@ type BeforeInstallPromptEvent = Event & {
 const nav = [
   ['Dashboard', LayoutDashboard, 'Command center'],
   ['Research', Search, 'Find opportunities'],
-  ['Content', FileText, 'Draft & refine'],
+  ['Content Studio', FileText, 'Draft & refine'],
   ['LinkedIn Posts', ExternalLink, 'Published posts'],
   ['Analytics', BarChart3, 'Performance'],
   ['Brand DNA', Settings, 'Brand DNA'],
@@ -62,6 +62,7 @@ const nav = [
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile>({ display_name: 'User', role: 'owner' });
+  const [linkedinAvatarFailed, setLinkedinAvatarFailed] = useState(false);
   const [linkedin, setLinkedin] = useState<LinkedInStatus>({ connected: false });
   const linkedinSyncAttemptedToken = useRef<string | null>(null);
   const [brand, setBrand] = useState<BrandStatus>({ ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 });
@@ -128,7 +129,7 @@ export default function Home() {
       setInstallPrompt(null);
       setIsStandalone(true);
       setMoreOpen(false);
-      setNotice('Brand OS was added to your device.');
+      setNotice('Suvacya was added to your device.');
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -415,6 +416,8 @@ useEffect(() => {
   };
 
   const initials = (profile.display_name || 'User').split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase();
+  const linkedinAvatarUrl = brand.linkedin_profile?.picture_url || null;
+  useEffect(() => { setLinkedinAvatarFailed(false); }, [linkedinAvatarUrl]);
   const closeMore = () => setMoreOpen(false);
   const isIosDevice = () => /iphone|ipad|ipod/i.test(window.navigator.userAgent) || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
   const installBrandOS = async () => {
@@ -424,7 +427,7 @@ useEffect(() => {
       setInstallPrompt(null);
       await prompt.prompt();
       const choice = await prompt.userChoice;
-      if (choice.outcome === 'accepted') setNotice('Installing Brand OS…');
+      if (choice.outcome === 'accepted') setNotice('Installing Suvacya…');
       return;
     }
     if (isIosDevice()) {
@@ -432,7 +435,7 @@ useEffect(() => {
       setShowIosInstallGuide(true);
       return;
     }
-    setNotice('Use your browser menu to install Brand OS or add it to your home screen.');
+    setNotice('Use your browser menu to install Suvacya or add it to your home screen.');
   };
   const connectLinkedIn = () => {
     // OAuth attempts are independent. If a user cancels or abandons LinkedIn,
@@ -662,7 +665,7 @@ useEffect(() => {
   };
 
   const improveDraft = async () => {
-    if (!token || !draftBody.trim()) { setError('Write a draft first, then ask Brand OS to polish it.'); return; }
+    if (!token || !draftBody.trim()) { setError('Write a draft first, then ask Suvacya to polish it.'); return; }
     if (!requireBrand('polishing content')) return;
     setIsImproving(true); setError(null); setNoticeTtl(4500); setNotice(null);
     try {
@@ -684,7 +687,7 @@ useEffect(() => {
 
   const saveThought = async () => {
     if (!token || !draftBody.trim()) {
-      setError('Write something first so Brand OS has a useful thought to learn from.');
+      setError('Write something first so Suvacya has a useful thought to learn from.');
       return;
     }
     if (!requireBrand('saving a personal thought')) return;
@@ -697,7 +700,7 @@ useEffect(() => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, 'Could not save this thought'));
-      setNotice('Saved as a personal thought. Brand OS will learn from it without treating it as a published opinion.');
+      setNotice('Saved as a personal thought. Suvacya will learn from it without treating it as a published opinion.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save this thought');
     } finally {
@@ -732,7 +735,7 @@ useEffect(() => {
       <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark"><Sparkles size={18} /></div>
-          <div><div className="brand-name">Brand OS</div><div className="brand-sub">Personal Brand Manager</div></div>
+          <div><div className="brand-name">Suvacya</div><div className="brand-sub">Personal Brand Manager</div></div>
         </div>
         <div className="nav-label">Workspace</div>
         {nav.map(([label, Icon, sub]) => (
@@ -756,7 +759,7 @@ useEffect(() => {
           <div className="connection-meta">No external LinkedIn action is executed without your explicit approval.</div>
         </div>
         <button className="side-button" onClick={logout}><LogOut size={14} /> Sign out <span style={{ marginLeft: 'auto' }}>⌘Q</span></button>
-        <div className="brand-footer">Brand OS · by Kanishka</div>
+        <div className="brand-footer">Suvacya · by Kanishka</div>
       </aside>
 
       <div className="main-shell">
@@ -766,7 +769,16 @@ useEffect(() => {
           </div>
           <div className="topbar-actions">
             <button className="icon-button" title="Refresh workspace" onClick={() => fetchData()}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
-            <div className="avatar">{initials}</div>
+            <div className="avatar" title={profile.display_name || 'Profile'}>
+              {linkedinAvatarUrl && !linkedinAvatarFailed ? (
+                <img
+                  src={linkedinAvatarUrl}
+                  alt={profile.display_name ? `${profile.display_name} profile` : 'Profile'}
+                  onError={() => setLinkedinAvatarFailed(true)}
+                  referrerPolicy="no-referrer"
+                />
+              ) : initials}
+            </div>
           </div>
         </header>
 
@@ -782,7 +794,7 @@ useEffect(() => {
                     <div className="page-kicker" style={{ color: '#bdb6ff' }}>
                       {brand.ready ? <><Sparkles size={13} /> Brand intelligence active</> : <><BrainCircuit size={13} /> Brand DNA setup required</>}
                     </div>
-                    <h1>{brand.ready ? 'Turn your expertise into a recognizable point of view.' : 'Start by teaching Brand OS your voice.'}</h1>
+                    <h1>{brand.ready ? 'Turn your expertise into a recognizable point of view.' : 'Start by teaching Suvacya your voice.'}</h1>
                     <p>{brand.ready
                       ? 'Research, content strategy, drafting and review — orchestrated around your brand voice, with you always in control of what reaches LinkedIn.'
                       : 'Review the Brand DNA we prefilled from LinkedIn. Previous posts are optional and can be added later to strengthen your writing style.'}</p>
@@ -815,7 +827,7 @@ useEffect(() => {
               <div className="metrics">
                 <Metric icon={Clock3} label="Awaiting approval" value={summary.pending} meta="Needs your decision" />
                 <Metric icon={CircleCheck} label="Approved" value={summary.reviewed} meta="Approved for publication" />
-                <Metric icon={TrendingUp} label="Published" value={summary.executed} meta="Tracked by Brand OS" />
+                <Metric icon={TrendingUp} label="Published" value={summary.executed} meta="Tracked by Suvacya" />
                 <Metric icon={ShieldCheck} label="Guardrail status" value="ON" meta="Claims · voice · duplicate · action" />
                 <Metric icon={BrainCircuit} label="Brand Pulse" value={brand.ready ? 'ACTIVE' : 'INACTIVE'} meta={brand.ready ? ((brand.current_post_count ?? brand.source_post_count) + ' signals in memory') : 'Set up before AI actions'} />
               </div>
@@ -823,7 +835,7 @@ useEffect(() => {
               <section className="panel approval-panel">
                 <div className="panel-head">
                   <div><div className="panel-title">Approval queue</div><div className="panel-subtitle">Your editorial desk — review the exact content before anything external happens.</div></div>
-                  <button className="button" onClick={() => go('Content')}><Plus size={14} /> New draft</button>
+                  <button className="button" onClick={() => go('Content Studio')}><Plus size={14} /> New draft</button>
                 </div>
                 <ApprovalWorkspace
                   queue={filteredQueue} selected={selectedApproval} selectedId={selectedId}
@@ -840,7 +852,7 @@ useEffect(() => {
           )}
 
           {tab === 'Research' && <ResearchView opportunities={opportunities} researchFocus={researchFocus} setResearchFocus={setResearchFocus} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
-          {tab === 'Content' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
+          {tab === 'Content Studio' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
           {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
           {tab === 'Brand DNA' && (
@@ -875,7 +887,7 @@ useEffect(() => {
         {[
           ['Dashboard', LayoutDashboard, 'Home'],
           ['Research', Search, 'Research'],
-          ['Content', FileText, 'Content'],
+          ['Content Studio', FileText, 'Content Studio'],
           ['LinkedIn Posts', ExternalLink, 'Posts'],
         ].map(([key, Icon, label]) => (
           <button key={key as string} className={`mobile-nav-item ${tab === key ? 'active' : ''}`} onClick={() => go(key as Tab)}>
@@ -899,24 +911,24 @@ useEffect(() => {
               <button onClick={() => go('Analytics')}><BarChart3 size={18} /><span>Analytics</span></button>
               <button onClick={() => go('Brand DNA')}><Settings size={18} /><span>Brand DNA</span></button>
               <button onClick={() => { closeMore(); connectLinkedIn(); }}><Link2 size={18} /><span>{linkedin.connected ? 'LinkedIn' : 'Connect LinkedIn'}</span></button>
-              <button onClick={installBrandOS} disabled={isStandalone}><Download size={18} /><span>{isStandalone ? 'Installed' : 'Install Brand OS'}</span></button>
+              <button onClick={installBrandOS} disabled={isStandalone}><Download size={18} /><span>{isStandalone ? 'Installed' : 'Install Suvacya'}</span></button>
             </div>
             <div className="mobile-more-status">
               <span className={`connection-dot ${linkedin.connected ? 'live' : ''}`} />
               <div><strong>{linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}</strong><span>{linkedin.connected ? 'Official API connection is ready.' : 'Connect through official OAuth to enable publishing.'}</span></div>
             </div>
             <button className="mobile-more-signout" onClick={logout}><LogOut size={17} /> Sign out</button>
-            <div className="mobile-more-footer">Brand OS · by Kanishka</div>
+            <div className="mobile-more-footer">Suvacya · by Kanishka</div>
           </section>
         </>
       )}
 
       {showIosInstallGuide && (
         <div className="install-guide-backdrop" onClick={() => setShowIosInstallGuide(false)}>
-          <section className="install-guide" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Install Brand OS">
+          <section className="install-guide" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Install Suvacya">
             <div className="install-guide-icon"><Download size={20} /></div>
-            <h2>Add Brand OS to your iPhone</h2>
-            <p>Safari can install Brand OS as an app on your Home Screen.</p>
+            <h2>Add Suvacya to your iPhone</h2>
+            <p>Safari can install Suvacya as an app on your Home Screen.</p>
             <ol>
               <li>Tap the <strong>Share</strong> button in Safari.</li>
               <li>Choose <strong>Add to Home Screen</strong>.</li>
@@ -935,7 +947,7 @@ function LoginScreen({ error, onConnect }: { error: string | null; onConnect: ()
     <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 22, background: 'radial-gradient(circle at 20% 10%, #e9e5ff, transparent 28%), radial-gradient(circle at 90% 80%, #dff9fb, transparent 30%), #f6f7fb' }}>
       <div className="login-shell">
         <div className="login-visual">
-          <div className="brand-lockup" style={{ padding: 0 }}><div className="brand-mark"><Sparkles size={18}/></div><div><div className="brand-name">Brand OS</div><div className="brand-sub" style={{ color: '#7f8aa3' }}>Personal Brand Manager</div></div></div>
+          <div className="brand-lockup" style={{ padding: 0 }}><div className="brand-mark"><Sparkles size={18}/></div><div><div className="brand-name">Suvacya</div><div className="brand-sub" style={{ color: '#7f8aa3' }}>Personal Brand Manager</div></div></div>
           <div style={{ position: 'relative', zIndex: 1, marginTop: 74 }}>
             <div className="page-kicker" style={{ color: '#bdb6ff' }}><Sparkles size={13}/> AI + human editorial control</div>
             <h1 style={{ fontFamily: 'Space Grotesk', fontSize: 47, lineHeight: 1.02, letterSpacing: '-.055em', margin: '12px 0 16px' }}>Your brand,<br/>with a brain.</h1>
@@ -948,7 +960,7 @@ function LoginScreen({ error, onConnect }: { error: string | null; onConnect: ()
         <div className="login-form">
           <div className="page-kicker"><ShieldCheck size={13}/> Secure official connection</div>
           <h2 style={{ fontFamily: 'Space Grotesk', fontSize: 29, letterSpacing: '-.04em', margin: '10px 0 8px' }}>Connect LinkedIn</h2>
-          <p style={{ color: '#667085', fontSize: 13, lineHeight: 1.6, margin: 0 }}>Brand OS uses LinkedIn's official OAuth flow. Your LinkedIn password is never entered into Brand OS.</p>
+          <p style={{ color: '#667085', fontSize: 13, lineHeight: 1.6, margin: 0 }}>Suvacya uses LinkedIn's official OAuth flow. Your LinkedIn password is never entered into Suvacya.</p>
            <p style={{ color: '#667085', fontSize: 11, lineHeight: 1.55, margin: '10px 0 0' }}>You'll authenticate securely on LinkedIn. If you're already signed in, LinkedIn may take you straight in.</p>
           {error && <div className="notice error" style={{ marginTop: 16 }}><X size={15}/><span>{error}</span></div>}
           <button className="button primary" style={{ width: '100%', minHeight: 46, marginTop: 24 }} onClick={onConnect}><LinkedInMark size={18}/> Continue with LinkedIn</button>
@@ -1070,7 +1082,7 @@ function ApprovalWorkspace(props: any) {
                 <div className="readonly-field" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65, minHeight: 150 }}>{selected.content}</div>
                 <div style={{ marginTop: 14, padding: 12, border: '1px dashed #d0d5dd', borderRadius: 12, background: '#fafafa' }}>
                   <div className="review-label" style={{ marginBottom: 7 }}>Optional photograph</div>
-                  <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG or PNG image (up to 4 MB). The image is sent directly to LinkedIn during execution and is not stored by Brand OS.</div>
+                  <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG or PNG image (up to 4 MB). The image is sent directly to LinkedIn during execution and is not stored by Suvacya.</div>
                   <input type="file" accept="image/jpeg,image/png" onChange={(e) => chooseImage(e.target.files?.[0] || null)} disabled={isBusy} />
                   {imagePreview && (
                     <div style={{ marginTop: 10 }}>
@@ -1134,7 +1146,7 @@ function LinkedInPostsView({ posts, totalPublished }: { posts: ApprovalItem[]; t
               <div style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.7, color: '#344054' }}>{post.content}</div>
               {post.approved_at ? <div className="form-help" style={{ marginTop: 10 }}>Approved {new Date(post.approved_at).toLocaleString()}</div> : null}
             </article>
-          )) : <EmptyState icon={ExternalLink} title="No published posts yet" text="Once you publish a post through Brand OS, it will appear here automatically." />}
+          )) : <EmptyState icon={ExternalLink} title="No published posts yet" text="Once you publish a post through Suvacya, it will appear here automatically." />}
         </div>
       </section>
     </>
@@ -1146,7 +1158,7 @@ function ResearchView({ opportunities, researchFocus, setResearchFocus, isResear
   return (
     <>
       <div className="page-header">
-        <div><div className="page-kicker"><Search size={13}/> Intelligence layer</div><h1 className="page-title">Research & opportunities</h1><p className="page-description">{hasResearch ? 'Your latest research is below. Add a focus whenever you want Brand OS to explore a specific topic.' : 'Live evidence is combined with your Brand DNA, recent research interests and learned context before an idea reaches the drafting engine.'}</p></div>
+        <div><div className="page-kicker"><Search size={13}/> Intelligence layer</div><h1 className="page-title">Research & opportunities</h1><p className="page-description">{hasResearch ? 'Your latest research is below. Add a focus whenever you want Suvacya to explore a specific topic.' : 'Live evidence is combined with your Brand DNA, recent research interests and learned context before an idea reaches the drafting engine.'}</p></div>
         <button className="button primary progress-button" onClick={onResearch} disabled={isResearching}>
           <span className="button-content"><Search size={14}/>{isResearching ? researchStage || 'Researching…' : hasResearch ? 'Research now' : 'Run research'}</span>
           {isResearching && <span className="button-progress-track"><span style={{ width: researchProgress + '%' }} /></span>}
@@ -1156,7 +1168,7 @@ function ResearchView({ opportunities, researchFocus, setResearchFocus, isResear
       <section className="panel research-focus-panel">
         <div className="research-focus-copy">
           <div className="panel-title">Guide the research <span className="form-help">(optional)</span></div>
-          <div className="panel-subtitle">Tell Brand OS what you want to explore. Leave it blank and Brand OS will use your Brand DNA plus what it has learned from your research and content.</div>
+          <div className="panel-subtitle">Tell Suvacya what you want to explore. Leave it blank and Suvacya will use your Brand DNA plus what it has learned from your research and content.</div>
         </div>
         <div className="research-focus-row">
           <div className="research-focus-input">
@@ -1178,7 +1190,7 @@ function ResearchView({ opportunities, researchFocus, setResearchFocus, isResear
 
       <div className="research-grid">
         {opportunities.length ? opportunities.map((item) => <ResearchCard key={item.id} item={item}/>) :
-          <section className="panel"><EmptyState icon={Search} title="No research yet" text="Add an optional focus above, or let Brand OS discover current topics from your Brand DNA." action="Run research" onAction={onResearch}/></section>}
+          <section className="panel"><EmptyState icon={Search} title="No research yet" text="Add an optional focus above, or let Suvacya discover current topics from your Brand DNA." action="Run research" onAction={onResearch}/></section>}
       </div>
     </>
   );
@@ -1239,8 +1251,8 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
       <div className="page-header">
         <div>
           <div className="page-kicker"><WandSparkles size={13}/> Editorial studio</div>
-          <h1 className="page-title">Write it your way. Let Brand OS polish it.</h1>
-          <p className="page-description">Start with your own idea and wording in any language. Brand OS can improve structure and clarity using your Brand DNA, then you preview the exact version before it enters the approval queue.</p>
+          <h1 className="page-title">Write it your way. Let Suvacya polish it.</h1>
+          <p className="page-description">Start with your own idea and wording in any language. Suvacya can improve structure and clarity using your Brand DNA, then you preview the exact version before it enters the approval queue.</p>
           <div className="form-help" style={{ marginTop: 8 }}>Brand learning is active · {learningStatus?.memory_count ?? 0} learned signals · {learningStatus?.pending_events ?? 0} queued for processing</div>
         </div>
       </div>
@@ -1251,11 +1263,11 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
           <div className="form-group"><label className="form-label">Your language</label><input className="input" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="e.g. English, Hindi, Hinglish" /></div>
           <div className="form-group">
             <label className="form-label">Your draft</label>
-            <textarea className="textarea" style={{ minHeight: 270 }} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write naturally. Do not worry about formatting — Brand OS will preserve your meaning and improve the presentation." />
+            <textarea className="textarea" style={{ minHeight: 270 }} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write naturally. Do not worry about formatting — Suvacya will preserve your meaning and improve the presentation." />
           </div>
           <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' }}>
             <button className="button primary progress-button" disabled={improving || !body.trim()} onClick={onImprove}>
-              <span className="button-content"><WandSparkles size={14}/>{improving ? 'Polishing…' : 'Improvise / polish with Brand OS'}</span>
+              <span className="button-content"><WandSparkles size={14}/>{improving ? 'Polishing…' : 'Improvise / polish with Suvacya'}</span>
               {improving && <span className="button-progress-track"><span style={{ width: improvementProgress + '%' }} /></span>}
             </button>
             <button className="button dark" disabled={busy || !body.trim()} onClick={onSubmit}><ShieldCheck size={14}/>{busy ? 'Sending…' : 'Send this version to approval'}</button>
@@ -1285,7 +1297,7 @@ function AnalyticsView({ analytics }: { analytics: any }) {
   const trend = Array.isArray(live.trend) ? live.trend : [];
   const cards = [
     ['Historical posts', p.historical_posts ?? 0, 'User-provided brand evidence'],
-    ['Content created', p.content_items ?? 0, 'Drafts generated in Brand OS'],
+    ['Content created', p.content_items ?? 0, 'Drafts generated in Suvacya'],
     ['Awaiting approval', p.pending_approval ?? 0, 'Needs your decision'],
     ['Published', p.published_via_brand_os ?? 0, 'Published through approved workflow'],
   ];
@@ -1376,7 +1388,7 @@ function AnalyticsView({ analytics }: { analytics: any }) {
       <section className="panel" style={{ marginTop: 16 }}>
         <div className="panel-head"><div><div className="panel-title">What will appear here</div><div className="panel-subtitle">Only observed LinkedIn data is used.</div></div></div>
         <div className="panel-body" style={{ color: '#667085', fontSize: 11, lineHeight: 1.7 }}>
-          Once analytics access is active, this view will show post impressions, reach, reactions, comments, reshares and engagement trends from LinkedIn's official member analytics API. Brand OS will not scrape LinkedIn or fabricate performance numbers.
+          Once analytics access is active, this view will show post impressions, reach, reactions, comments, reshares and engagement trends from LinkedIn's official member analytics API. Suvacya will not scrape LinkedIn or fabricate performance numbers.
         </div>
       </section>
       )}
@@ -1425,7 +1437,7 @@ function SettingsView(props: any) {
                 <h2 className="settings-title">Review your starting Brand DNA</h2>
                 <p className="settings-copy">
                   {hasLinkedInProfile
-                    ? 'Brand OS has prefilled what it could from your LinkedIn connection. Keep it, edit it, or complete anything that is missing.'
+                    ? 'Suvacya has prefilled what it could from your LinkedIn connection. Keep it, edit it, or complete anything that is missing.'
                     : 'Complete the few profile details below. Historical posts are optional.'}
                 </p>
               </div>
@@ -1450,8 +1462,7 @@ function SettingsView(props: any) {
                   <div style={{ color: '#5145cd', fontWeight: 700, marginBottom: 4 }}>LinkedIn profile data</div>
                   <div><b>Name:</b> {profile.display_name || 'Available'}</div>
                   <div><b>Photo:</b> {linkedinPhotoAvailable ? 'Fetched from LinkedIn' : 'Not returned by LinkedIn'}</div>
-                  <div><b>Headline:</b> {linkedinProfile.headline || 'Not returned by LinkedIn for this connection'}</div>
-                  {linkedinProfile.locale && <div><b>Locale:</b> {linkedinProfile.locale}</div>}
+                  <div><b>Headline:</b> {linkedinProfile.headline || 'Not Shared by LinkedIn'}</div>
                 </div>
               </div>
             )}
@@ -1460,7 +1471,6 @@ function SettingsView(props: any) {
               <div style={{ marginTop: 14, padding: 12, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.55 }}>
                 <div style={{ color: '#5145cd', fontWeight: 700, marginBottom: 4 }}>LinkedIn profile signal</div>
                 <div><b>Headline:</b> {linkedinProfile.headline}</div>
-                {linkedinProfile.locale && <div style={{ marginTop: 3 }}><b>Locale:</b> {linkedinProfile.locale}</div>}
               </div>
             )}
 
@@ -1505,7 +1515,7 @@ function SettingsView(props: any) {
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <div>
                 <h2 className="settings-title">Voice calibration <span style={{ fontWeight: 500, color: '#98a2b3' }}>(optional)</span></h2>
-                <p className="settings-copy">Add 3–10 previous LinkedIn posts if you want Brand OS to learn your writing style from real examples. You can skip this and add them later.</p>
+                <p className="settings-copy">Add 3–10 previous LinkedIn posts if you want Suvacya to learn your writing style from real examples. You can skip this and add them later.</p>
               </div>
               <span className={"status-pill " + (count ? 'approved' : 'edited')}>{count}/10 posts</span>
             </div>
@@ -1533,7 +1543,7 @@ function SettingsView(props: any) {
             </div>
             {!count && (
               <div style={{ marginTop: 10, color: '#667085', fontSize: 10 }}>
-                No posts added. That is okay. Brand OS can start from your profile and learn from your content over time.
+                No posts added. That is okay. Suvacya can start from your profile and learn from your content over time.
               </div>
             )}
           </section>
@@ -1542,7 +1552,7 @@ function SettingsView(props: any) {
         <div className="settings-stack">
           <section className="panel settings-card">
             <div className="panel-head" style={{ padding: 0, border: 0 }}>
-              <div><h2 className="settings-title">Saved Brand DNA</h2><p className="settings-copy">Read-only view of the profile context used by Brand OS.</p></div>
+              <div><h2 className="settings-title">Saved Brand DNA</h2><p className="settings-copy">Read-only view of the profile context used by Suvacya.</p></div>
               <span className="tag"><ShieldCheck size={10}/> Frozen</span>
             </div>
             <div className="profile-grid" style={{ marginTop: 16 }}>
@@ -1562,7 +1572,7 @@ function SettingsView(props: any) {
 
           <section className="panel settings-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14 }}>
-              <div><h2 className="settings-title">Voice calibration</h2><p className="settings-copy">These imported posts are optional source evidence for writing style. Brand OS can also learn from approved and published content afterward.</p></div>
+              <div><h2 className="settings-title">Voice calibration</h2><p className="settings-copy">These imported posts are optional source evidence for writing style. Suvacya can also learn from approved and published content afterward.</p></div>
               <span className="status-pill approved">● {count} SAVED</span>
             </div>
             {count ? (
@@ -1599,7 +1609,7 @@ function SettingsView(props: any) {
         <h2 className="settings-title">LinkedIn connection</h2>
         <p className="settings-copy">
           Signed in as <b>{profile.display_name}</b>. {linkedin.connected
-            ? 'Your official LinkedIn connection is active. Brand OS uses only the profile information LinkedIn makes available to the current app permissions.'
+            ? 'Your official LinkedIn connection is active. Suvacya uses only the profile information LinkedIn makes available to the current app permissions.'
             : 'Connect LinkedIn to prefill the starting Brand DNA where available and enable supported publishing actions.'}
         </p>
         <button className="button" onClick={onConnect}><Link2 size={14}/>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
