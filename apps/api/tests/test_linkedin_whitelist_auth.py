@@ -2,7 +2,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import BrandOnboardingRequest, app
 
 
 class TestLinkedInWhitelistAuth(unittest.TestCase):
@@ -29,6 +29,15 @@ class TestLinkedInWhitelistAuth(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 410)
+
+    def test_brand_onboarding_posts_and_experience_are_optional(self):
+        request = BrandOnboardingRequest(
+            professional_title="Product Leader",
+            industry="SaaS",
+            tone="Clear and practical",
+        )
+        self.assertEqual(request.posts, [])
+        self.assertIsNone(request.experience_years)
 
     def test_unwhitelisted_legacy_login_cannot_create_a_session(self):
         response = self.client.post(

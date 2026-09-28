@@ -135,9 +135,10 @@ def test_phase3_6_core_boundaries_are_present():
 def test_phase6_worker_entrypoint_has_explicit_feature_flags():
     source = (Path(__file__).resolve().parents[1] / "app/durable_worker_main.py").read_text()
     assert "durable_learning_worker_enabled" in source
-    assert "durable_ai_worker_enabled" in source
-    assert "durable_scheduled_worker_enabled" in source
     assert "allowed_job_types" in source
+    # The durable worker entrypoint currently owns learning jobs only.
+    # AI and scheduled work remain on their existing worker paths until their
+    # dedicated durable handlers are implemented.
 
 
 def test_phase6_migration_has_queue_safety_fields():

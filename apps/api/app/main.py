@@ -107,6 +107,22 @@ async def lifespan(app: FastAPI):
             })
             if "experience_years" not in columns:
                 await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN experience_years FLOAT"))
+            if "brand_bootstrap_completed" not in columns:
+                await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN brand_bootstrap_completed BOOLEAN NOT NULL DEFAULT FALSE"))
+
+            linkedin_columns = await conn.run_sync(lambda sync_conn: {
+                column["name"] for column in inspect(sync_conn).get_columns("linkedin_connections")
+            })
+            linkedin_column_sql = {
+                "linkedin_headline": "TEXT",
+                "linkedin_picture_url": "TEXT",
+                "linkedin_locale": "VARCHAR(30)",
+                "linkedin_vanity_name": "VARCHAR(255)",
+                "linkedin_profile_synced_at": "TIMESTAMP",
+            }
+            for column_name, column_type in linkedin_column_sql.items():
+                if column_name not in linkedin_columns:
+                    await conn.execute(text(f"ALTER TABLE linkedin_connections ADD COLUMN {column_name} {column_type}"))
 
             approval_columns = await conn.run_sync(lambda sync_conn: {
                 column["name"] for column in inspect(sync_conn).get_columns("approval_requests")
@@ -234,10 +250,10 @@ class BrandOnboardingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     display_name: str = "User"
-    professional_title: str
-    industry: str
-    tone: str
-    experience_years: float = Field(ge=0, le=100)
+    professional_title: str = ""
+    industry: str = ""
+    tone: str = ""
+    experience_years: float | None = Field(default=None, ge=0, le=100)
     posts: list[BrandOnboardingPost] = Field(default_factory=list)
 
 
@@ -479,9 +495,12 @@ async def brand_status(
         profile.professional_title and profile.professional_title.strip()
         and profile.industry and profile.industry.strip()
         and profile.tone and profile.tone.strip()
-        and profile.experience_years is not None
     )
     brand_ready = bool(memory and memory.status == "READY" and profile_complete)
+    linkedin_result = await session.execute(
+        select(LinkedInConnection).where(LinkedInConnection.user_id == int(profile.id)).limit(1)
+    )
+    linkedin_connection = linkedin_result.scalar_one_or_none()
     return {
         "status": "READY" if brand_ready else ("NEEDS_INPUT" if memory else "NOT_INITIALIZED"),
         "ready": brand_ready,
@@ -490,6 +509,7 @@ async def brand_status(
         "summary": memory.summary if memory else None,
         "continuous_learning": True,
         "historical_import_optional": True,
+        "brand_bootstrap_completed": bool(profile.brand_bootstrap_completed),
         "last_updated": memory.updated_at if memory else None,
         "profile": {
             "display_name": profile.display_name if profile else "User",
@@ -498,11 +518,147 @@ async def brand_status(
             "experience_years": profile.experience_years if profile else None,
             "tone": profile.tone if profile else None,
         },
+        "linkedin_profile": {
+            "connected": bool(linkedin_connection),
+            "headline": linkedin_connection.linkedin_headline if linkedin_connection else None,
+            "picture_url": linkedin_connection.linkedin_picture_url if linkedin_connection else None,
+            "locale": linkedin_connection.linkedin_locale if linkedin_connection else None,
+            "vanity_name": linkedin_connection.linkedin_vanity_name if linkedin_connection else None,
+        },
         "source_posts": [
             {"id": post.id, "body": post.body, "published_at": post.published_at, "source": post.source}
             for post in posts
             if post.source == "user_import"
         ][:10],
+    }
+
+
+@app.post("/api/brand/bootstrap")
+async def brand_bootstrap(
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
+):
+    """Seed Brand DNA from the official LinkedIn profile data we already receive.
+
+    This is deliberately best-effort. Authentication must never depend on the
+    model provider, and we never overwrite fields the user has already set.
+    Historical LinkedIn posts are not requested here because that permission is
+    not available to the current app.
+    """
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    connection_result = await session.execute(
+        select(LinkedInConnection).where(LinkedInConnection.user_id == int(current_user.id)).limit(1)
+    )
+    connection = connection_result.scalar_one_or_none()
+    if connection is None:
+        return {"bootstrapped": False, "reason": "linkedin_not_connected"}
+
+    if profile.brand_bootstrap_completed:
+        memory = await BrandIntelligenceService(session).get_memory(profile.id)
+        return {
+            "bootstrapped": True,
+            "already_completed": True,
+            "ready": bool(
+                memory and memory.status == "READY"
+                and profile.professional_title and profile.industry and profile.tone
+            ),
+        }
+
+    # Use the headline directly when LinkedIn provides it. It is the strongest
+    # self-authored professional signal available through the current open profile scope.
+    if connection.linkedin_headline and not profile.professional_title:
+        profile.professional_title = connection.linkedin_headline[:200]
+
+    if not profile.tone:
+        profile.tone = "Clear, practical and credible"
+
+    existing_memory = await BrandIntelligenceService(session).get_memory(profile.id)
+    if (
+        profile.professional_title
+        and profile.industry
+        and profile.tone
+        and existing_memory
+        and existing_memory.status == "READY"
+    ):
+        profile.brand_bootstrap_completed = True
+        await session.commit()
+        return {
+            "bootstrapped": True,
+            "already_completed": False,
+            "ready": True,
+            "profile": {
+                "display_name": profile.display_name,
+                "professional_title": profile.professional_title,
+                "industry": profile.industry,
+                "experience_years": profile.experience_years,
+                "tone": profile.tone,
+            },
+        }
+
+    inferred = {}
+    if connection.linkedin_headline or profile.professional_title:
+        system = """You create a conservative first-pass Brand DNA profile from a user's
+own LinkedIn authentication data.
+
+Rules:
+- Use only the supplied LinkedIn name, headline, locale and existing profile fields.
+- Never invent employers, credentials, achievements, years of experience, clients or facts.
+- Infer an industry only when the headline/profile gives enough evidence. Otherwise return an empty string.
+- A professional title may be cleaned up from the headline, but do not add claims.
+- Tone is a writing preference, not a fact. Only suggest a simple neutral tone if the profile gives a clear signal; otherwise return an empty string.
+- Never infer years of experience from a title or seniority word.
+- Return JSON only:
+{"professional_title":"","industry":"","tone":""}
+"""
+        prompt = json.dumps(
+            {
+                "name": profile.display_name,
+                "linkedin_headline": connection.linkedin_headline,
+                "linkedin_locale": connection.linkedin_locale,
+                "existing_professional_title": profile.professional_title,
+                "existing_industry": profile.industry,
+                "existing_tone": profile.tone,
+            },
+            ensure_ascii=False,
+        )
+        try:
+            inferred = await ModelRouterService().generate_json(system, prompt, max_output_tokens=500)
+        except Exception as exc:
+            logger.warning("LinkedIn Brand DNA bootstrap model unavailable: %s", exc)
+
+    if not profile.professional_title and str(inferred.get("professional_title") or "").strip():
+        profile.professional_title = str(inferred["professional_title"]).strip()[:200]
+    if not profile.industry and str(inferred.get("industry") or "").strip():
+        profile.industry = str(inferred["industry"]).strip()[:200]
+    if not profile.tone and str(inferred.get("tone") or "").strip():
+        profile.tone = str(inferred["tone"]).strip()[:200]
+
+    profile.brand_bootstrap_completed = True
+    await session.commit()
+
+    # Do not build Brand Intelligence before the user reviews the draft.
+    # This keeps onboarding to at most one lightweight inference call and
+    # preserves the user's final say over the saved Brand DNA.
+    ready_for_review = bool(profile.professional_title and profile.industry and profile.tone)
+
+    return {
+        "bootstrapped": True,
+        "already_completed": False,
+        "ready": False,
+        "ready_for_review": ready_for_review,
+        "profile": {
+            "display_name": profile.display_name,
+            "professional_title": profile.professional_title,
+            "industry": profile.industry,
+            "experience_years": profile.experience_years,
+            "tone": profile.tone,
+        },
+        "linkedin_profile": {
+            "headline": connection.linkedin_headline,
+            "picture_url": connection.linkedin_picture_url,
+            "locale": connection.linkedin_locale,
+            "vanity_name": connection.linkedin_vanity_name,
+        },
     }
 
 
@@ -541,8 +697,6 @@ async def brand_onboard(
     current_user: AppUser = Depends(require_roles("admin", "owner", "user")),
 ):
 
-    if len(req.posts) < 3:
-        raise HTTPException(status_code=400, detail="At least 3 previous posts are required to build Brand Intelligence.")
     if len(req.posts) > 10:
         raise HTTPException(status_code=400, detail="You can import a maximum of 10 previous posts.")
     if any(not post.body.strip() for post in req.posts):
@@ -550,40 +704,48 @@ async def brand_onboard(
 
     profile = await AuthService.get_or_create_profile(session, current_user)
 
-    # Brand DNA is fully user-controlled. LinkedIn is used only for account
-    # connection and publishing, never as the source of Brand DNA profile fields.
+    # LinkedIn-assisted onboarding is additive. Existing user-entered Brand DNA
+    # remains authoritative, while blank fields can be supplied from the current
+    # onboarding draft. Experience is optional because LinkedIn's open profile
+    # scopes do not expose employment history.
     profile.display_name = req.display_name.strip()[:150] or current_user.display_name or profile.display_name or "User"
-    profile.professional_title = req.professional_title.strip()[:200]
-    profile.industry = req.industry.strip()[:200]
-    profile.experience_years = float(req.experience_years)
-    profile.tone = req.tone.strip()[:200]
+    if req.professional_title.strip():
+        profile.professional_title = req.professional_title.strip()[:200]
+    if req.industry.strip():
+        profile.industry = req.industry.strip()[:200]
+    if req.experience_years is not None:
+        profile.experience_years = float(req.experience_years)
+    if req.tone.strip():
+        profile.tone = req.tone.strip()[:200]
     profile.role = profile.role or current_user.role or "user"
     await session.commit()
 
-    # The editable 3–10 source posts are a current snapshot. Replace only the
-    # user-imported set on refresh; keep Brand OS published posts as durable evidence.
-    await session.execute(
-        delete(HistoricalPost).where(
-            HistoricalPost.profile_id == int(profile.id),
-            HistoricalPost.source == "user_import",
-        )
-    )
-    await session.commit()
-
+    # Historical posts are optional. If the user supplies them, replace only
+    # the editable user-import set. An empty submission preserves existing
+    # imported evidence rather than deleting it.
+    import_result = {"created": 0, "skipped": 0, "total": 0}
     service = BrandIntelligenceService(session)
-    import_result = await service.import_posts(
-        [
-            {
-                "body": post.body,
-                "published_at": post.published_at,
-                "external_id": post.external_id,
-                "metadata": post.metadata,
-                "source": "user_import",
-            }
-            for post in req.posts
-        ],
-        profile_id=profile.id,
-    )
+    if req.posts:
+        await session.execute(
+            delete(HistoricalPost).where(
+                HistoricalPost.profile_id == int(profile.id),
+                HistoricalPost.source == "user_import",
+            )
+        )
+        await session.commit()
+        import_result = await service.import_posts(
+            [
+                {
+                    "body": post.body,
+                    "published_at": post.published_at,
+                    "external_id": post.external_id,
+                    "metadata": post.metadata,
+                    "source": "user_import",
+                }
+                for post in req.posts
+            ],
+            profile_id=profile.id,
+        )
     try:
         memory = await service.analyze(profile.id)
     except ValueError as exc:
@@ -599,7 +761,7 @@ async def brand_onboard(
 async def brand_initialize_legacy():
     raise HTTPException(
         status_code=410,
-        detail="Automatic Brand DNA initialization is disabled. Enter your Brand DNA details and use the onboarding form.",
+        detail="Automatic Brand DNA initialization is disabled. Use LinkedIn-assisted onboarding and review the generated Brand DNA.",
     )
 
 
@@ -912,9 +1074,8 @@ async def improve_content(
         not profile.professional_title
         or not profile.industry
         or not profile.tone
-        or profile.experience_years is None
     ):
-        raise HTTPException(status_code=400, detail="Complete Professional Title, Industry, Desired Tone and Years of Experience before improving content.")
+        raise HTTPException(status_code=400, detail="Complete Professional Title, Industry and Desired Tone before improving content.")
 
     brand_service = BrandIntelligenceService(session)
     memory = await brand_service.get_memory(profile.id)
@@ -1077,9 +1238,8 @@ async def create_draft(
         not profile.professional_title
         or not profile.industry
         or not profile.tone
-        or profile.experience_years is None
     ):
-        raise HTTPException(status_code=400, detail="Complete Professional Title, Industry, Desired Tone and Years of Experience before creating content.")
+        raise HTTPException(status_code=400, detail="Complete Professional Title, Industry and Desired Tone before creating content.")
     brand_memory = await BrandIntelligenceService(session).get_memory(profile.id)
     if brand_memory is None or brand_memory.status != "READY":
         raise HTTPException(status_code=400, detail="Complete Brand DNA setup before creating content.")

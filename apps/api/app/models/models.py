@@ -39,6 +39,7 @@ class UserProfile(Base):
     experience_years: Mapped[float | None] = mapped_column(Float, nullable=True)
     tone: Mapped[str | None] = mapped_column(String(200), nullable=True)
     role: Mapped[str | None] = mapped_column(String(50), nullable=True, default="owner")
+    brand_bootstrap_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
@@ -175,6 +176,11 @@ class LinkedInConnection(Base):
     token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     linkedin_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     linkedin_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    linkedin_headline: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    linkedin_picture_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    linkedin_locale: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    linkedin_vanity_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    linkedin_profile_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
