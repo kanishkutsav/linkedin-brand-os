@@ -508,6 +508,117 @@ async def brand_status(
     }
 
 
+@app.post("/api/brand/bootstrap")
+async def brand_bootstrap(
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
+):
+    """Seed Brand DNA from the official LinkedIn profile data we already receive.
+
+    This is deliberately best-effort. Authentication must never depend on the
+    model provider, and we never overwrite fields the user has already set.
+    Historical LinkedIn posts are not requested here because that permission is
+    not available to the current app.
+    """
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    connection_result = await session.execute(
+        select(LinkedInConnection).where(LinkedInConnection.user_id == int(current_user.id)).limit(1)
+    )
+    connection = connection_result.scalar_one_or_none()
+    if connection is None:
+        return {"bootstrapped": False, "reason": "linkedin_not_connected"}
+
+    if profile.brand_bootstrap_completed:
+        memory = await BrandIntelligenceService(session).get_memory(profile.id)
+        return {
+            "bootstrapped": True,
+            "already_completed": True,
+            "ready": bool(
+                memory and memory.status == "READY"
+                and profile.professional_title and profile.industry and profile.tone
+            ),
+        }
+
+    # Use the headline directly when LinkedIn provides it. It is the strongest
+    # self-authored professional signal available through the current open profile scope.
+    if connection.linkedin_headline and not profile.professional_title:
+        profile.professional_title = connection.linkedin_headline[:200]
+
+    if not profile.tone:
+        profile.tone = "Clear, practical and credible"
+
+    inferred = {}
+    if connection.linkedin_headline or profile.professional_title:
+        system = """You create a conservative first-pass Brand DNA profile from a user's
+own LinkedIn authentication data.
+
+Rules:
+- Use only the supplied LinkedIn name, headline, locale and existing profile fields.
+- Never invent employers, credentials, achievements, years of experience, clients or facts.
+- Infer an industry only when the headline/profile gives enough evidence. Otherwise return an empty string.
+- A professional title may be cleaned up from the headline, but do not add claims.
+- Tone is a writing preference, not a fact. Only suggest a simple neutral tone if the profile gives a clear signal; otherwise return an empty string.
+- Never infer years of experience from a title or seniority word.
+- Return JSON only:
+{"professional_title":"","industry":"","tone":""}
+"""
+        prompt = json.dumps(
+            {
+                "name": profile.display_name,
+                "linkedin_headline": connection.linkedin_headline,
+                "linkedin_locale": connection.linkedin_locale,
+                "existing_professional_title": profile.professional_title,
+                "existing_industry": profile.industry,
+                "existing_tone": profile.tone,
+            },
+            ensure_ascii=False,
+        )
+        try:
+            inferred = await ModelRouterService().generate_json(system, prompt, max_output_tokens=500)
+        except Exception as exc:
+            logger.warning("LinkedIn Brand DNA bootstrap model unavailable: %s", exc)
+
+    if not profile.professional_title and str(inferred.get("professional_title") or "").strip():
+        profile.professional_title = str(inferred["professional_title"]).strip()[:200]
+    if not profile.industry and str(inferred.get("industry") or "").strip():
+        profile.industry = str(inferred["industry"]).strip()[:200]
+    if not profile.tone and str(inferred.get("tone") or "").strip():
+        profile.tone = str(inferred["tone"]).strip()[:200]
+
+    profile.brand_bootstrap_completed = True
+    await session.commit()
+
+    ready = bool(profile.professional_title and profile.industry and profile.tone)
+    memory_payload = None
+    if ready:
+        try:
+            memory_payload = await BrandIntelligenceService(session).analyze(profile.id)
+        except Exception as exc:
+            # The profile bootstrap remains saved even if the analysis provider
+            # is temporarily unavailable. The user can retry from Brand DNA.
+            logger.warning("LinkedIn Brand DNA analysis deferred: %s", exc)
+
+    return {
+        "bootstrapped": True,
+        "already_completed": False,
+        "ready": bool(memory_payload),
+        "profile": {
+            "display_name": profile.display_name,
+            "professional_title": profile.professional_title,
+            "industry": profile.industry,
+            "experience_years": profile.experience_years,
+            "tone": profile.tone,
+        },
+        "brand_memory": memory_payload,
+        "linkedin_profile": {
+            "headline": connection.linkedin_headline,
+            "picture_url": connection.linkedin_picture_url,
+            "locale": connection.linkedin_locale,
+            "vanity_name": connection.linkedin_vanity_name,
+        },
+    }
+
+
 @app.get("/api/brand/memory")
 async def brand_memory(
     session: AsyncSession = Depends(get_session),
