@@ -436,10 +436,11 @@ async def admin_overview(session: AsyncSession = Depends(get_session), current_u
     active_users = len((await session.execute(select(AuthUser.id).where(AuthUser.is_active == True))).scalars().all())
     total_events = len((await session.execute(select(ObservabilityEvent.id))).scalars().all())
     failed = len((await session.execute(select(ObservabilityEvent.id).where(ObservabilityEvent.status == "FAILED"))).scalars().all())
+    successful = len((await session.execute(select(ObservabilityEvent.id).where(ObservabilityEvent.status == "SUCCESS"))).scalars().all())
     total_feedback = len((await session.execute(select(UserFeedback.id))).scalars().all())
     open_feedback = len((await session.execute(select(UserFeedback.id).where(UserFeedback.status.in_(["NEW", "REVIEWING", "PLANNED", "IN_PROGRESS"])))).scalars().all())
     return {"users": {"total": total_users, "active": active_users},
-            "reliability": {"events": total_events, "failed_requests": failed, "error_rate": failed / total_events if total_events else 0},
+            "reliability": {"events": total_events, "successful_requests": successful, "failed_requests": failed, "error_rate": failed / total_events if total_events else 0},
             "feedback": {"total": total_feedback, "open": open_feedback},
             "ai_providers": {"groq": bool(settings.groq_api_key), "openrouter": bool(settings.openrouter_api_key), "gemini": bool(settings.gemini_api_key)},
             "job_providers": {"Adzuna": bool(settings.adzuna_app_id and settings.adzuna_app_key), "Jooble": bool(settings.jooble_api_key), "The Muse": bool(settings.themuse_api_key), "Remotive": bool(settings.remotive_enabled)}}
@@ -452,9 +453,9 @@ async def admin_users(session: AsyncSession = Depends(get_session), current_user
                        "active": u.is_active, "whitelisted": u.is_whitelisted, "created_at": u.created_at} for u in users]}
 
 
-@app.get("/api/admin/activity")
-async def admin_activity(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
-    rows = (await session.execute(select(ObservabilityEvent).order_by(ObservabilityEvent.created_at.desc()).limit(300))).scalars().all()
+@app.get("/api/admin/failures")
+async def admin_failures(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    rows = (await session.execute(select(ObservabilityEvent).where(ObservabilityEvent.status == "FAILED").order_by(ObservabilityEvent.created_at.desc()).limit(100))).scalars().all()
     return {"items": [{"id": x.id, "user_id": x.user_id, "correlation_id": x.correlation_id, "event_type": x.event_type,
                        "activity_type": x.activity_type, "status": x.status, "failure_category": x.failure_category,
                        "http_status": x.http_status, "latency_ms": x.latency_ms, "provider": x.provider,
@@ -491,10 +492,11 @@ async def admin_update_feedback(feedback_id: int, req: FeedbackStatusRequest, se
 
 @app.get("/api/admin/ai-providers")
 async def admin_ai_providers(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
-    rows = (await session.execute(select(ObservabilityEvent).where(ObservabilityEvent.provider.is_not(None)).order_by(ObservabilityEvent.created_at.desc()).limit(300))).scalars().all()
-    return {"configured": {"groq": bool(settings.groq_api_key), "openrouter": bool(settings.openrouter_api_key), "gemini": bool(settings.gemini_api_key)},
-            "recent": [{"provider": x.provider, "model": x.model, "status": x.status, "failure_category": x.failure_category,
-                        "latency_ms": x.latency_ms, "fallback_used": x.fallback_used, "created_at": x.created_at} for x in rows]}
+    return {"configured": {"groq": bool(settings.groq_api_key), "openrouter": bool(settings.openrouter_api_key), "gemini": bool(settings.gemini_api_key)}}
+
+@app.get("/api/admin/job-providers")
+async def admin_job_providers(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    return {"configured": {"Adzuna": bool(settings.adzuna_app_id and settings.adzuna_app_key), "Jooble": bool(settings.jooble_api_key), "The Muse": bool(settings.themuse_api_key), "Remotive": bool(settings.remotive_enabled)}}
 
 @app.middleware("http")
 async def observability_controls(request: Request, call_next):
