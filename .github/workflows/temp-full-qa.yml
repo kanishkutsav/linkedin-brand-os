@@ -16,7 +16,9 @@ jobs:
         with:
           python-version: '3.14'
       - run: pip install -r requirements.txt
+      - run: pip install pytest pytest-asyncio
       - run: python -m unittest discover -s tests -p 'test*.py' -v
+      - run: pytest -q
   frontend:
     runs-on: ubuntu-latest
     defaults:
