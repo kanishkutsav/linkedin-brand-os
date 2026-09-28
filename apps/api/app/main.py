@@ -509,6 +509,7 @@ async def brand_status(
         "summary": memory.summary if memory else None,
         "continuous_learning": True,
         "historical_import_optional": True,
+        "brand_bootstrap_completed": bool(profile.brand_bootstrap_completed),
         "last_updated": memory.updated_at if memory else None,
         "profile": {
             "display_name": profile.display_name if profile else "User",
