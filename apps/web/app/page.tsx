@@ -1357,6 +1357,8 @@ function SettingsView(props: any) {
   const experienceValue = brandExperienceYears === '' ? '' : String(brandExperienceYears);
   const linkedinProfile = brand.linkedin_profile || {};
   const hasLinkedInProfile = Boolean(linkedinProfile.connected || linkedin.connected);
+  const linkedinPicture = linkedinProfile.picture_url || '';
+  const linkedinPhotoAvailable = Boolean(linkedinPicture);
 
   return (
     <>
@@ -1390,6 +1392,30 @@ function SettingsView(props: any) {
               </div>
               {brand.ready && <button className="button" onClick={onCancel}><X size={14}/> Cancel</button>}
             </div>
+
+            {hasLinkedInProfile && (
+              <div style={{ marginTop: 14, padding: 12, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.55, display: 'flex', gap: 12, alignItems: 'center' }}>
+                {linkedinPhotoAvailable ? (
+                  <img
+                    src={linkedinPicture}
+                    alt="LinkedIn profile"
+                    style={{ width: 48, height: 48, borderRadius: '50%', objectFit: 'cover', flex: '0 0 auto', border: '1px solid #e4e7ec' }}
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div style={{ width: 48, height: 48, borderRadius: '50%', display: 'grid', placeItems: 'center', background: '#e4e7ec', color: '#344054', fontWeight: 700, flex: '0 0 auto' }}>
+                    {(profile.display_name || 'U').slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <div style={{ color: '#5145cd', fontWeight: 700, marginBottom: 4 }}>LinkedIn profile data</div>
+                  <div><b>Name:</b> {profile.display_name || 'Available'}</div>
+                  <div><b>Photo:</b> {linkedinPhotoAvailable ? 'Fetched from LinkedIn' : 'Not returned by LinkedIn'}</div>
+                  <div><b>Headline:</b> {linkedinProfile.headline || 'Not returned by LinkedIn for this connection'}</div>
+                  {linkedinProfile.locale && <div><b>Locale:</b> {linkedinProfile.locale}</div>}
+                </div>
+              </div>
+            )}
 
             {linkedinProfile.headline && (
               <div style={{ marginTop: 14, padding: 12, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.55 }}>
