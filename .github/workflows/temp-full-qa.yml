@@ -6,6 +6,8 @@ on:
 
 jobs:
   backend:
+    env:
+      PYTHONPATH: apps/api
     runs-on: ubuntu-latest
     defaults:
       run:
