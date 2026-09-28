@@ -3,10 +3,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Activity, ArrowUpRight, BarChart3, BrainCircuit, Check, ChevronRight, CircleCheck,
+  Activity, ArrowUpRight, BarChart3, BrainCircuit, Briefcase, Check, ChevronRight, CircleCheck,
   Clock3, Command, Download, ExternalLink, FileText, Gauge, Globe2, LayoutDashboard, Link2,
   LogOut, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings,
-  ShieldCheck, Sparkles, Target, TrendingUp, UserRound, WandSparkles, X, Zap
+  ShieldAlert, ShieldCheck, Sparkles, Target, TrendingUp, UserRound, WandSparkles, MessageSquare, X, Zap
 } from 'lucide-react';
 
 const API_BASE = typeof window !== 'undefined' && window.location.hostname === 'localhost' ? (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000') : '';
@@ -50,7 +50,7 @@ type PersonalThought = {
   status?: string;
   created_at?: string | null;
 };
-type Tab = 'Dashboard' | 'Research' | 'Content Studio' | 'LinkedIn Posts' | 'Analytics' | 'Brand DNA';
+type Tab = 'Dashboard' | 'Research' | 'Content Studio' | 'LinkedIn Posts' | 'Analytics' | 'Brand DNA' | 'Jobs' | 'Feedback' | 'Admin';
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -64,6 +64,9 @@ const nav = [
   ['LinkedIn Posts', ExternalLink, 'Published posts'],
   ['Analytics', BarChart3, 'Performance'],
   ['Brand DNA', Settings, 'Brand DNA'],
+  ['Jobs', Briefcase, 'Job opportunities'],
+  ['Feedback', MessageSquare, 'Share feedback'],
+  ['Admin', ShieldAlert, 'Operations & reliability'],
 ] as const;
 
 export default function Home() {
@@ -117,12 +120,6 @@ export default function Home() {
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [oauthCompleting, setOauthCompleting] = useState(false);
-  const initialWorkspaceLoaded = useRef(false);
-  const [initialWorkspaceLoading, setInitialWorkspaceLoading] = useState(true);
-  const [publishImage, setPublishImage] = useState<File | null>(null);
-  const [publishImagePreview, setPublishImagePreview] = useState<string | null>(null);
   const [learningStatus, setLearningStatus] = useState({ pending_events: 0, memory_count: 0 });
   const [personalThoughts, setPersonalThoughts] = useState<PersonalThought[]>([]);
   const [dashboardCounts, setDashboardCounts] = useState({
@@ -133,6 +130,9 @@ export default function Home() {
   const [expandedThoughtId, setExpandedThoughtId] = useState<number | null>(null);
   const [selectedThoughtIds, setSelectedThoughtIds] = useState<number[]>([]);
   const [thoughtSelectionMode, setThoughtSelectionMode] = useState(false);
+  const [jobs, setJobs] = useState<any[]>([]); const [jobProviders, setJobProviders] = useState<any[]>([]); const [jobQuery, setJobQuery] = useState(''); const [jobsLoading, setJobsLoading] = useState(false); const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [feedbackType, setFeedbackType] = useState('FEATURE'); const [feedbackSubject, setFeedbackSubject] = useState(''); const [feedbackDescription, setFeedbackDescription] = useState(''); const [feedbackContext, setFeedbackContext] = useState(''); const [feedbackSending, setFeedbackSending] = useState(false);
+  const [adminOverview, setAdminOverview] = useState<any>(null); const [adminActivity, setAdminActivity] = useState<any[]>([]); const [adminFeedback, setAdminFeedback] = useState<any[]>([]); const [adminUsers, setAdminUsers] = useState<any[]>([]);
 
   const headers = (authToken = token) => (authToken && authToken !== 'cookie') ? { Authorization: `Bearer ${authToken}` } : {};
 
@@ -242,19 +242,11 @@ useEffect(() => {
     const code = params.get('linkedin_code');
     const oauthNonce = params.get('oauth_nonce');
     if (code) {
-      setOauthCompleting(true);
-      const readOAuthCookie = () => document.cookie.split('; ').find((part) => part.startsWith('suvacya_oauth_nonce='))?.slice('suvacya_oauth_nonce='.length) || '';
-      // sessionStorage is tab-scoped and can be lost when LinkedIn returns
-      // through a new tab/window. The short-lived first-party cookie provides
-      // the same browser binding without weakening the server-side state check.
-      const expectedNonce = readOAuthCookie() || window.sessionStorage.getItem('brand-os-oauth-nonce');
+      const expectedNonce = window.sessionStorage.getItem('brand-os-oauth-nonce');
       window.history.replaceState({}, document.title, window.location.pathname);
       if (!expectedNonce || !oauthNonce || expectedNonce !== oauthNonce) {
         window.sessionStorage.removeItem('brand-os-oauth-nonce');
-        document.cookie = 'suvacya_oauth_nonce=; Max-Age=0; Path=/; SameSite=Lax' + (window.location.protocol === 'https:' ? '; Secure' : '');
         setError('LinkedIn sign-in could not be verified in this browser. Please start the connection again.');
-        setOauthCompleting(false);
-        setAuthLoading(false);
         return;
       }
       window.sessionStorage.removeItem('brand-os-oauth-started-at');
@@ -267,30 +259,20 @@ useEffect(() => {
         if (!res.ok) throw new Error(getApiError(data, 'LinkedIn connection failed'));
         window.sessionStorage.removeItem('brand-os-oauth-nonce');
         window.sessionStorage.removeItem('brand-os-oauth-started-at');
-        document.cookie = 'suvacya_oauth_nonce=; Max-Age=0; Path=/; SameSite=Lax' + (window.location.protocol === 'https:' ? '; Secure' : '');
         setToken('cookie');
-        setAuthLoading(false);
-        setOauthCompleting(false);
         setNotice('LinkedIn account connected successfully.');
       }).catch((e) => {
         window.sessionStorage.removeItem('brand-os-oauth-nonce');
-        setOauthCompleting(false);
-        setAuthLoading(false);
         setError(e instanceof Error ? e.message : 'LinkedIn connection failed');
       });
       return;
     }
-    apiFetch(API_BASE + '/api/auth/me').then((res) => {
-      if (res.ok) setToken('cookie');
-      setAuthLoading(false);
-    }).catch(() => setAuthLoading(false));
+    apiFetch(API_BASE + '/api/auth/me').then((res) => { if (res.ok) setToken('cookie'); }).catch(() => undefined);
   }, []);
 
   const fetchData = async (authToken: string | null = token) => {
     if (!authToken) return;
-    const isInitialLoad = !initialWorkspaceLoaded.current;
     setLoading(true);
-    if (isInitialLoad) setInitialWorkspaceLoading(true);
     try {
       // Load the core workspace first. Optional panels must never block the
       // dashboard/Brand DNA from appearing.
@@ -309,6 +291,7 @@ useEffect(() => {
       const profileJson = await profileRes.json();
       const approvalsJson = await approvalsRes.json();
       setProfile({ display_name: profileJson.display_name || 'User', role: profileJson.role || 'owner' });
+      if (profileJson.role === 'admin' && new URLSearchParams(window.location.search).get('admin') === '1') setTab('Admin');
       const linkedinJson = linkedinRes.ok ? await linkedinRes.json() : { connected: false };
       setLinkedin(linkedinJson);
 
@@ -409,10 +392,6 @@ useEffect(() => {
       if (nextQueue.length && !nextQueue.some((i) => i.id === selectedId)) setSelectedId(nextQueue[0].id);
 
       setLoading(false);
-      if (isInitialLoad) {
-        initialWorkspaceLoaded.current = true;
-        setInitialWorkspaceLoading(false);
-      }
 
       // Optional workspace panels load independently. A slow research feed or
       // analytics query must not blank/freeze the main workspace.
@@ -437,10 +416,12 @@ useEffect(() => {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load dashboard data');
       setLoading(false);
-      if (isInitialLoad) setInitialWorkspaceLoading(false);
     }
   };
   useEffect(() => { fetchData(token); }, [token]);
+  const loadJobs = async () => { if (!token) return; setJobsLoading(true); try { const q = jobQuery.trim() ? '?query=' + encodeURIComponent(jobQuery.trim()) : ''; const res = await apiFetch(API_BASE + '/api/jobs/search' + q, { headers: headers() }); const data = await res.json(); if (!res.ok) throw new Error(getApiError(data, 'Job search is temporarily unavailable.')); setJobs(data.jobs || []); setJobProviders(data.providers || []); } catch (e) { setError(e instanceof Error ? e.message : 'Job search is temporarily unavailable.'); } finally { setJobsLoading(false); } };
+  const loadAdmin = async () => { if (!token || profile.role !== 'admin') return; try { const results = await Promise.all(['/api/admin/overview','/api/admin/activity','/api/admin/feedback','/api/admin/users'].map((path) => apiFetch(API_BASE + path, { headers: headers() }))); if (results[0].ok) setAdminOverview(await results[0].json()); if (results[1].ok) setAdminActivity((await results[1].json()).items || []); if (results[2].ok) setAdminFeedback((await results[2].json()).items || []); if (results[3].ok) setAdminUsers((await results[3].json()).items || []); } catch (e) { setError(e instanceof Error ? e.message : 'Admin data could not be loaded.'); } };
+  useEffect(() => { if (tab === 'Jobs' && token && !jobs.length) void loadJobs(); if (tab === 'Admin' && token && profile.role === 'admin') void loadAdmin(); }, [tab, token, profile.role]);
   useEffect(() => {
     const selected = queue.find((item) => item.id === selectedId);
     if (!selected) return;
@@ -454,7 +435,7 @@ useEffect(() => {
     return queue.filter((item) => {
       const normalizedStatus = String(item.status || '').trim().toUpperCase();
       const statusMatch = statusFilter === 'PENDING'
-        ? ['PENDING', 'EDITED', 'REGENERATED', 'APPROVED', 'PUBLISHING'].includes(normalizedStatus)
+        ? ['PENDING', 'APPROVED', 'PUBLISHING'].includes(normalizedStatus)
         : statusFilter === 'NEEDS_REVIEW'
           ? ['EDITED', 'REGENERATED'].includes(normalizedStatus)
           : normalizedStatus === statusFilter;
@@ -510,37 +491,10 @@ useEffect(() => {
     const nonce = window.crypto?.randomUUID?.() || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
     window.sessionStorage.setItem('brand-os-oauth-nonce', nonce);
     window.sessionStorage.setItem('brand-os-oauth-started-at', String(Date.now()));
-    // Keep a short-lived first-party binding cookie as a fallback for OAuth
-    // handoffs that return in a new browser tab/window where sessionStorage
-    // is not shared.
-    document.cookie = 'suvacya_oauth_nonce=' + encodeURIComponent(nonce) + '; Max-Age=600; Path=/; SameSite=Lax' + (window.location.protocol === 'https:' ? '; Secure' : '');
     setError(null);
     window.location.href = '/api/auth/linkedin/start?browser_nonce=' + encodeURIComponent(nonce);
   };
   const cancelBrandEdit = async () => { await fetchData(); setBrandEditing(false); };
-  const refreshWorkspace = () => {
-    setError(null);
-    void fetchData();
-  };
-
-  const deleteAccount = async () => {
-    const confirmation = window.prompt('This permanently deletes your Suvacya account and application data. Type DELETE to confirm.');
-    if (confirmation !== 'DELETE') return;
-    try {
-      const csrf = document.cookie.split('; ').find((part) => part.startsWith('__Host-suvacya-csrf='))?.split('=').slice(1).join('=') || document.cookie.split('; ').find((part) => part.startsWith('suvacya-csrf='))?.split('=').slice(1).join('=') || '';
-      const res = await apiFetch(API_BASE + '/api/account', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
-        body: JSON.stringify({ confirmation }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(getApiError(data, 'Account deletion failed'));
-      window.location.href = '/';
-    } catch (e) {
-      window.alert(e instanceof Error ? e.message : 'Account deletion failed');
-    }
-  };
-
   const logout = async () => {
     try {
       if (token) {
@@ -613,19 +567,9 @@ useEffect(() => {
         setStatusFilter('PENDING');
       }
       if (action === 'execute') setStatusFilter('EXECUTED');
-      if (action === 'execute') {
-        if (publishImagePreview) URL.revokeObjectURL(publishImagePreview);
-        setPublishImage(null);
-        setPublishImagePreview(null);
-        setQueue((current) => current.map((item) => item.id === selectedApproval.id ? { ...item, status: 'EXECUTED' } : item));
-        setDashboardCounts((current) => ({ ...current, approved: Math.max(0, current.approved - 1), published: current.published + 1, pending_filter: Math.max(0, current.pending_filter - 1) }));
-        setStatusFilter('EXECUTED');
-      } else if (action === 'regenerate') {
-        setQueue((current) => current.map((item) => item.id === selectedApproval.id ? { ...item, status: 'REGENERATED' } : item));
-      } else if (action === 'approve') {
-        setQueue((current) => current.map((item) => item.id === selectedApproval.id ? { ...item, status: 'APPROVED' } : item));
-        setDashboardCounts((current) => ({ ...current, awaiting_approval: Math.max(0, current.awaiting_approval - 1), approved: current.approved + 1 }));
-      }
+      setOperationProgress(action === 'approve' || action === 'execute' ? 82 : 88);
+      setOperationStage(action === 'regenerate' ? 'Refreshing the approval queue…' : 'Refreshing the workspace…');
+      await fetchData();
       setOperationProgress(100);
       setOperationStage('Done');
       setNoticeTtl(action === 'regenerate' ? 1800 : 4500);
@@ -638,7 +582,6 @@ useEffect(() => {
               ? 'Published to LinkedIn successfully.'
               : 'Action completed successfully.'
       );
-      void fetchData();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Approval action failed');
     } finally {
@@ -660,10 +603,12 @@ useEffect(() => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, 'Content generation failed'));
+      setGenerationProgress(84);
+      setGenerationStage('Refreshing the approval queue…');
+      await fetchData();
       setGenerationProgress(100);
       setGenerationStage('Done');
       go('Dashboard');
-      void fetchData();
       setNotice(
         data.approval_queued
           ? 'New content suggestion generated and added to the approval queue.'
@@ -828,16 +773,13 @@ useEffect(() => {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, 'Draft creation failed'));
       setDraftTitle(''); setDraftTopic(''); setDraftBody('');
-      go('Dashboard');
+      await fetchData(); go('Dashboard');
       setNotice(data.approval_id ? 'Draft created and added to the HITL approval queue.' : 'Draft created but guardrails require edits.');
-      void fetchData();
     } catch (e) { setError(e instanceof Error ? e.message : 'Draft creation failed'); }
     finally { setIsBusy(false); }
   };
 
-  if (authLoading || oauthCompleting) return <FullScreenLoading label={oauthCompleting ? 'Signing you in…' : 'Loading…'} />;
   if (!token) return <LoginScreen error={error} onConnect={connectLinkedIn} />;
-  if (initialWorkspaceLoading) return <FullScreenLoading label="Loading…" />;
 
   return (
     <div className="app-shell">
@@ -847,12 +789,22 @@ useEffect(() => {
           <div><div className="brand-name">Suvacya</div><div className="brand-sub">Personal Brand Manager</div></div>
         </div>
         <div className="nav-label">Workspace</div>
-        {nav.map(([label, Icon, sub]) => (
+        {nav.filter(([label]) => label !== 'Admin' || profile.role === 'admin').map(([label, Icon, sub]) => (
           <button key={label} className={`nav-item ${tab === label ? 'active' : ''}`} onClick={() => go(label as Tab)}>
             <Icon size={16} /><span>{label}</span>{label === 'Dashboard' && summary.pending > 0 ? <em>{summary.pending}</em> : <ChevronRight size={13} opacity={.35} />}
           </button>
         ))}
         <div className="sidebar-spacer" />
+        <div className="connection-card">
+          <div className="connection-row">
+            <span className={`connection-dot ${linkedin.connected ? 'live' : ''}`} />
+            <span className="connection-title">{linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}</span>
+          </div>
+          <div className="connection-meta">{linkedin.connected ? 'Official API connection is ready.' : 'Connect through official OAuth to enable publishing.'}</div>
+          <button className="button ghost-dark" style={{ width: '100%', marginTop: 9 }} onClick={connectLinkedIn}>
+            <Link2 size={13} /> {linkedin.connected ? 'Reconnect' : 'Connect'}
+          </button>
+        </div>
         <div className="connection-card">
           <div className="connection-row"><ShieldCheck size={15} color="#4c8fef" /><span className="connection-title">Human approval gate</span></div>
           <div className="connection-meta">No external LinkedIn action is executed without your explicit approval.</div>
@@ -868,30 +820,17 @@ useEffect(() => {
           </div>
           <div className="topbar-actions">
             <div className="profile-menu-wrap">
-              <button className="avatar profile-avatar-button" title="Open profile menu" onClick={() => setProfileMenuOpen((open) => !open)} aria-label="Open profile menu" aria-expanded={profileMenuOpen}>
-                {linkedinAvatarUrl && !linkedinAvatarFailed ? (
-                  <img
-                    src={linkedinAvatarUrl}
-                    alt={profile.display_name ? `${profile.display_name} profile` : 'Profile'}
-                    onError={() => setLinkedinAvatarFailed(true)}
-                    referrerPolicy="no-referrer"
-                  />
-                ) : initials}
+              <button className="avatar profile-trigger" title="Account menu" onClick={() => setProfileMenuOpen((v) => !v)} aria-expanded={profileMenuOpen}>
+                {linkedinAvatarUrl && !linkedinAvatarFailed ? <img src={linkedinAvatarUrl} alt={profile.display_name ? profile.display_name + ' profile' : 'Profile'} onError={() => setLinkedinAvatarFailed(true)} referrerPolicy="no-referrer" /> : initials}
               </button>
-              {profileMenuOpen && (
-                <>
-                  <button className="profile-menu-backdrop" aria-label="Close profile menu" onClick={() => setProfileMenuOpen(false)} />
-                  <div className="profile-menu" role="menu">
-                    <div className="profile-menu-head">
-                      <div className="profile-menu-name">{profile.display_name || 'User'}</div>
-                      <div className="profile-menu-status">{linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}</div>
-                    </div>
-                    <button role="menuitem" onClick={() => { setProfileMenuOpen(false); connectLinkedIn(); }}><Link2 size={15}/><span>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</span></button>
-                    <button role="menuitem" onClick={() => { setProfileMenuOpen(false); refreshWorkspace(); }} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /><span>{loading ? 'Refreshing dashboard…' : 'Refresh dashboard'}</span></button>
-                    <button role="menuitem" className="profile-menu-danger" onClick={() => { setProfileMenuOpen(false); void deleteAccount(); }}><X size={15}/><span>Delete account</span></button>
-                  </div>
-                </>
-              )}
+              {profileMenuOpen && <div className="profile-menu">
+                <div className="profile-menu-head"><strong>{profile.display_name || 'Profile'}</strong><span>{profile.role || 'user'}</span></div>
+                <button onClick={() => { setProfileMenuOpen(false); connectLinkedIn(); }}><Link2 size={14}/> {linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
+                <button onClick={() => { setProfileMenuOpen(false); void fetchData(); }}><RefreshCw size={14}/> Refresh dashboard</button>
+                <button onClick={() => { setProfileMenuOpen(false); go('Feedback'); }}><MessageSquare size={14}/> Send feedback</button>
+                {profile.role === 'admin' && <button onClick={() => { setProfileMenuOpen(false); go('Admin'); }}><ShieldAlert size={14}/> Admin panel</button>}
+                <button className="danger" onClick={() => { setProfileMenuOpen(false); logout(); }}><LogOut size={14}/> Sign out</button>
+              </div>}
             </div>
           </div>
         </header>
@@ -960,9 +899,6 @@ useEffect(() => {
                   reviewNote={reviewNote} setReviewNote={setReviewNote}
                   isBusy={isBusy} busyAction={busyAction} operationProgress={operationProgress} operationStage={operationStage}
                   onAction={runApprovalAction}
-                  publishImage={publishImage}
-                  publishImagePreview={publishImagePreview}
-                  onPublishImageChange={(file: File | null, preview: string | null) => { setPublishImage(file); setPublishImagePreview(preview); }}
                 />
               </section>
             </>
@@ -972,6 +908,9 @@ useEffect(() => {
           {tab === 'Content Studio' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
           {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
+          {tab === 'Jobs' && <JobsView jobs={jobs} providers={jobProviders} query={jobQuery} setQuery={setJobQuery} loading={jobsLoading} expandedId={expandedJobId} setExpandedId={setExpandedJobId} onSearch={loadJobs} />}
+          {tab === 'Feedback' && <FeedbackView type={feedbackType} setType={setFeedbackType} subject={feedbackSubject} setSubject={setFeedbackSubject} description={feedbackDescription} setDescription={setFeedbackDescription} context={feedbackContext} setContext={setFeedbackContext} sending={feedbackSending} onSubmit={async () => { if (!feedbackSubject.trim() || !feedbackDescription.trim() || !token) return; setFeedbackSending(true); try { const res = await apiFetch(API_BASE + '/api/feedback', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback_type: feedbackType, subject: feedbackSubject, description: feedbackDescription, context: feedbackContext }) }); const data = await res.json(); if (!res.ok) throw new Error(getApiError(data, 'Feedback could not be submitted.')); setFeedbackSubject(''); setFeedbackDescription(''); setFeedbackContext(''); setNotice('Thanks. Your feedback was submitted.'); } catch (e) { setError(e instanceof Error ? e.message : 'Feedback could not be submitted.'); } finally { setFeedbackSending(false); } }} />}
+          {tab === 'Admin' && profile.role === 'admin' && <AdminView overview={adminOverview} activity={adminActivity} feedback={adminFeedback} users={adminUsers} onRefresh={loadAdmin} />}
           {tab === 'Brand DNA' && (
             <SettingsView
               brand={brand}
@@ -990,6 +929,8 @@ useEffect(() => {
               removePost={removeHistoricalPost}
               building={isBuildingBrand}
               onBuild={buildBrand}
+              linkedin={linkedin}
+              onConnect={connectLinkedIn}
               editing={brandEditing}
               setEditing={setBrandEditing}              onCancel={cancelBrandEdit}
               personalThoughts={personalThoughts}
@@ -1025,10 +966,6 @@ useEffect(() => {
         </main>
       </div>
 
-      {loading && initialWorkspaceLoaded.current && (
-        <WorkspaceLoadingOverlay label="Loading…" />
-      )}
-
       <nav className="mobile-bottom-nav" aria-label="Mobile workspace navigation">
         {[
           ['Dashboard', LayoutDashboard, 'Home'],
@@ -1056,7 +993,12 @@ useEffect(() => {
             <div className="mobile-more-grid">
               <button onClick={() => go('Analytics')}><BarChart3 size={18} /><span>Analytics</span></button>
               <button onClick={() => go('Brand DNA')}><Settings size={18} /><span>Brand DNA</span></button>
+              <button onClick={() => { closeMore(); connectLinkedIn(); }}><Link2 size={18} /><span>{linkedin.connected ? 'LinkedIn' : 'Connect LinkedIn'}</span></button>
               <button onClick={installSuvacya} disabled={isStandalone}><Download size={18} /><span>{isStandalone ? 'Installed' : 'Install Suvacya'}</span></button>
+            </div>
+            <div className="mobile-more-status">
+              <span className={`connection-dot ${linkedin.connected ? 'live' : ''}`} />
+              <div><strong>{linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}</strong><span>{linkedin.connected ? 'Official API connection is ready.' : 'Connect through official OAuth to enable publishing.'}</span></div>
             </div>
             <button className="mobile-more-signout" onClick={logout}><LogOut size={17} /> Sign out</button>
             <div className="mobile-more-footer">Suvacya · by Kanishka</div>
@@ -1105,6 +1047,7 @@ function LoginScreen({ error, onConnect }: { error: string | null; onConnect: ()
            <p style={{ color: '#5f6f86', fontSize: 11, lineHeight: 1.55, margin: '10px 0 0' }}>You'll authenticate securely on LinkedIn. If you're already signed in, LinkedIn may take you straight in.</p>
           {error && <div className="notice error" style={{ marginTop: 16 }}><X size={15}/><span>{error}</span></div>}
           <button className="button primary" style={{ width: '100%', minHeight: 46, marginTop: 24 }} onClick={onConnect}><LinkedInMark size={18}/> Continue with LinkedIn</button>
+          <p style={{ color: '#6b7d92', fontSize: 10, lineHeight: 1.55, margin: '12px 0 0' }}>By continuing, you confirm that you are at least 18 years old and agree to the <a href="/terms" style={{ color: '#1769e0', fontWeight: 700 }}>Terms of Service</a> and <a href="/privacy" style={{ color: '#1769e0', fontWeight: 700 }}>Privacy Policy</a>. You can disconnect LinkedIn or delete your account later from Suvacya.</p>
           <div style={{ marginTop: 17, padding: 12, borderRadius: 12, background: '#f4f8fc', color: '#5f6f86', fontSize: 10, lineHeight: 1.55 }}>OAuth permissions requested are limited to supported identity and posting capabilities. External actions remain behind the approval gate.</div>
         </div>
       </div>
@@ -1122,17 +1065,15 @@ function MiniStat({ icon: Icon, label, value }: any) {
 
 // Production copy sync marker: ensure latest UI copy is included in deployment.
 function ApprovalWorkspace(props: any) {
-  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, dashboardCounts, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction, publishImage, publishImagePreview, onPublishImageChange } = props;
+  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, dashboardCounts, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction } = props;
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [mobileReviewOpen, setMobileReviewOpen] = useState(false);
-  const previousSelectedId = useRef<number | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   useEffect(() => {
-    if (previousSelectedId.current !== null && previousSelectedId.current !== selectedId) {
-      if (publishImagePreview) URL.revokeObjectURL(publishImagePreview);
-      onPublishImageChange(null, null);
-    }
-    previousSelectedId.current = selectedId;
-  }, [selectedId, publishImagePreview, onPublishImageChange]);
+    setSelectedImage(null);
+    setImagePreview(null);
+  }, [selectedId]);
 
   const chooseImage = (file: File | null) => {
     if (!file) return;
@@ -1140,13 +1081,13 @@ function ApprovalWorkspace(props: any) {
       window.alert('Only JPEG or PNG images are supported.');
       return;
     }
-    if (file.size > 4 * 1024 * 1024) {
+    if (file.size > 10 * 1024 * 1024) {
       window.alert('Image must be 4 MB or smaller.');
       return;
     }
-    if (publishImagePreview) URL.revokeObjectURL(publishImagePreview);
-    const preview = URL.createObjectURL(file);
-    onPublishImageChange(file, preview);
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setSelectedImage(file);
+    setImagePreview(URL.createObjectURL(file));
   };
 
   return (
@@ -1227,15 +1168,15 @@ function ApprovalWorkspace(props: any) {
                   <div className="review-label" style={{ marginBottom: 7 }}>Optional photograph</div>
                   <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG or PNG image (up to 4 MB). The image is sent directly to LinkedIn during execution and is not stored by Suvacya.</div>
                   <input type="file" accept="image/jpeg,image/png" onChange={(e) => chooseImage(e.target.files?.[0] || null)} disabled={isBusy} />
-                  {publishImagePreview && (
+                  {imagePreview && (
                     <div style={{ marginTop: 10 }}>
-                      <img src={publishImagePreview} alt="Selected LinkedIn post image preview" style={{ display: 'block', width: '100%', maxHeight: 280, objectFit: 'contain', borderRadius: 10, background: '#f1f5f9' }} />
-                      <button className="link-button" style={{ marginTop: 7 }} onClick={() => { if (publishImagePreview) URL.revokeObjectURL(publishImagePreview); onPublishImageChange(null, null); }}>Remove image</button>
+                      <img src={imagePreview} alt="Selected LinkedIn post image preview" style={{ display: 'block', width: '100%', maxHeight: 280, objectFit: 'contain', borderRadius: 10, background: '#f1f5f9' }} />
+                      <button className="link-button" style={{ marginTop: 7 }} onClick={() => { if (imagePreview) URL.revokeObjectURL(imagePreview); setImagePreview(null); setSelectedImage(null); }}>Remove image</button>
                     </div>
                   )}
                 </div>
                 <div className="review-actions" style={{ marginTop: 14 }}>
-                  <button className="button success progress-button" disabled={isBusy} onClick={() => onAction('execute', publishImage)}>
+                  <button className="button success progress-button" disabled={isBusy} onClick={() => onAction('execute', selectedImage)}>
                     <span className="button-content"><ExternalLink size={14}/> {busyAction === 'execute' ? operationStage || 'Publishing…' : 'Execute'}</span>
                     {busyAction === 'execute' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
                   </button>
@@ -1543,7 +1484,7 @@ function SettingsView(props: any) {
   const {
     brand, profile, brandTitle, setBrandTitle, brandIndustry, setBrandIndustry,
     brandExperienceYears, setBrandExperienceYears, brandTone, setBrandTone,
-    posts, updatePost, addPost, removePost, building, onBuild,
+    posts, updatePost, addPost, removePost, building, onBuild, linkedin, onConnect,
     editing, setEditing, onCancel, personalThoughts = [], onDeletePersonalThoughts,
     expandedThoughtId, setExpandedThoughtId, selectedThoughtIds = [], setSelectedThoughtIds,
     thoughtSelectionMode = false, setThoughtSelectionMode
@@ -1552,7 +1493,7 @@ function SettingsView(props: any) {
   const count = posts.filter((x: string) => x.trim()).length;
   const experienceValue = brandExperienceYears === '' ? '' : String(brandExperienceYears);
   const linkedinProfile = brand.linkedin_profile || {};
-  const hasLinkedInProfile = Boolean(linkedinProfile.connected);
+  const hasLinkedInProfile = Boolean(linkedinProfile.connected || linkedin.connected);
   const linkedinPicture = linkedinProfile.picture_url || '';
   const linkedinPhotoAvailable = Boolean(linkedinPicture);
 
@@ -1853,49 +1794,59 @@ function SettingsView(props: any) {
 
       <section className="panel settings-card" style={{ marginTop: 16 }}>
         <h2 className="settings-title">Privacy & Data</h2>
-        <p className="settings-copy">Review privacy information and account data controls. Account deletion and LinkedIn connection management are available from Profile.</p>
+        <p className="settings-copy">Review your data controls, export your application data, or permanently delete your Suvacya account.</p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+          <button className="button" onClick={async () => {
+            try {
+              const csrf = document.cookie.split('; ').find((part) => part.startsWith('__Host-suvacya-csrf='))?.split('=').slice(1).join('=') || document.cookie.split('; ').find((part) => part.startsWith('suvacya-csrf='))?.split('=').slice(1).join('=') || '';
+              const res = await fetch(API_BASE + '/api/account/export', { credentials: 'include', headers: csrf ? { 'X-CSRF-Token': csrf } : {} });
+              const data = await res.json();
+              if (!res.ok) throw new Error(getApiError(data, 'Data export failed'));
+              const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const anchor = document.createElement('a');
+              anchor.href = url;
+              anchor.download = 'suvacya-data-export.json';
+              anchor.click();
+              URL.revokeObjectURL(url);
+              window.alert('Your Suvacya data export is ready.');
+            } catch (e) {
+              window.alert(e instanceof Error ? e.message : 'Data export failed');
+            }
+          }}><Download size={14}/> Export my data</button>
           <a className="button" href="/privacy">Privacy Policy</a>
           <a className="button" href="/terms">Terms</a>
+          <button className="button" style={{ color: '#b91c1c' }} onClick={async () => {
+            const confirmation = window.prompt('This permanently deletes your Suvacya account and application data. Type DELETE to confirm.');
+            if (confirmation !== 'DELETE') return;
+            try {
+              const csrf = document.cookie.split('; ').find((part) => part.startsWith('__Host-suvacya-csrf='))?.split('=').slice(1).join('=') || document.cookie.split('; ').find((part) => part.startsWith('suvacya-csrf='))?.split('=').slice(1).join('=') || '';
+              const res = await fetch(API_BASE + '/api/account', {
+                method: 'DELETE',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
+                body: JSON.stringify({ confirmation }),
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) throw new Error(getApiError(data, 'Account deletion failed'));
+              window.location.href = '/';
+            } catch (e) {
+              window.alert(e instanceof Error ? e.message : 'Account deletion failed');
+            }
+          }}><X size={14}/> Delete account</button>
         </div>
       </section>
 
+      <section className="panel settings-card" style={{ marginTop: 16 }}>
+        <h2 className="settings-title">LinkedIn connection</h2>
+        <p className="settings-copy">
+          Signed in as <b>{profile.display_name}</b>. {linkedin.connected
+            ? 'Your official LinkedIn connection is active. Suvacya uses only the profile information LinkedIn makes available to the current app permissions.'
+            : 'Connect LinkedIn to prefill the starting Brand DNA where available and enable supported publishing actions.'}
+        </p>
+        <button className="button" onClick={onConnect}><Link2 size={14}/>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
+      </section>
     </>
-  );
-}
-
-function FullScreenLoading({ label = 'Loading…' }: { label?: string }) {
-  return (
-    <main className="full-screen-loading" aria-live="polite" aria-busy="true">
-      <div className="loading-workspace-preview" aria-hidden="true">
-        <aside className="loading-preview-sidebar">
-          <div className="loading-preview-brand"><span /><span /><span /></div>
-          <div className="loading-preview-nav" /><div className="loading-preview-nav" /><div className="loading-preview-nav" /><div className="loading-preview-nav" /><div className="loading-preview-nav" />
-        </aside>
-        <div className="loading-preview-main">
-          <div className="loading-preview-topbar" /><div className="loading-preview-hero" />
-          <div className="loading-preview-grid"><div /><div /><div /></div>
-          <div className="loading-preview-panel" />
-        </div>
-      </div>
-      <div className="loading-workspace-scrim" />
-      <div className="full-screen-loading-card">
-        <div className="brand-mark"><Sparkles size={18} /></div>
-        <div className="full-screen-loading-label">{label}</div>
-        <div className="full-screen-loading-hint">Your workspace is being prepared…</div>
-      </div>
-    </main>
-  );
-}
-
-function WorkspaceLoadingOverlay({ label = 'Loading…' }: { label?: string }) {
-  return (
-    <div className="workspace-loading-overlay" aria-live="polite" aria-busy="true">
-      <div className="full-screen-loading-card">
-        <div className="brand-mark"><Sparkles size={18} /></div>
-        <div className="full-screen-loading-label">{label}</div>
-      </div>
-    </div>
   );
 }
 
@@ -1905,4 +1856,33 @@ function EmptyState({ icon: Icon, title, text, action, onAction }: any) {
 
 function LinkedInMark({ size = 18, color }: { size?: number; color?: string }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill={color || 'currentColor'} aria-hidden="true"><path d="M6.5 8.2H3.2V20h3.3V8.2ZM4.85 3A1.95 1.95 0 1 0 4.85 6.9 1.95 1.95 0 0 0 4.85 3ZM20.8 13.25c0-3.52-1.88-5.16-4.4-5.16-2.02 0-2.92 1.11-3.43 1.89V8.2H9.67V20h3.3v-5.84c0-1.54.29-3.03 2.2-3.03 1.88 0 1.91 1.76 1.91 3.13V20h3.3l.02-6.75Z"/></svg>;
+}
+function JobsView({ jobs, providers, query, setQuery, loading, expandedId, setExpandedId, onSearch }: any) {
+  return <>
+    <div className="page-header"><div><div className="page-kicker"><Briefcase size={13}/> Career opportunities</div><h1 className="page-title">Job opportunities</h1><p className="page-description">Search openings using your professional title, experience and domain. Suvacya does not apply for jobs on your behalf.</p></div></div>
+    <section className="panel" style={{ padding: 18 }}><div style={{ display: 'flex', gap: 10, alignItems: 'center' }}><input className="input" style={{ flex: 1 }} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void onSearch(); }} placeholder="Search a position, e.g. Product Manager" /><button className="button primary" onClick={() => void onSearch()} disabled={loading}><Search size={14}/>{loading ? 'Searching…' : 'Search jobs'}</button></div><div style={{ marginTop: 10, color: '#7a899d', fontSize: 11 }}>Profile context is used when the search box is empty. Matching is deterministic and does not use AI.</div></section>
+    <section className="panel" style={{ marginTop: 16, padding: 18 }}><div className="panel-head"><div><h2 className="settings-title">Sources</h2><p className="settings-copy">Each provider is independent. Missing API keys do not block this section.</p></div></div><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{providers.map((p: any) => <span className="tag" key={p.provider}>{p.provider} · {p.configured ? (p.error ? 'temporarily unavailable' : 'configured') : 'waiting for API key'}</span>)}</div></section>
+    <section className="panel" style={{ marginTop: 16, padding: 18 }}><div className="panel-head"><div><h2 className="settings-title">Openings</h2><p className="settings-copy">{jobs.length ? jobs.length + ' openings found' : 'No openings returned yet.'}</p></div></div>
+      {jobs.length ? jobs.map((job: any) => { const id = job.provider + ':' + job.provider_job_id; const open = expandedId === id; return <article key={id} className="post-entry" style={{ marginTop: 10 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}><div><div style={{ fontWeight: 800, color: '#10233f' }}>{job.title}</div><div style={{ marginTop: 4, fontSize: 12, color: '#5f6f86' }}>{job.company} · {job.location}{job.experience_level ? ' · ' + job.experience_level : ''}</div></div><span className="tag">{job.provider}</span></div><div style={{ marginTop: 9, display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="button" onClick={() => setExpandedId(open ? null : id)}>{open ? 'Hide description' : 'View description'}</button>{job.application_url ? <a className="button primary" href={job.application_url} target="_blank" rel="noopener noreferrer">Apply externally <ExternalLink size={13}/></a> : null}</div>{open ? <div style={{ marginTop: 12, color: '#334b66', fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{job.description || 'No description supplied by the source.'}</div> : null}</article>; }) : <EmptyState icon={Briefcase} title="No jobs to show yet" text="Add provider keys later or broaden the search. Configured sources populate this section independently." />}
+    </section>
+  </>;
+}
+
+function FeedbackView({ type, setType, subject, setSubject, description, setDescription, context, setContext, sending, onSubmit }: any) {
+  return <>
+    <div className="page-header"><div><div className="page-kicker"><MessageSquare size={13}/> Product feedback</div><h1 className="page-title">Help shape Suvacya</h1><p className="page-description">Suggest a feature, report a bug, or tell us what would make the product more useful.</p></div></div>
+    <section className="panel settings-card"><div className="profile-grid"><div className="form-group"><label className="form-label">Type</label><select className="input" value={type} onChange={(e) => setType(e.target.value)}><option value="FEATURE">Feature / improvement</option><option value="BUG">Bug report</option><option value="GENERAL">General feedback</option><option value="OTHER">Other</option></select></div><div className="form-group"><label className="form-label">Subject</label><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Short summary" /></div></div><div className="form-group" style={{ marginTop: 14 }}><label className="form-label">Description</label><textarea className="textarea" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What happened or what would you like to see?" rows={7} /></div><div className="form-group" style={{ marginTop: 14 }}><label className="form-label">Context (optional)</label><input className="input" value={context} onChange={(e) => setContext(e.target.value)} placeholder="What were you trying to do?" /></div><button className="button primary" style={{ marginTop: 14 }} onClick={onSubmit} disabled={sending || !subject.trim() || !description.trim()}>{sending ? 'Sending…' : 'Submit feedback'} <ArrowUpRight size={13}/></button></section>
+  </>;
+}
+
+function AdminView({ overview, activity, feedback, users, onRefresh }: any) {
+  return <>
+    <div className="page-header"><div><div className="page-kicker"><ShieldAlert size={13}/> Admin operations</div><h1 className="page-title">Operations & reliability</h1><p className="page-description">Server-side admin controls, activity, failures, feedback and provider readiness.</p></div><button className="button" onClick={() => void onRefresh()}><RefreshCw size={13}/> Refresh</button></div>
+    <div className="metric-grid">{[['Users', overview?.users?.total],['API events', overview?.reliability?.events],['Failed requests', overview?.reliability?.failed_requests],['Open feedback', overview?.feedback?.open]].map(([label,value]) => <div className="metric-card" key={label as string}><span>{label}</span><strong>{value ?? '—'}</strong></div>)}</div>
+    <section className="panel settings-card" style={{ marginTop: 16 }}><h2 className="settings-title">AI providers</h2><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>{Object.entries(overview?.ai_providers || {}).map(([k,v]: any) => <span className="tag" key={k}>{k} · {v ? 'configured' : 'not configured'}</span>)}</div></section>
+    <section className="panel settings-card" style={{ marginTop: 16 }}><h2 className="settings-title">Job providers</h2><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>{Object.entries(overview?.job_providers || {}).map(([k,v]: any) => <span className="tag" key={k}>{k} · {v ? 'available' : 'waiting for key'}</span>)}</div></section>
+    <section className="panel settings-card" style={{ marginTop: 16 }}><h2 className="settings-title">Recent activity & failures</h2>{activity.slice(0,30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}><b>{x.activity_type}</b> · {x.status} · {x.failure_category || 'OK'} · {x.latency_ms ?? 0}ms <span style={{ color:'#8a98ab' }}>#{x.correlation_id}</span></div>)}</section>
+    <section className="panel settings-card" style={{ marginTop: 16 }}><h2 className="settings-title">Feedback inbox</h2>{feedback.slice(0,30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}><b>{x.type}</b> · {x.subject} · {x.status} · {x.priority}<div style={{ marginTop: 5, color:'#5f6f86' }}>{x.description}</div></div>)}</section>
+    <section className="panel settings-card" style={{ marginTop: 16 }}><h2 className="settings-title">Users</h2>{users.slice(0,30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}>{x.display_name || 'User'} · {x.email} · <b>{x.role}</b> · {x.active ? 'active' : 'inactive'}</div>)}</section>
+  </>;
 }

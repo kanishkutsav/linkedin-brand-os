@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Literal
+import time
+from typing import Any
 
 import httpx
 from google import genai
 from google.genai import types
 
 from app.core.config import settings
+from app.db.database import SessionLocal
+from app.models.models import ObservabilityEvent
 from app.services.security import minimize_ai_text
 
 
 class ModelRouterService:
-    """Groq-first task-aware LLM router with OpenRouter and Gemini fallbacks.
+    """Groq-first LLM router with OpenRouter and Gemini fallbacks.
 
     User-entered Brand DNA is passed in the generation prompt, so every
     configured provider receives the same title, industry, experience, tone,
@@ -32,41 +35,63 @@ class ModelRouterService:
                 "No LLM provider is configured. Set OPENROUTER_API_KEY, GROQ_API_KEY or GEMINI_API_KEY."
             )
 
+
+    @staticmethod
+    async def _record_provider_event(provider: str, model: str, status: str, latency_ms: int, attempts: int, fallback_used: bool, error: str | None = None) -> None:
+        try:
+            async with SessionLocal() as session:
+                category = None
+                if error:
+                    low = error.lower()
+                    if "429" in low or "rate" in low: category = "RATE_LIMIT"
+                    elif "401" in low or "403" in low or "auth" in low: category = "AUTHENTICATION_ERROR"
+                    elif "timeout" in low: category = "TIMEOUT"
+                    elif "http 5" in low: category = "PROVIDER_UNAVAILABLE"
+                    else: category = "MODEL_ERROR"
+                session.add(ObservabilityEvent(
+                    correlation_id="ai-" + str(int(time.time() * 1000)),
+                    event_type="ProviderSucceeded" if status == "SUCCESS" else "ProviderFailed",
+                    activity_type="GENERATE", status=status, user_visible_failure=False,
+                    provider=provider, model=model, failure_category=category,
+                    latency_ms=latency_ms, attempts=attempts, fallback_used=fallback_used,
+                    final_provider=provider if status == "SUCCESS" else None,
+                    details_json=json.dumps({"error": (error or "")[:300]}, ensure_ascii=False),
+                ))
+                await session.commit()
+        except Exception:
+            pass
+
     async def generate_json(
         self,
         system_instruction: str,
         prompt: str,
         *,
         max_output_tokens: int = 1800,
-        task: Literal["content", "research", "learning", "general"] = "general",
     ) -> dict:
         errors: list[str] = []
-
+        attempts = 0
         safe_system = minimize_ai_text(system_instruction)
         safe_prompt = minimize_ai_text(prompt)
 
-        for provider in ("groq", "openrouter", "gemini"):
-            if provider not in self.allowed_providers:
+        providers = [
+            ("groq", settings.groq_api_key, settings.groq_model, self._groq_json),
+            ("openrouter", settings.openrouter_api_key, settings.openrouter_model, self._openrouter_json),
+            ("gemini", settings.gemini_api_key, settings.gemini_model, self._gemini_json),
+        ]
+        for provider, api_key, model, fn in providers:
+            if not api_key or provider not in self.allowed_providers:
                 continue
-            if provider == "groq" and settings.groq_api_key:
-                try:
-                    return await self._groq_json(safe_system, safe_prompt, max_output_tokens=max_output_tokens, task=task)
-                except Exception as exc:
-                    errors.append(f"groq: {exc}")
-            elif provider == "openrouter" and settings.openrouter_api_key:
-                try:
-                    return await self._openrouter_json(safe_system, safe_prompt, max_output_tokens=max_output_tokens, task=task)
-                except Exception as exc:
-                    errors.append(f"openrouter: {exc}")
-            elif provider == "gemini" and settings.gemini_api_key:
-                try:
-                    return await self._gemini_json(safe_system, safe_prompt, max_output_tokens=max_output_tokens, task=task)
-                except Exception as exc:
-                    errors.append(f"gemini: {exc}")
+            attempts += 1
+            started = time.perf_counter()
+            try:
+                result = await fn(safe_system, safe_prompt, max_output_tokens=max_output_tokens)
+                await self._record_provider_event(provider, model, "SUCCESS", int((time.perf_counter() - started) * 1000), attempts, attempts > 1)
+                return result
+            except Exception as exc:
+                await self._record_provider_event(provider, model, "FAILED", int((time.perf_counter() - started) * 1000), attempts, False, str(exc))
+                errors.append(provider + ": " + str(exc))
 
-        raise RuntimeError(
-            "All configured LLM providers failed. " + " | ".join(errors)
-        )
+        raise RuntimeError("All configured LLM providers failed. " + " | ".join(errors))
 
     async def _openrouter_json(
         self,
@@ -74,10 +99,9 @@ class ModelRouterService:
         prompt: str,
         *,
         max_output_tokens: int,
-        task: str = "general",
     ) -> dict:
         payload = {
-            "model": settings.model_for("openrouter", task),
+            "model": settings.openrouter_model,
             "messages": [
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": prompt},
@@ -94,7 +118,7 @@ class ModelRouterService:
 
         # Free-tier routing should fail over quickly instead of holding the UI
         # for the old 90-second provider timeout.
-        async with httpx.AsyncClient(timeout=6.0) as client:
+        async with httpx.AsyncClient(timeout=7.0) as client:
             response = await client.post(
                 settings.openrouter_base_url.rstrip("/") + "/chat/completions",
                 headers=headers,
@@ -116,11 +140,9 @@ class ModelRouterService:
         prompt: str,
         *,
         max_output_tokens: int,
-        task: str = "general",
     ) -> dict:
         payload = {
-            "model": settings.model_for("groq", task),
-            "reasoning_effort": {"content": "low", "research": "high", "learning": "medium", "general": "medium"}.get(task, "medium"),
+            "model": settings.groq_model,
             "messages": [
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": prompt},
@@ -155,12 +177,11 @@ class ModelRouterService:
         prompt: str,
         *,
         max_output_tokens: int,
-        task: str = "general",
     ) -> dict:
         client = genai.Client(api_key=settings.gemini_api_key)
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
-                model=settings.model_for("gemini", task),
+                model=settings.gemini_model,
                 contents=minimize_ai_text(prompt),
                 config=types.GenerateContentConfig(
                     system_instruction=minimize_ai_text(system_instruction),
@@ -168,7 +189,7 @@ class ModelRouterService:
                     max_output_tokens=max_output_tokens,
                 ),
             ),
-            timeout=6.0,
+            timeout=7.0,
         )
         content = getattr(response, "text", None)
         if not content:
@@ -273,7 +294,7 @@ Hard rules:
             },
             ensure_ascii=False,
         )
-        return await self.generate_json(system, prompt, max_output_tokens=900, task="content")
+        return await self.generate_json(system, prompt, max_output_tokens=900)
 
 
 class GeminiService:
