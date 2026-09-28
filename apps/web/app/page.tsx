@@ -235,10 +235,15 @@ useEffect(() => {
     const code = params.get('linkedin_code');
     const oauthNonce = params.get('oauth_nonce');
     if (code) {
-      const expectedNonce = window.sessionStorage.getItem('brand-os-oauth-nonce');
+      const readOAuthCookie = () => document.cookie.split('; ').find((part) => part.startsWith('suvacya_oauth_nonce='))?.slice('suvacya_oauth_nonce='.length) || '';
+      // sessionStorage is tab-scoped and can be lost when LinkedIn returns
+      // through a new tab/window. The short-lived first-party cookie provides
+      // the same browser binding without weakening the server-side state check.
+      const expectedNonce = readOAuthCookie() || window.sessionStorage.getItem('brand-os-oauth-nonce');
       window.history.replaceState({}, document.title, window.location.pathname);
       if (!expectedNonce || !oauthNonce || expectedNonce !== oauthNonce) {
         window.sessionStorage.removeItem('brand-os-oauth-nonce');
+        document.cookie = 'suvacya_oauth_nonce=; Max-Age=0; Path=/; SameSite=Lax' + (window.location.protocol === 'https:' ? '; Secure' : '');
         setError('LinkedIn sign-in could not be verified in this browser. Please start the connection again.');
         return;
       }
@@ -252,6 +257,7 @@ useEffect(() => {
         if (!res.ok) throw new Error(getApiError(data, 'LinkedIn connection failed'));
         window.sessionStorage.removeItem('brand-os-oauth-nonce');
         window.sessionStorage.removeItem('brand-os-oauth-started-at');
+        document.cookie = 'suvacya_oauth_nonce=; Max-Age=0; Path=/; SameSite=Lax' + (window.location.protocol === 'https:' ? '; Secure' : '');
         setToken('cookie');
         setNotice('LinkedIn account connected successfully.');
       }).catch((e) => {
@@ -480,6 +486,10 @@ useEffect(() => {
     const nonce = window.crypto?.randomUUID?.() || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
     window.sessionStorage.setItem('brand-os-oauth-nonce', nonce);
     window.sessionStorage.setItem('brand-os-oauth-started-at', String(Date.now()));
+    // Keep a short-lived first-party binding cookie as a fallback for OAuth
+    // handoffs that return in a new browser tab/window where sessionStorage
+    // is not shared.
+    document.cookie = 'suvacya_oauth_nonce=' + encodeURIComponent(nonce) + '; Max-Age=600; Path=/; SameSite=Lax' + (window.location.protocol === 'https:' ? '; Secure' : '');
     setError(null);
     window.location.href = '/api/auth/linkedin/start?browser_nonce=' + encodeURIComponent(nonce);
   };
