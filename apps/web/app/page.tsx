@@ -270,7 +270,7 @@ useEffect(() => {
       // First-time LinkedIn users get a one-time, best-effort Brand DNA
       // bootstrap. It uses only the official profile data we already received.
       if (linkedinJson.connected && brandJson.brand_bootstrap_completed === false) {
-        void fetch(\`\${API_BASE}/api/brand/bootstrap\`, { method: 'POST', headers: headers(authToken) })
+        void fetch(`${API_BASE}/api/brand/bootstrap`, { method: 'POST', headers: headers(authToken) })
           .then(async (bootstrapRes) => {
             if (!bootstrapRes.ok) return;
             const bootstrapJson = await bootstrapRes.json();
