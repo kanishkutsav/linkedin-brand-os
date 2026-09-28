@@ -25,9 +25,10 @@ type Profile = { display_name: string; role?: string };
 type LinkedInStatus = { connected: boolean; name?: string | null; email?: string | null; expires_at?: string | null };
 type BrandStatus = {
   ready: boolean; status: string; source_post_count: number; current_post_count?: number;
-  continuous_learning?: boolean; historical_import_optional?: boolean; last_updated?: string | null;
+  continuous_learning?: boolean; historical_import_optional?: boolean; brand_bootstrap_completed?: boolean; last_updated?: string | null;
   summary?: string | null;
   profile?: { display_name?: string; professional_title?: string | null; industry?: string | null; experience_years?: number | null; tone?: string | null };
+  linkedin_profile?: { connected?: boolean; headline?: string | null; picture_url?: string | null; locale?: string | null; vanity_name?: string | null };
 };
 type Opportunity = {
   id: number; title: string; topic: string; angle: string; pillar: string; format?: string; objective?: string;
@@ -254,7 +255,8 @@ useEffect(() => {
       const profileJson = await profileRes.json();
       const approvalsJson = await approvalsRes.json();
       setProfile({ display_name: profileJson.display_name || 'User', role: profileJson.role || 'owner' });
-      setLinkedin(linkedinRes.ok ? await linkedinRes.json() : { connected: false });
+      const linkedinJson = linkedinRes.ok ? await linkedinRes.json() : { connected: false };
+      setLinkedin(linkedinJson);
 
       let brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
 
@@ -264,6 +266,28 @@ useEffect(() => {
       setBrandIndustry(p.industry || '');
       setBrandExperienceYears(typeof p.experience_years === 'number' ? p.experience_years : '');
       setBrandTone(p.tone || '');
+
+      // First-time LinkedIn users get a one-time, best-effort Brand DNA
+      // bootstrap. It uses only the official profile data we already received.
+      if (linkedinJson.connected && brandJson.brand_bootstrap_completed === false) {
+        void fetch(\`\${API_BASE}/api/brand/bootstrap\`, { method: 'POST', headers: headers(authToken) })
+          .then(async (bootstrapRes) => {
+            if (!bootstrapRes.ok) return;
+            const bootstrapJson = await bootstrapRes.json();
+            const bootstrapProfile = bootstrapJson.profile || {};
+            if (bootstrapProfile.professional_title !== undefined) setBrandTitle(bootstrapProfile.professional_title || '');
+            if (bootstrapProfile.industry !== undefined) setBrandIndustry(bootstrapProfile.industry || '');
+            if (bootstrapProfile.experience_years !== undefined) setBrandExperienceYears(typeof bootstrapProfile.experience_years === 'number' ? bootstrapProfile.experience_years : '');
+            if (bootstrapProfile.tone !== undefined) setBrandTone(bootstrapProfile.tone || '');
+            if (bootstrapJson.brand_memory) {
+              setBrand({ ...bootstrapJson.brand_memory, ready: bootstrapJson.ready === true });
+            }
+            await fetchData(authToken);
+          })
+          .catch(() => {
+            // Bootstrap is optional. Never block the core workspace if it fails.
+          });
+      }
 
       // Brand status now carries the frozen source-post snapshot, so Brand DNA
       // does not depend on a second request just to display the user's posts.
@@ -407,7 +431,7 @@ useEffect(() => {
   const requireBrand = (actionLabel: string) => {
     if (brand.ready) return true;
     go('Brand DNA');
-    setError('Brand DNA is not set up yet. Before ' + actionLabel + ', complete your Brand DNA details and add 3–10 previous LinkedIn posts to calibrate your writing voice.');
+    setError('Brand DNA is not set up yet. Before ' + actionLabel + ', complete the suggested Brand DNA details. Previous LinkedIn posts are optional and can be added later to improve voice calibration.');
     return false;
   };
 
@@ -553,12 +577,12 @@ useEffect(() => {
     const tone = brandTone.trim();
     const experience = typeof brandExperienceYears === 'number' ? brandExperienceYears : Number(brandExperienceYears);
 
-    if (!title || !industry || !tone || !Number.isFinite(experience) || experience < 0) {
-      setError('Professional title, industry, desired tone and years of experience are required.');
+    if (!title || !industry || !tone) {
+      setError('Professional title, industry and desired tone are required. Years of experience and previous posts are optional.');
       return;
     }
-    if (blocks.length < 3) {
-      setError('Add at least 3 and up to 10 previous LinkedIn posts to build your Brand DNA.');
+    if (typeof experience === 'number' && (!Number.isFinite(experience) || experience < 0)) {
+      setError('Years of experience must be a valid non-negative number.');
       return;
     }
 
@@ -585,7 +609,9 @@ useEffect(() => {
       const memory = data.brand_memory || {};
       setBrand({ ...memory, ready: memory.status === 'READY' });
       setNotice(
-        'Brand Intelligence updated using your saved Brand DNA details and ' + blocks.length + ' imported posts.'
+        blocks.length
+          ? 'Brand Intelligence updated using your saved Brand DNA details and ' + blocks.length + ' imported posts.'
+          : 'Brand Intelligence updated. You can add previous LinkedIn posts later to strengthen voice calibration.'
       );
       await fetchData();
       setBrandEditing(false);
