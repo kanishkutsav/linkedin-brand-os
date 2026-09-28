@@ -6,7 +6,7 @@ import {
   Activity, ArrowUpRight, BarChart3, BrainCircuit, Briefcase, Check, ChevronRight, CircleCheck,
   Clock3, Command, Download, ExternalLink, FileText, Gauge, Globe2, LayoutDashboard, Link2,
   LoaderCircle, LogOut, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings,
-  ShieldAlert, ShieldCheck, Sparkles, Target, TrendingUp, UserRound, WandSparkles, MessageSquare, X, Zap
+  ShieldAlert, ShieldCheck, Sparkles, Target, ChevronDown, TrendingUp, UserRound, WandSparkles, MessageSquare, X, Zap
 } from 'lucide-react';
 
 const API_BASE = typeof window !== 'undefined' && window.location.hostname === 'localhost' ? (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000') : '';
@@ -134,7 +134,14 @@ export default function Home() {
   const [thoughtSelectionMode, setThoughtSelectionMode] = useState(false);
   const [jobs, setJobs] = useState<any[]>([]); const [jobProviders, setJobProviders] = useState<any[]>([]); const [jobLocation, setJobLocation] = useState<any>(null); const [jobQuery, setJobQuery] = useState(''); const [jobsLoading, setJobsLoading] = useState(false); const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [feedbackType, setFeedbackType] = useState('FEATURE'); const [feedbackSubject, setFeedbackSubject] = useState(''); const [feedbackDescription, setFeedbackDescription] = useState(''); const [feedbackContext, setFeedbackContext] = useState(''); const [feedbackSending, setFeedbackSending] = useState(false);
-  const [adminOverview, setAdminOverview] = useState<any>(null); const [adminActivity, setAdminActivity] = useState<any[]>([]); const [adminFeedback, setAdminFeedback] = useState<any[]>([]); const [adminUsers, setAdminUsers] = useState<any[]>([]); const [adminLoading, setAdminLoading] = useState(false);
+  const [adminOverview, setAdminOverview] = useState<any>(null);
+  const [adminActivity, setAdminActivity] = useState<any[]>([]);
+  const [adminFeedback, setAdminFeedback] = useState<any[]>([]);
+  const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  const [adminAiProviders, setAdminAiProviders] = useState<any>(null);
+  const [adminJobProviders, setAdminJobProviders] = useState<any>(null);
+  const [adminSections, setAdminSections] = useState<Record<string, boolean>>({});
+  const [adminSectionLoading, setAdminSectionLoading] = useState<Record<string, boolean>>({});
 
   const headers = (authToken = token) => (authToken && authToken !== 'cookie') ? { Authorization: `Bearer ${authToken}` } : {};
 
@@ -446,18 +453,43 @@ useEffect(() => {
       setJobsLoading(false);
     }
   };
-  const loadAdmin = async () => { if (!token || profile.role !== 'admin') return; setAdminLoading(true); try { const results = await Promise.all(['/api/admin/overview','/api/admin/activity','/api/admin/feedback','/api/admin/users'].map((path) => apiFetch(API_BASE + path, { headers: headers() }))); if (results[0].ok) setAdminOverview(await results[0].json()); if (results[1].ok) setAdminActivity((await results[1].json()).items || []); if (results[2].ok) setAdminFeedback((await results[2].json()).items || []); if (results[3].ok) setAdminUsers((await results[3].json()).items || []); } catch (e) { setError(e instanceof Error ? e.message : 'Admin data could not be loaded.'); } finally { setAdminLoading(false); } };
-  const updateAdminFeedback = async (id: number, status: string, priority: string) => {
+const loadAdminOverview = async () => {
     if (!token || profile.role !== 'admin') return;
-    const response = await apiFetch(API_BASE + '/api/admin/feedback/' + id, {
-      method: 'PATCH',
-      headers: { ...headers(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, priority }),
-    });
-    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || 'Feedback could not be updated.');
-    await loadAdmin();
+    try {
+      const response = await apiFetch(API_BASE + '/api/admin/overview', { headers: headers() });
+      if (response.ok) setAdminOverview(await response.json());
+      else throw new Error('Admin overview could not be loaded.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Admin overview could not be loaded.'); }
   };
-  useEffect(() => { if (tab === 'Jobs' && token && !jobs.length) void loadJobs(); if (tab === 'Admin' && token && profile.role === 'admin') void loadAdmin(); }, [tab, token, profile.role]);
+  const loadAdminSection = async (section: string, force = false) => {
+    if (!token || profile.role !== 'admin') return;
+    if (!force && adminSectionLoading[section]) return;
+    if (!force && ((section === 'failures' && adminActivity.length) || (section === 'feedback' && adminFeedback.length) || (section === 'users' && adminUsers.length) || (section === 'ai-providers' && adminAiProviders) || (section === 'job-providers' && adminJobProviders))) return;
+    const paths: Record<string, string> = { failures: '/api/admin/failures', feedback: '/api/admin/feedback', users: '/api/admin/users', 'ai-providers': '/api/admin/ai-providers', 'job-providers': '/api/admin/job-providers' };
+    const path = paths[section]; if (!path) return;
+    setAdminSectionLoading((prev) => ({ ...prev, [section]: true }));
+    try {
+      const response = await apiFetch(API_BASE + path, { headers: headers() });
+      if (!response.ok) throw new Error('Admin section could not be loaded.');
+      const data = await response.json();
+      if (section === 'failures') setAdminActivity(data.items || []);
+      if (section === 'feedback') setAdminFeedback(data.items || []);
+      if (section === 'users') setAdminUsers(data.items || []);
+      if (section === 'ai-providers') setAdminAiProviders(data);
+      if (section === 'job-providers') setAdminJobProviders(data);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Admin section could not be loaded.'); }
+    finally { setAdminSectionLoading((prev) => ({ ...prev, [section]: false })); }
+  };
+  const toggleAdminSection = (section: string) => {
+    const nextOpen = !adminSections[section];
+    setAdminSections((prev) => ({ ...prev, [section]: nextOpen }));
+    if (nextOpen) void loadAdminSection(section);
+  };
+  const refreshAdmin = async () => {
+    await loadAdminOverview();
+    await Promise.all(Object.entries(adminSections).filter(([, open]) => open).map(([section]) => loadAdminSection(section, true)));
+  };
+  useEffect(() => { if (tab === 'Jobs' && token && !jobs.length) void loadJobs(); if (tab === 'Admin' && token && profile.role === 'admin') void loadAdminOverview(); }, [tab, token, profile.role]);
   useEffect(() => {
     const selected = queue.find((item) => item.id === selectedId);
     if (!selected) return;
@@ -856,10 +888,10 @@ useEffect(() => {
     finally { setIsBusy(false); }
   };
 
-  const globalLoading = pendingRequests > 0 || loading || jobsLoading || adminLoading || isBusy || isGenerating || isResearching || isImproving || isBuildingBrand || savingThought || feedbackSending || authChecking;
+  const globalLoading = pendingRequests > 0 || loading || jobsLoading || (tab === 'Admin' && !adminOverview) || isBusy || isGenerating || isResearching || isImproving || isBuildingBrand || savingThought || feedbackSending || authChecking;
   const globalLoadingMessage = authChecking
     ? 'Loading your workspace…'
-    : adminLoading
+    : (tab === 'Admin' && !adminOverview)
       ? 'Loading admin data…'
       : jobsLoading
         ? 'Searching jobs…'
@@ -1008,7 +1040,7 @@ useEffect(() => {
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
           {tab === 'Jobs' && <JobsView jobs={jobs} location={jobLocation} query={jobQuery} setQuery={setJobQuery} loading={jobsLoading} expandedId={expandedJobId} setExpandedId={setExpandedJobId} onSearch={loadJobs} />}
           {tab === 'Feedback' && <FeedbackView type={feedbackType} setType={setFeedbackType} subject={feedbackSubject} setSubject={setFeedbackSubject} description={feedbackDescription} setDescription={setFeedbackDescription} context={feedbackContext} setContext={setFeedbackContext} sending={feedbackSending} onSubmit={async () => { if (!feedbackSubject.trim() || !feedbackDescription.trim() || !token) return; setFeedbackSending(true); try { const res = await apiFetch(API_BASE + '/api/feedback', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback_type: feedbackType, subject: feedbackSubject, description: feedbackDescription, context: feedbackContext }) }); const data = await res.json(); if (!res.ok) throw new Error(getApiError(data, 'Feedback could not be submitted.')); setFeedbackSubject(''); setFeedbackDescription(''); setFeedbackContext(''); setNotice('Thanks. Your feedback was submitted.'); } catch (e) { setError(e instanceof Error ? e.message : 'Feedback could not be submitted.'); } finally { setFeedbackSending(false); } }} />}
-          {tab === 'Admin' && profile.role === 'admin' && <AdminView overview={adminOverview} activity={adminActivity} feedback={adminFeedback} users={adminUsers} loading={adminLoading} onRefresh={loadAdmin} onUpdateFeedback={updateAdminFeedback} />}
+          {tab === 'Admin' && profile.role === 'admin' && <AdminView overview={adminOverview} activity={adminActivity} feedback={adminFeedback} users={adminUsers} aiProviders={adminAiProviders} jobProviders={adminJobProviders} sections={adminSections} sectionLoading={adminSectionLoading} onToggle={toggleAdminSection} onRefresh={refreshAdmin} />}
           {tab === 'Brand DNA' && (
             <SettingsView
               brand={brand}
@@ -1936,53 +1968,29 @@ function FeedbackView({ type, setType, subject, setSubject, description, setDesc
   </>;
 }
 
-function AdminView({ overview, activity, feedback, users, loading, onRefresh, onUpdateFeedback }: any) {
-  const [expandedActivity, setExpandedActivity] = useState<string | null>(null);
-  const [expandedUser, setExpandedUser] = useState<number | null>(null);
-  const [feedbackDrafts, setFeedbackDrafts] = useState<Record<number, { status: string; priority: string }>>({});
-  const [savingFeedback, setSavingFeedback] = useState<number | null>(null);
-
-  const LoadingRows = ({ count = 3 }: { count?: number }) => (
-    <div aria-busy="true" aria-label="Loading" className="admin-loading-list">
-      {Array.from({ length: count }).map((_, index) => <div key={index} className="admin-skeleton-row"><div className="loading-shimmer" style={{ height: 11, width: index % 2 ? '58%' : '42%' }} /><div className="loading-shimmer" style={{ height: 8, width: '72%', marginTop: 8 }} /></div>)}
-    </div>
-  );
-  const draftFor = (item: any) => feedbackDrafts[item.id] || { status: item.status, priority: item.priority };
-  const setDraft = (item: any, key: 'status' | 'priority', value: string) => {
-    const current = draftFor(item);
-    setFeedbackDrafts((prev) => ({ ...prev, [item.id]: { ...current, [key]: value } }));
+function AdminView({ overview, activity, feedback, users, aiProviders, jobProviders, sections, sectionLoading, onToggle, onRefresh }: any) {
+  const Section = ({ id, title, eyebrow, children }: any) => {
+    const open = !!sections[id];
+    return <section className="panel settings-card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
+      <button type="button" onClick={() => onToggle(id)} aria-expanded={open} className="settings-title" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '18px 20px', background: 'transparent', border: 0, cursor: 'pointer', textAlign: 'left' }}>
+        <span>{eyebrow && <span className="page-kicker" style={{ display: 'block', marginBottom: 4 }}>{eyebrow}</span>}<span>{title}</span></span>
+        <ChevronDown size={17} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 160ms ease', flexShrink: 0 }} />
+      </button>
+      {open && <div style={{ borderTop: '1px solid var(--border, #e6ebf2)', padding: '16px 20px 20px' }}>{sectionLoading[id] ? <div className="post-entry" style={{ color: '#6f7f93' }}>Loading…</div> : children}</div>}
+    </section>;
   };
-  const saveFeedback = async (item: any) => {
-    const draft = draftFor(item);
-    setSavingFeedback(item.id);
-    try {
-      await onUpdateFeedback(item.id, draft.status, draft.priority);
-      setFeedbackDrafts((prev) => { const next = { ...prev }; delete next[item.id]; return next; });
-    } finally { setSavingFeedback(null); }
-  };
-
   return <>
-    <div className="page-header admin-header">
-      <div><div className="page-kicker"><ShieldAlert size={13}/> Admin operations</div><h1 className="page-title">Operations & reliability</h1><p className="page-description">Monitor platform health, investigate failures, review feedback and inspect users.</p></div>
-      <button className="button" onClick={() => void onRefresh()} disabled={loading}><RefreshCw size={13} className={loading ? 'spin' : ''}/> {loading ? 'Refreshing…' : 'Refresh data'}</button>
+    <div className="page-header"><div><div className="page-kicker"><ShieldAlert size={13}/> Admin operations</div><h1 className="page-title">Operations & reliability</h1><p className="page-description">Open a section only when you need its data; each section loads on demand.</p></div><button className="button" onClick={() => void onRefresh()}><RefreshCw size={13}/> Refresh</button></div>
+    <div className="metric-grid">
+      <div className="metric-card"><span>Successful activity</span><strong>{overview?.reliability?.successful_requests ?? 0} / {overview?.reliability?.events ?? 0}</strong><small>successful / total API activity</small></div>
+      <div className="metric-card"><span>Failed requests</span><strong>{overview?.reliability?.failed_requests ?? 0}</strong></div>
+      <div className="metric-card"><span>Users</span><strong>{overview?.users?.total ?? 0}</strong></div>
+      <div className="metric-card"><span>Open feedback</span><strong>{overview?.feedback?.open ?? 0}</strong></div>
     </div>
-
-    {loading && !overview ? <div className="admin-loading-banner" role="status" aria-live="polite"><LoaderCircle size={17} className="spin" /><div><strong>Loading admin data</strong><span>Fetching the latest platform information from the server.</span></div></div> : null}
-
-    <div className="admin-summary-grid">
-      <div className="admin-summary-card"><span>API events</span><strong>{overview?.reliability?.events ?? '—'}</strong><small>Recorded platform events</small></div>
-      <div className="admin-summary-card"><span>Failed requests</span><strong>{overview?.reliability?.failed_requests ?? '—'}</strong><small>Requests requiring attention</small></div>
-      <div className="admin-summary-card"><span>Open feedback</span><strong>{overview?.feedback?.open ?? '—'}</strong><small>Items still in progress</small></div>
-    </div>
-
-    <section className="panel admin-section"><div className="admin-section-head"><div><div className="admin-section-kicker">Infrastructure</div><h2 className="settings-title">AI providers</h2><p className="settings-copy">Current server configuration and availability.</p></div></div>{loading && !overview ? <LoadingRows count={1} /> : <div className="admin-provider-grid">{Object.entries(overview?.ai_providers || {}).map(([k,v]: any) => <div className="admin-provider" key={k}><span className={v ? 'admin-status-dot live' : 'admin-status-dot'} /><b>{k}</b><span>{v ? 'Configured' : 'Not configured'}</span></div>)}</div>}</section>
-
-    <section className="panel admin-section"><div className="admin-section-head"><div><div className="admin-section-kicker">Infrastructure</div><h2 className="settings-title">Job providers</h2><p className="settings-copy">Provider availability is visible to administrators only.</p></div></div>{loading && !overview ? <LoadingRows count={1} /> : <div className="admin-provider-grid">{Object.entries(overview?.job_providers || {}).map(([k,v]: any) => <div className="admin-provider" key={k}><span className={v ? 'admin-status-dot live' : 'admin-status-dot'} /><b>{k}</b><span>{v ? 'Available' : 'Waiting for key'}</span></div>)}</div>}</section>
-
-    <section className="panel admin-section"><div className="admin-section-head"><div><div className="admin-section-kicker">Observability</div><h2 className="settings-title">Recent activity & failures</h2><p className="settings-copy">Latest events with expandable diagnostics.</p></div><span className="admin-count">{activity.length} recent</span></div>{loading && !activity.length ? <LoadingRows count={4} /> : activity.length ? <div className="admin-list">{activity.slice(0,30).map((x:any) => { const id=String(x.id); const open=expandedActivity===id; return <div className="admin-row" key={id}><button className="admin-row-main" onClick={() => setExpandedActivity(open ? null : id)} aria-expanded={open}><span className={x.status === 'FAILED' ? 'admin-status-dot danger' : 'admin-status-dot live'} /><span className="admin-row-primary"><b>{x.activity_type}</b><span>{x.status} · {x.failure_category || 'OK'} · {x.latency_ms ?? 0}ms</span></span><span className="admin-row-chevron">{open ? '−' : '+'}</span></button>{open ? <div className="admin-row-details"><span>Correlation ID: {x.correlation_id || '—'}</span><span>Provider: {x.final_provider || x.provider || '—'}</span><span>HTTP: {x.http_status ?? '—'}</span><span>User: {x.user_id ?? '—'}</span></div> : null}</div>; })}</div> : <div className="admin-empty">No activity recorded yet.</div>}</section>
-
-    <section className="panel admin-section"><div className="admin-section-head"><div><div className="admin-section-kicker">Product feedback</div><h2 className="settings-title">Feedback inbox</h2><p className="settings-copy">Review incoming feedback and update its workflow status or priority.</p></div><span className="admin-count">{feedback.length} total</span></div>{loading && !feedback.length ? <LoadingRows count={3} /> : feedback.length ? <div className="admin-list">{feedback.slice(0,30).map((x:any) => { const draft=draftFor(x); const dirty=draft.status!==x.status || draft.priority!==x.priority; const saving=savingFeedback===x.id; return <div className="admin-feedback-row" key={x.id}><div className="admin-feedback-content"><div className="admin-feedback-title"><b>{x.subject || x.type}</b><span className="tag">{x.type}</span></div><p>{x.description}</p><small>{x.created_at ? new Date(x.created_at).toLocaleString() : '—'}</small></div><div className="admin-feedback-controls"><label>Status<select className="admin-select" value={draft.status} onChange={(e)=>setDraft(x,'status',e.target.value)}><option>NEW</option><option>REVIEWING</option><option>PLANNED</option><option>IN_PROGRESS</option><option>RESOLVED</option><option>DUPLICATE</option><option>NOT_PLANNED</option></select></label><label>Priority<select className="admin-select" value={draft.priority} onChange={(e)=>setDraft(x,'priority',e.target.value)}><option>LOW</option><option>MEDIUM</option><option>HIGH</option><option>CRITICAL</option></select></label><button className="button primary admin-save" disabled={!dirty || saving} onClick={()=>void saveFeedback(x)}>{saving?'Saving…':'Save'}</button></div></div>; })}</div> : <div className="admin-empty">No feedback submitted yet.</div>}</section>
-
-    <section className="panel admin-section"><div className="admin-section-head"><div><div className="admin-section-kicker">Accounts</div><h2 className="settings-title">Users <span className="admin-inline-count">{overview?.users?.total ?? users.length}</span></h2><p className="settings-copy">All registered accounts and their current access state.</p></div></div>{loading && !users.length ? <LoadingRows count={4} /> : users.length ? <div className="admin-list">{users.slice(0,50).map((x:any) => { const open=expandedUser===x.id; return <div className="admin-row" key={x.id}><button className="admin-row-main" onClick={()=>setExpandedUser(open?null:x.id)} aria-expanded={open}><span className={x.active?'admin-status-dot live':'admin-status-dot'} /><span className="admin-row-primary"><b>{x.display_name || 'User'}</b><span>{x.email} · {x.role} · {x.active?'Active':'Inactive'}</span></span><span className="admin-row-chevron">{open?'−':'+'}</span></button>{open?<div className="admin-row-details"><span>Role: {x.role}</span><span>Whitelisted: {x.whitelisted?'Yes':'No'}</span><span>Created: {x.created_at ? new Date(x.created_at).toLocaleString() : '—'}</span></div>:null}</div>; })}</div> : <div className="admin-empty">No users found.</div>}</section>
+    <Section id="ai-providers" title="AI providers" eyebrow="PROVIDER READINESS"><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{Object.entries(aiProviders?.configured || {}).map(([k,v]: any) => <span className="tag" key={k}>{k} · {v ? 'configured' : 'not configured'}</span>)}</div></Section>
+    <Section id="job-providers" title="Job providers" eyebrow="PROVIDER READINESS"><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{Object.entries(jobProviders?.configured || {}).map(([k,v]: any) => <span className="tag" key={k}>{k} · {v ? 'available' : 'not configured'}</span>)}</div></Section>
+    <Section id="failures" title="Failed requests" eyebrow="OBSERVABILITY">{activity.length ? activity.slice(0, 30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}><b>{x.activity_type}</b> · {x.failure_category || 'UNKNOWN'} · {x.http_status || '—'} · {x.latency_ms ?? 0}ms<div style={{ marginTop: 4, color: '#6f7f93' }}>Correlation #{x.correlation_id}</div>{x.details && Object.keys(x.details).length > 0 && <div style={{ marginTop: 5, color: '#5f6f86' }}>{JSON.stringify(x.details)}</div>}</div>) : <div className="post-entry" style={{ color: '#6f7f93' }}>No failed requests recorded.</div>}</Section>
+    <Section id="feedback" title="Feedback inbox" eyebrow="PRODUCT FEEDBACK">{feedback.length ? feedback.slice(0, 30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}><b>{x.type}</b> · {x.subject} · {x.status} · {x.priority}<div style={{ marginTop: 5, color:'#5f6f86' }}>{x.description}</div></div>) : <div className="post-entry" style={{ color: '#6f7f93' }}>No feedback submitted.</div>}</Section>
+    <Section id="users" title="Users" eyebrow="ACCOUNT DIRECTORY">{users.length ? users.slice(0, 30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}>{x.display_name || 'User'} · {x.email} · <b>{x.role}</b> · {x.active ? 'active' : 'inactive'}</div>) : <div className="post-entry" style={{ color: '#6f7f93' }}>No users found.</div>}</Section>
   </>;
 }
