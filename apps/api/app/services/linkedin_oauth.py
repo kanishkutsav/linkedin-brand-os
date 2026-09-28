@@ -88,7 +88,9 @@ async def build_authorization_url(session: AsyncSession, browser_nonce: str | No
     await session.commit()
 
     # Keep LinkedIn connection on the self-serve OIDC + Share on LinkedIn
-    # permissions only. Brand DNA is collected separately from the user.
+    # permissions only. Brand DNA is bootstrapped from the profile data those
+    # permissions expose, then reviewed by the user. Historical posts remain
+    # optional user-imported evidence because member post-read access is closed.
     scopes = ["openid", "profile", "email", "w_member_social"]
     if settings.linkedin_analytics_oauth_enabled:
         scopes.extend(["r_member_postAnalytics", "r_member_profileAnalytics"])
