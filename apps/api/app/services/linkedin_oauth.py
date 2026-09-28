@@ -319,11 +319,22 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
         connection.token_expires_at = token_expires_at
         connection.linkedin_email = email
         connection.linkedin_name = display_name
-        connection.linkedin_headline = headline
-        connection.linkedin_picture_url = picture_url
-        connection.linkedin_locale = locale
-        connection.linkedin_vanity_name = vanity_name
-        connection.linkedin_profile_synced_at = _utc_now()
+
+        # Existing connections keep any previously stored profile metadata.
+        # A reconnect may supply newer optional claims, but it must not replace
+        # values we already have. Missing fields are filled opportunistically.
+        metadata_added = False
+        for attr, value in (
+            ("linkedin_headline", headline),
+            ("linkedin_picture_url", picture_url),
+            ("linkedin_locale", locale),
+            ("linkedin_vanity_name", vanity_name),
+        ):
+            if value and not getattr(connection, attr):
+                setattr(connection, attr, value)
+                metadata_added = True
+        if metadata_added:
+            connection.linkedin_profile_synced_at = _utc_now()
 
     exchange_code = secrets.token_urlsafe(32)
     session.add(
