@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 
 const API_BASE = typeof window !== 'undefined' && window.location.hostname === 'localhost' ? (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000') : '';
-const STORAGE_KEY = 'brand-os-token';
 
 function getApiError(data: any, fallback: string) {
   if (typeof data?.detail === 'string') return data.detail;
@@ -42,6 +41,14 @@ type Opportunity = {
   total_score: number; scores: Record<string, number>; rationale?: string;
   evidence?: { summary?: string; why_now?: string; source_hints?: string[]; grounding_queries?: string[] };
   source_ids?: number[]; sources?: { title?: string; url?: string; domain?: string }[];
+};
+type PersonalThought = {
+  id: number;
+  content: string;
+  title?: string | null;
+  topic?: string | null;
+  status?: string;
+  created_at?: string | null;
 };
 type Tab = 'Dashboard' | 'Research' | 'Content Studio' | 'LinkedIn Posts' | 'Analytics' | 'Brand DNA';
 
@@ -81,6 +88,7 @@ export default function Home() {
   const [queue, setQueue] = useState<ApprovalItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<'PENDING' | 'NEEDS_REVIEW' | 'EXECUTED' | 'REJECTED'>('PENDING');
+  const initialReviewFilterResolved = useRef(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [editedBody, setEditedBody] = useState('');
   const [reviewNote, setReviewNote] = useState('');
@@ -109,13 +117,28 @@ export default function Home() {
   const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
   const [loading, setLoading] = useState(false);
   const [learningStatus, setLearningStatus] = useState({ pending_events: 0, memory_count: 0 });
+  const [personalThoughts, setPersonalThoughts] = useState<PersonalThought[]>([]);
   const [dashboardCounts, setDashboardCounts] = useState({
     total: 0, awaiting_approval: 0, approved: 0, published: 0,
     needs_review: 0, rejected: 0, pending_filter: 0,
   });
   const [savingThought, setSavingThought] = useState(false);
+  const [expandedThoughtId, setExpandedThoughtId] = useState<number | null>(null);
+  const [selectedThoughtIds, setSelectedThoughtIds] = useState<number[]>([]);
+  const [thoughtSelectionMode, setThoughtSelectionMode] = useState(false);
 
-  const headers = (authToken = token) => authToken ? { Authorization: `Bearer ${authToken}` } : {};
+  const headers = (authToken = token) => (authToken && authToken !== 'cookie') ? { Authorization: `Bearer ${authToken}` } : {};
+
+  const readCookie = (name: string) => document.cookie.split('; ').find((part) => part.startsWith(name + '='))?.slice(name.length + 1) || '';
+  const apiFetch = (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const requestHeaders = new Headers(init.headers || {});
+    const method = String(init.method || 'GET').toUpperCase();
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      const csrf = readCookie('__Host-suvacya-csrf') || readCookie('suvacya-csrf');
+      if (csrf) requestHeaders.set('X-CSRF-Token', csrf);
+    }
+    return fetch(input, { ...init, headers: requestHeaders, credentials: 'include' });
+  };
 
   useEffect(() => {
     const standalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
@@ -211,35 +234,33 @@ useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('linkedin_code');
     const oauthNonce = params.get('oauth_nonce');
-    const savedToken = window.localStorage.getItem(STORAGE_KEY);
     if (code) {
-      const expectedNonce = window.localStorage.getItem('brand-os-oauth-nonce');
+      const expectedNonce = window.sessionStorage.getItem('brand-os-oauth-nonce');
       window.history.replaceState({}, document.title, window.location.pathname);
       if (!expectedNonce || !oauthNonce || expectedNonce !== oauthNonce) {
-        window.localStorage.removeItem('brand-os-oauth-nonce');
+        window.sessionStorage.removeItem('brand-os-oauth-nonce');
         setError('LinkedIn sign-in could not be verified in this browser. Please start the connection again.');
         return;
       }
-      window.localStorage.removeItem('brand-os-oauth-started-at');
-      fetch(`${API_BASE}/api/auth/linkedin/exchange`, {
+      window.sessionStorage.removeItem('brand-os-oauth-started-at');
+      apiFetch(`${API_BASE}/api/auth/linkedin/exchange`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, oauth_nonce: oauthNonce }),
       }).then(async (res) => {
         const data = await res.json();
         if (!res.ok) throw new Error(getApiError(data, 'LinkedIn connection failed'));
-        window.localStorage.setItem(STORAGE_KEY, data.token);
-        window.localStorage.removeItem('brand-os-oauth-nonce');
-        window.localStorage.removeItem('brand-os-oauth-started-at');
-        setToken(data.token);
+        window.sessionStorage.removeItem('brand-os-oauth-nonce');
+        window.sessionStorage.removeItem('brand-os-oauth-started-at');
+        setToken('cookie');
         setNotice('LinkedIn account connected successfully.');
       }).catch((e) => {
-        window.localStorage.removeItem('brand-os-oauth-nonce');
+        window.sessionStorage.removeItem('brand-os-oauth-nonce');
         setError(e instanceof Error ? e.message : 'LinkedIn connection failed');
       });
       return;
     }
-    if (savedToken) setToken(savedToken);
+    apiFetch(API_BASE + '/api/auth/me').then((res) => { if (res.ok) setToken('cookie'); }).catch(() => undefined);
   }, []);
 
   const fetchData = async (authToken: string | null = token) => {
@@ -249,13 +270,12 @@ useEffect(() => {
       // Load the core workspace first. Optional panels must never block the
       // dashboard/Brand DNA from appearing.
       const [profileRes, approvalsRes, linkedinRes, brandRes] = await Promise.all([
-        fetch(`${API_BASE}/api/auth/me`, { headers: headers(authToken) }),
-        fetch(`${API_BASE}/api/dashboard/approvals`, { headers: headers(authToken) }),
-        fetch(`${API_BASE}/api/linkedin/status`, { headers: headers(authToken) }),
-        fetch(`${API_BASE}/api/brand/status`, { headers: headers(authToken) }),
+        apiFetch(`${API_BASE}/api/auth/me`, { headers: headers(authToken) }),
+        apiFetch(`${API_BASE}/api/dashboard/approvals`, { headers: headers(authToken) }),
+        apiFetch(`${API_BASE}/api/linkedin/status`, { headers: headers(authToken) }),
+        apiFetch(`${API_BASE}/api/brand/status`, { headers: headers(authToken) }),
       ]);
       if (profileRes.status === 401 || approvalsRes.status === 401) {
-        window.localStorage.removeItem(STORAGE_KEY);
         setToken(null); setQueue([]); setLinkedin({ connected: false });
         throw new Error('Your session expired. Please sign in with LinkedIn again.');
       }
@@ -281,7 +301,7 @@ useEffect(() => {
         linkedinSyncAttemptedToken.current !== authToken
       ) {
         linkedinSyncAttemptedToken.current = authToken;
-        void fetch(API_BASE + '/api/linkedin/profile/sync-missing', {
+        void apiFetch(API_BASE + '/api/linkedin/profile/sync-missing', {
           method: 'POST',
           headers: headers(authToken),
         }).then(async (syncRes) => {
@@ -310,7 +330,7 @@ useEffect(() => {
       // First-time LinkedIn users get a one-time, best-effort Brand DNA
       // bootstrap. It uses only the official profile data we already received.
       if (linkedinJson.connected && brandJson.brand_bootstrap_completed === false) {
-        void fetch(`${API_BASE}/api/brand/bootstrap`, { method: 'POST', headers: headers(authToken) })
+        void apiFetch(`${API_BASE}/api/brand/bootstrap`, { method: 'POST', headers: headers(authToken) })
           .then(async (bootstrapRes) => {
             if (!bootstrapRes.ok) return;
             const bootstrapJson = await bootstrapRes.json();
@@ -341,15 +361,26 @@ useEffect(() => {
         title: item.title || '', topic: item.topic || '', approved_at: item.approved_at || null, created_at: item.created_at,
       }));
       setQueue(nextQueue);
+      const pendingFilterCount = Number(approvalsJson.counts?.pending_filter ?? 0);
+      const needsReviewCount = Number(approvalsJson.counts?.needs_review ?? 0);
       setDashboardCounts({
         total: Number(approvalsJson.counts?.total ?? 0),
         awaiting_approval: Number(approvalsJson.counts?.awaiting_approval ?? 0),
         approved: Number(approvalsJson.counts?.approved ?? 0),
         published: Number(approvalsJson.counts?.published ?? 0),
-        needs_review: Number(approvalsJson.counts?.needs_review ?? 0),
+        needs_review: needsReviewCount,
         rejected: Number(approvalsJson.counts?.rejected ?? 0),
-        pending_filter: Number(approvalsJson.counts?.pending_filter ?? 0),
+        pending_filter: pendingFilterCount,
       });
+
+      // On the initial workspace load, take the user to actionable work first:
+      // Pending has priority; if it is empty, show Needs review; if both are
+      // empty, keep the normal Pending empty state. Do not re-run this fallback
+      // after actions because the user may have intentionally changed filters.
+      if (!initialReviewFilterResolved.current) {
+        setStatusFilter(pendingFilterCount > 0 ? 'PENDING' : needsReviewCount > 0 ? 'NEEDS_REVIEW' : 'PENDING');
+        initialReviewFilterResolved.current = true;
+      }
       if (nextQueue.length && !nextQueue.some((i) => i.id === selectedId)) setSelectedId(nextQueue[0].id);
 
       setLoading(false);
@@ -357,15 +388,20 @@ useEffect(() => {
       // Optional workspace panels load independently. A slow research feed or
       // analytics query must not blank/freeze the main workspace.
       void Promise.all([
-        fetch(`${API_BASE}/api/research/opportunities`, { headers: headers(authToken) }),
-        fetch(`${API_BASE}/api/analytics/overview`, { headers: headers(authToken) }),
-        fetch(`${API_BASE}/api/learning/status`, { headers: headers(authToken) }),
-      ]).then(async ([opportunityRes, analyticsRes, learningRes]) => {
+        apiFetch(`${API_BASE}/api/research/opportunities`, { headers: headers(authToken) }),
+        apiFetch(`${API_BASE}/api/analytics/overview`, { headers: headers(authToken) }),
+        apiFetch(`${API_BASE}/api/learning/status`, { headers: headers(authToken) }),
+        apiFetch(`${API_BASE}/api/learning/thoughts`, { headers: headers(authToken) }),
+       ]).then(async ([opportunityRes, analyticsRes, learningRes, thoughtsRes]) => {
         const opportunityJson = opportunityRes.ok ? await opportunityRes.json() : { opportunities: [] };
         setOpportunities(opportunityJson.opportunities || []);
         const analyticsJson = analyticsRes.ok ? await analyticsRes.json() : null;
         setAnalytics(analyticsJson);
         if (learningRes.ok) setLearningStatus(await learningRes.json());
+        if (thoughtsRes.ok) {
+          const thoughtsJson = await thoughtsRes.json();
+          setPersonalThoughts(thoughtsJson.thoughts || []);
+        }
       }).catch(() => {
         // Optional panels are allowed to fail without affecting the core workspace.
       });
@@ -442,8 +478,8 @@ useEffect(() => {
     // the next click must start a fresh transaction instead of being blocked
     // by stale browser state from the previous attempt.
     const nonce = window.crypto?.randomUUID?.() || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
-    window.localStorage.setItem('brand-os-oauth-nonce', nonce);
-    window.localStorage.setItem('brand-os-oauth-started-at', String(Date.now()));
+    window.sessionStorage.setItem('brand-os-oauth-nonce', nonce);
+    window.sessionStorage.setItem('brand-os-oauth-started-at', String(Date.now()));
     setError(null);
     window.location.href = '/api/auth/linkedin/start?browser_nonce=' + encodeURIComponent(nonce);
   };
@@ -451,10 +487,9 @@ useEffect(() => {
   const logout = async () => {
     try {
       if (token) {
-        await fetch(API_BASE + '/api/auth/logout', { method: 'POST', headers: headers(token) });
+        await apiFetch(API_BASE + '/api/auth/logout', { method: 'POST', headers: headers(token) });
       }
     } finally {
-      window.localStorage.removeItem(STORAGE_KEY);
       setToken(null); setQueue([]); setLinkedin({ connected: false });
     }
   };
@@ -505,7 +540,7 @@ useEffect(() => {
             })()
           : JSON.stringify(payload || {}),
       };
-      const res = await fetch(`${API_BASE}/api/approvals/${selectedApproval.id}/${action}`, requestInit);
+      const res = await apiFetch(`${API_BASE}/api/approvals/${selectedApproval.id}/${action}`, requestInit);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, `Action failed: ${action}`));
       if (action === 'execute' && data.published === false) {
@@ -551,7 +586,7 @@ useEffect(() => {
     try {
       setGenerationProgress(34);
       setGenerationStage('Generating with AI…');
-      const res = await fetch(API_BASE + '/api/agent/events', {
+      const res = await apiFetch(API_BASE + '/api/agent/events', {
         method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ event_type: 'manual_generate_content', payload: { objective: 'Generate a fresh LinkedIn content opportunity for human review.' } }),
       });
@@ -582,7 +617,7 @@ useEffect(() => {
     setIsResearching(true); setResearchProgress(8); setResearchStage('Starting live research…');
     setError(null); setNoticeTtl(4500); setNotice(null);
     try {
-      const res = await fetch(API_BASE + '/api/research/discover', {
+      const res = await apiFetch(API_BASE + '/api/research/discover', {
         method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: researchFocus.trim() || null }),
       });
       const data = await res.json().catch(() => ({}));
@@ -640,7 +675,7 @@ useEffect(() => {
         posts: blocks.map((body) => ({ body })),
       };
 
-      const res = await fetch(API_BASE + endpoint, {
+      const res = await apiFetch(API_BASE + endpoint, {
         method: 'POST',
         headers: { ...headers(), 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -669,7 +704,7 @@ useEffect(() => {
     if (!requireBrand('polishing content')) return;
     setIsImproving(true); setError(null); setNoticeTtl(4500); setNotice(null);
     try {
-      const res = await fetch(API_BASE + '/api/content/improve', {
+      const res = await apiFetch(API_BASE + '/api/content/improve', {
         method: 'POST',
         headers: { ...headers(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: draftTitle, topic: draftTopic, body: draftBody, language: draftLanguage || null }),
@@ -693,14 +728,19 @@ useEffect(() => {
     if (!requireBrand('saving a personal thought')) return;
     setSavingThought(true); setError(null); setNotice(null);
     try {
-      const res = await fetch(API_BASE + '/api/learning/thought', {
+      const res = await apiFetch(API_BASE + '/api/learning/thought', {
         method: 'POST',
         headers: { ...headers(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: draftBody, topic: draftTopic, title: draftTitle }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, 'Could not save this thought'));
-      setNotice('Saved as a personal thought. Suvacya will learn from it without treating it as a published opinion.');
+      setNotice('Personal thought saved. Suvacya will use it as a learning signal for future research and content.');
+      const thoughtsRes = await apiFetch(API_BASE + '/api/learning/thoughts', { headers: headers() });
+      if (thoughtsRes.ok) {
+        const thoughtsJson = await thoughtsRes.json();
+        setPersonalThoughts(thoughtsJson.thoughts || []);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save this thought');
     } finally {
@@ -715,7 +755,7 @@ useEffect(() => {
     if (!requireBrand('sending content to approval')) return;
     setIsBusy(true); setError(null); setNoticeTtl(4500); setNotice(null);
     try {
-      const res = await fetch(`${API_BASE}/api/content/drafts`, {
+      const res = await apiFetch(`${API_BASE}/api/content/drafts`, {
         method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: draftTitle, topic: draftTopic, pillar: 'Expertise', body: draftBody }),
       });
@@ -755,7 +795,7 @@ useEffect(() => {
           </button>
         </div>
         <div className="connection-card">
-          <div className="connection-row"><ShieldCheck size={15} color="#8b7cff" /><span className="connection-title">Human approval gate</span></div>
+          <div className="connection-row"><ShieldCheck size={15} color="#4c8fef" /><span className="connection-title">Human approval gate</span></div>
           <div className="connection-meta">No external LinkedIn action is executed without your explicit approval.</div>
         </div>
         <button className="side-button" onClick={logout}><LogOut size={14} /> Sign out <span style={{ marginLeft: 'auto' }}>⌘Q</span></button>
@@ -791,7 +831,7 @@ useEffect(() => {
               <section className="hero" onClick={!brand.ready ? () => go('Brand DNA') : undefined} style={!brand.ready ? { cursor: 'pointer' } : undefined}>
                 <div className="hero-grid">
                   <div>
-                    <div className="page-kicker" style={{ color: '#bdb6ff' }}>
+                    <div className="page-kicker" style={{ color: '#b9d7f7' }}>
                       {brand.ready ? <><Sparkles size={13} /> Brand intelligence active</> : <><BrainCircuit size={13} /> Brand DNA setup required</>}
                     </div>
                     <h1>{brand.ready ? 'Turn your expertise into a recognizable point of view.' : 'Start by teaching Suvacya your voice.'}</h1>
@@ -876,8 +916,35 @@ useEffect(() => {
               linkedin={linkedin}
               onConnect={connectLinkedIn}
               editing={brandEditing}
-              setEditing={setBrandEditing}
-              onCancel={cancelBrandEdit}
+              setEditing={setBrandEditing}              onCancel={cancelBrandEdit}
+              personalThoughts={personalThoughts}
+              onDeletePersonalThoughts={async (ids: number[]) => {
+                if (!ids.length) return;
+                if (!window.confirm(ids.length === 1
+                  ? 'Delete this personal insight? Suvacya will stop using it as a learning signal.'
+                  : `Delete ${ids.length} personal insights? Suvacya will stop using them as learning signals.`)) return;
+                try {
+                  const res = await apiFetch(API_BASE + '/api/learning/thoughts', {
+                    method: 'DELETE',
+                    headers: { ...headers(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (!res.ok) throw new Error(getApiError(data, 'Could not delete personal insights'));
+                  const deletedIds = new Set(ids);
+                  setPersonalThoughts((current) => current.filter((thought) => !deletedIds.has(thought.id)));
+                  setExpandedThoughtId((current) => current !== null && deletedIds.has(current) ? null : current);
+                  setNotice(data.deleted === 1 ? 'Personal insight deleted.' : `${data.deleted || ids.length} personal insights deleted.`);
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : 'Could not delete personal insights');
+                }
+              }}
+              expandedThoughtId={expandedThoughtId}
+              setExpandedThoughtId={setExpandedThoughtId}
+              selectedThoughtIds={selectedThoughtIds}
+              setSelectedThoughtIds={setSelectedThoughtIds}
+              thoughtSelectionMode={thoughtSelectionMode}
+              setThoughtSelectionMode={setThoughtSelectionMode}
             />
           )}
         </main>
@@ -944,27 +1011,27 @@ useEffect(() => {
 
 function LoginScreen({ error, onConnect }: { error: string | null; onConnect: () => void }) {
   return (
-    <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 22, background: 'radial-gradient(circle at 20% 10%, #e9e5ff, transparent 28%), radial-gradient(circle at 90% 80%, #dff9fb, transparent 30%), #f6f7fb' }}>
+    <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 22, background: 'radial-gradient(circle at 20% 10%, #eaf3ff, transparent 28%), radial-gradient(circle at 90% 80%, #e8f3ff, transparent 30%), #f5f8fc' }}>
       <div className="login-shell">
         <div className="login-visual">
-          <div className="brand-lockup" style={{ padding: 0 }}><div className="brand-mark"><Sparkles size={18}/></div><div><div className="brand-name">Suvacya</div><div className="brand-sub" style={{ color: '#7f8aa3' }}>Personal Brand Manager</div></div></div>
+          <div className="brand-lockup" style={{ padding: 0 }}><div className="brand-mark"><Sparkles size={18}/></div><div><div className="brand-name">Suvacya</div><div className="brand-sub" style={{ color: '#8ea1b8' }}>Personal Brand Manager</div></div></div>
           <div style={{ position: 'relative', zIndex: 1, marginTop: 74 }}>
-            <div className="page-kicker" style={{ color: '#bdb6ff' }}><Sparkles size={13}/> AI + human editorial control</div>
+            <div className="page-kicker" style={{ color: '#b9d7f7' }}><Sparkles size={13}/> AI + human editorial control</div>
             <h1 style={{ fontFamily: 'Space Grotesk', fontSize: 47, lineHeight: 1.02, letterSpacing: '-.055em', margin: '12px 0 16px' }}>Your brand,<br/>with a brain.</h1>
-            <p style={{ color: '#aeb7ca', maxWidth: 430, lineHeight: 1.65, fontSize: 13 }}>A professional operating system for discovering ideas, shaping your voice and preparing content — without giving an AI free rein over your identity.</p>
+            <p style={{ color: '#b8c9dc', maxWidth: 430, lineHeight: 1.65, fontSize: 13 }}>A professional operating system for discovering ideas, shaping your voice and preparing content — without giving an AI free rein over your identity.</p>
             <div style={{ display: 'grid', gap: 9, marginTop: 28 }}>
-              {['Learns from approved content', 'Researches before drafting', 'Human approval before external actions'].map((x) => <div key={x} style={{ display: 'flex', gap: 9, alignItems: 'center', color: '#dce1ec', fontSize: 11 }}><CircleCheck size={15} color="#8b7cff"/>{x}</div>)}
+              {['Learns from approved content', 'Researches before drafting', 'Human approval before external actions'].map((x) => <div key={x} style={{ display: 'flex', gap: 9, alignItems: 'center', color: '#d8e3ee', fontSize: 11 }}><CircleCheck size={15} color="#4c8fef"/>{x}</div>)}
             </div>
           </div>
         </div>
         <div className="login-form">
           <div className="page-kicker"><ShieldCheck size={13}/> Secure official connection</div>
           <h2 style={{ fontFamily: 'Space Grotesk', fontSize: 29, letterSpacing: '-.04em', margin: '10px 0 8px' }}>Connect LinkedIn</h2>
-          <p style={{ color: '#667085', fontSize: 13, lineHeight: 1.6, margin: 0 }}>Suvacya uses LinkedIn's official OAuth flow. Your LinkedIn password is never entered into Suvacya.</p>
-           <p style={{ color: '#667085', fontSize: 11, lineHeight: 1.55, margin: '10px 0 0' }}>You'll authenticate securely on LinkedIn. If you're already signed in, LinkedIn may take you straight in.</p>
+          <p style={{ color: '#5f6f86', fontSize: 13, lineHeight: 1.6, margin: 0 }}>Suvacya uses LinkedIn's official OAuth flow. Your LinkedIn password is never entered into Suvacya.</p>
+           <p style={{ color: '#5f6f86', fontSize: 11, lineHeight: 1.55, margin: '10px 0 0' }}>You'll authenticate securely on LinkedIn. If you're already signed in, LinkedIn may take you straight in.</p>
           {error && <div className="notice error" style={{ marginTop: 16 }}><X size={15}/><span>{error}</span></div>}
           <button className="button primary" style={{ width: '100%', minHeight: 46, marginTop: 24 }} onClick={onConnect}><LinkedInMark size={18}/> Continue with LinkedIn</button>
-          <div style={{ marginTop: 17, padding: 12, borderRadius: 12, background: '#f8f9fb', color: '#667085', fontSize: 10, lineHeight: 1.55 }}>OAuth permissions requested are limited to supported identity and posting capabilities. External actions remain behind the approval gate.</div>
+          <div style={{ marginTop: 17, padding: 12, borderRadius: 12, background: '#f4f8fc', color: '#5f6f86', fontSize: 10, lineHeight: 1.55 }}>OAuth permissions requested are limited to supported identity and posting capabilities. External actions remain behind the approval gate.</div>
         </div>
       </div>
     </main>
@@ -1066,7 +1133,7 @@ function ApprovalWorkspace(props: any) {
                     <span className="button-content"><Check size={14}/> {busyAction === 'approve' ? operationStage || 'Approving…' : 'Approve'}</span>
                     {busyAction === 'approve' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
                   </button>
-                  <button className="button" disabled={isBusy} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>
+                  <button className="button" disabled={isBusy || editedBody === selected.content} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>
                   <button className="button progress-button" disabled={isBusy || !reviewNote.trim()} title={!reviewNote.trim() ? 'Add feedback before regenerating.' : 'Regenerate using your feedback'} onClick={() => onAction('regenerate', { reason: reviewNote.trim() })}>
                     <span className="button-content"><RotateCcw size={14}/> {busyAction === 'regenerate' ? operationStage || 'Regenerating…' : 'Regenerate'}</span>
                     {busyAction === 'regenerate' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
@@ -1080,13 +1147,13 @@ function ApprovalWorkspace(props: any) {
                 <div className="notice success" style={{ marginTop: 0 }}><CircleCheck size={15}/><span>Approved and locked. The content can no longer be edited or regenerated.</span></div>
                 <div className="editor-toolbar" style={{ marginTop: 12 }}><span>Locked approved content</span><span>{selected.content.length} chars</span></div>
                 <div className="readonly-field" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65, minHeight: 150 }}>{selected.content}</div>
-                <div style={{ marginTop: 14, padding: 12, border: '1px dashed #d0d5dd', borderRadius: 12, background: '#fafafa' }}>
+                <div style={{ marginTop: 14, padding: 12, border: '1px dashed #c8d4e2', borderRadius: 12, background: '#fbfdff' }}>
                   <div className="review-label" style={{ marginBottom: 7 }}>Optional photograph</div>
                   <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG or PNG image (up to 4 MB). The image is sent directly to LinkedIn during execution and is not stored by Suvacya.</div>
                   <input type="file" accept="image/jpeg,image/png" onChange={(e) => chooseImage(e.target.files?.[0] || null)} disabled={isBusy} />
                   {imagePreview && (
                     <div style={{ marginTop: 10 }}>
-                      <img src={imagePreview} alt="Selected LinkedIn post image preview" style={{ display: 'block', width: '100%', maxHeight: 280, objectFit: 'contain', borderRadius: 10, background: '#f2f4f7' }} />
+                      <img src={imagePreview} alt="Selected LinkedIn post image preview" style={{ display: 'block', width: '100%', maxHeight: 280, objectFit: 'contain', borderRadius: 10, background: '#f1f5f9' }} />
                       <button className="link-button" style={{ marginTop: 7 }} onClick={() => { if (imagePreview) URL.revokeObjectURL(imagePreview); setImagePreview(null); setSelectedImage(null); }}>Remove image</button>
                     </div>
                   )}
@@ -1143,7 +1210,7 @@ function LinkedInPostsView({ posts, totalPublished }: { posts: ApprovalItem[]; t
               </div>
               {post.title ? <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 7 }}>{post.title}</div> : null}
               {post.topic ? <div className="form-help" style={{ marginBottom: 9 }}>{post.topic}</div> : null}
-              <div style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.7, color: '#344054' }}>{post.content}</div>
+              <div style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.7, color: '#334b66' }}>{post.content}</div>
               {post.approved_at ? <div className="form-help" style={{ marginTop: 10 }}>Approved {new Date(post.approved_at).toLocaleString()}</div> : null}
             </article>
           )) : <EmptyState icon={ExternalLink} title="No published posts yet" text="Once you publish a post through Suvacya, it will appear here automatically." />}
@@ -1273,7 +1340,7 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
             <button className="button dark" disabled={busy || !body.trim()} onClick={onSubmit}><ShieldCheck size={14}/>{busy ? 'Sending…' : 'Send this version to approval'}</button>
             <button className="button" disabled={savingThought || !body.trim()} onClick={onSaveThought}>{savingThought ? 'Saving…' : 'Save as personal thought'}</button>
           </div>
-          {improvementNotes?.length ? <div style={{ marginTop: 12, padding: 11, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.5 }}><b style={{ color: '#5145cd' }}>What changed:</b> {improvementNotes.join(' · ')}</div> : null}
+          {improvementNotes?.length ? <div style={{ marginTop: 12, padding: 11, borderRadius: 11, background: '#eaf3ff', color: '#5f6f86', fontSize: 10, lineHeight: 1.5 }}><b style={{ color: '#1558b0' }}>What changed:</b> {improvementNotes.join(' · ')}</div> : null}
         </div>
         <div className="live-preview">
           <div className="panel-title" style={{ marginBottom: 4 }}>Preview before approval</div>
@@ -1283,7 +1350,7 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
             <div className="li-body">{body || 'Your polished post preview will appear here.'}</div>
             <div className="li-actions"><span>Like</span><span>Comment</span><span>Share</span></div>
           </div>
-          <div style={{ marginTop: 12, padding: 11, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.5 }}><b style={{ color: '#5145cd' }}>HITL:</b> Polish → preview → send to approval → approve → publish. The AI never bypasses the approval gate.</div>
+          <div style={{ marginTop: 12, padding: 11, borderRadius: 11, background: '#eaf3ff', color: '#5f6f86', fontSize: 10, lineHeight: 1.5 }}><b style={{ color: '#1558b0' }}>HITL:</b> Polish → preview → send to approval → approve → publish. The AI never bypasses the approval gate.</div>
         </div>
       </section>
     </>
@@ -1341,7 +1408,7 @@ function AnalyticsView({ analytics }: { analytics: any }) {
                 <Metric icon={Zap} label="Engagement rate" value={`${live.engagement_rate ?? 0}%`} meta="Reactions + comments + reshares / impressions" />
               </div>
 
-              <div className="panel" style={{ border: '1px solid #eaecf0', boxShadow: 'none' }}>
+              <div className="panel" style={{ border: '1px solid #e5ebf2', boxShadow: 'none' }}>
                 <div className="panel-head">
                   <div><div className="panel-title">Daily trend</div><div className="panel-subtitle">Impressions and engagement reported by LinkedIn.</div></div>
                 </div>
@@ -1350,11 +1417,11 @@ function AnalyticsView({ analytics }: { analytics: any }) {
                     <div style={{ display: 'grid', gap: 9 }}>
                       {trend.slice(-14).map((row: any) => (
                         <div key={row.date} style={{ display: 'grid', gridTemplateColumns: '72px 1fr 70px', gap: 9, alignItems: 'center', fontSize: 10 }}>
-                          <span style={{ color: '#667085' }}>{new Date(row.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
-                          <div style={{ height: 8, background: '#f2f4f7', borderRadius: 99, overflow: 'hidden' }}>
-                            <div style={{ width: `${Math.max(2, Math.round((Number(row.IMPRESSION || 0) / maxImpressions) * 100))}%`, height: '100%', background: '#5145cd', borderRadius: 99 }} />
+                          <span style={{ color: '#5f6f86' }}>{new Date(row.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                          <div style={{ height: 8, background: '#f1f5f9', borderRadius: 99, overflow: 'hidden' }}>
+                            <div style={{ width: `${Math.max(2, Math.round((Number(row.IMPRESSION || 0) / maxImpressions) * 100))}%`, height: '100%', background: '#1558b0', borderRadius: 99 }} />
                           </div>
-                          <span style={{ textAlign: 'right', color: '#344054' }}>{Number(row.IMPRESSION || 0).toLocaleString()} imp.</span>
+                          <span style={{ textAlign: 'right', color: '#334b66' }}>{Number(row.IMPRESSION || 0).toLocaleString()} imp.</span>
                         </div>
                       ))}
                     </div>
@@ -1373,7 +1440,7 @@ function AnalyticsView({ analytics }: { analytics: any }) {
               <strong>Official LinkedIn performance data is not connected yet</strong>
               <span>{live.message || 'The app needs LinkedIn Community Management member analytics access before it can show impressions, reach and engagement.'}</span>
               {live.authorization_required ? (
-                <div style={{ maxWidth: 620, fontSize: 10, lineHeight: 1.6, color: '#667085', marginTop: 6 }}>
+                <div style={{ maxWidth: 620, fontSize: 10, lineHeight: 1.6, color: '#5f6f86', marginTop: 6 }}>
                   Required permissions: <b>r_member_postAnalytics</b> for post performance and <b>r_member_profileAnalytics</b> for follower/profile trends. After those permissions are enabled for the LinkedIn developer app, reconnect the LinkedIn account so the new consent is issued.
                 </div>
               ) : null}
@@ -1387,7 +1454,7 @@ function AnalyticsView({ analytics }: { analytics: any }) {
       {false && (
       <section className="panel" style={{ marginTop: 16 }}>
         <div className="panel-head"><div><div className="panel-title">What will appear here</div><div className="panel-subtitle">Only observed LinkedIn data is used.</div></div></div>
-        <div className="panel-body" style={{ color: '#667085', fontSize: 11, lineHeight: 1.7 }}>
+        <div className="panel-body" style={{ color: '#5f6f86', fontSize: 11, lineHeight: 1.7 }}>
           Once analytics access is active, this view will show post impressions, reach, reactions, comments, reshares and engagement trends from LinkedIn's official member analytics API. Suvacya will not scrape LinkedIn or fabricate performance numbers.
         </div>
       </section>
@@ -1401,7 +1468,9 @@ function SettingsView(props: any) {
     brand, profile, brandTitle, setBrandTitle, brandIndustry, setBrandIndustry,
     brandExperienceYears, setBrandExperienceYears, brandTone, setBrandTone,
     posts, updatePost, addPost, removePost, building, onBuild, linkedin, onConnect,
-    editing, setEditing, onCancel
+    editing, setEditing, onCancel, personalThoughts = [], onDeletePersonalThoughts,
+    expandedThoughtId, setExpandedThoughtId, selectedThoughtIds = [], setSelectedThoughtIds,
+    thoughtSelectionMode = false, setThoughtSelectionMode
   } = props;
 
   const count = posts.filter((x: string) => x.trim()).length;
@@ -1445,7 +1514,7 @@ function SettingsView(props: any) {
             </div>
 
             {hasLinkedInProfile && (
-              <div style={{ marginTop: 14, padding: 12, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.55, display: 'flex', gap: 12, alignItems: 'center' }}>
+              <div style={{ marginTop: 14, padding: 12, borderRadius: 11, background: '#eaf3ff', color: '#5f6f86', fontSize: 10, lineHeight: 1.55, display: 'flex', gap: 12, alignItems: 'center' }}>
                 {linkedinPhotoAvailable ? (
                   <img
                     src={linkedinPicture}
@@ -1454,12 +1523,12 @@ function SettingsView(props: any) {
                     referrerPolicy="no-referrer"
                   />
                 ) : (
-                  <div style={{ width: 48, height: 48, borderRadius: '50%', display: 'grid', placeItems: 'center', background: '#e4e7ec', color: '#344054', fontWeight: 700, flex: '0 0 auto' }}>
+                  <div style={{ width: 48, height: 48, borderRadius: '50%', display: 'grid', placeItems: 'center', background: '#e4e7ec', color: '#334b66', fontWeight: 700, flex: '0 0 auto' }}>
                     {(profile.display_name || 'U').slice(0, 1).toUpperCase()}
                   </div>
                 )}
                 <div>
-                  <div style={{ color: '#5145cd', fontWeight: 700, marginBottom: 4 }}>LinkedIn profile data</div>
+                  <div style={{ color: '#1558b0', fontWeight: 700, marginBottom: 4 }}>LinkedIn profile data</div>
                   <div><b>Name:</b> {profile.display_name || 'Available'}</div>
                   <div><b>Photo:</b> {linkedinPhotoAvailable ? 'Fetched from LinkedIn' : 'Not returned by LinkedIn'}</div>
                   <div><b>Headline:</b> {linkedinProfile.headline || 'Not Shared by LinkedIn'}</div>
@@ -1468,8 +1537,8 @@ function SettingsView(props: any) {
             )}
 
             {linkedinProfile.headline && (
-              <div style={{ marginTop: 14, padding: 12, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.55 }}>
-                <div style={{ color: '#5145cd', fontWeight: 700, marginBottom: 4 }}>LinkedIn profile signal</div>
+              <div style={{ marginTop: 14, padding: 12, borderRadius: 11, background: '#eaf3ff', color: '#5f6f86', fontSize: 10, lineHeight: 1.55 }}>
+                <div style={{ color: '#1558b0', fontWeight: 700, marginBottom: 4 }}>LinkedIn profile signal</div>
                 <div><b>Headline:</b> {linkedinProfile.headline}</div>
               </div>
             )}
@@ -1488,7 +1557,7 @@ function SettingsView(props: any) {
                 <input className="input" value={brandTone} onChange={(e) => setBrandTone(e.target.value)} placeholder="e.g. Direct, practical and credible" />
               </div>
               <div className="form-group">
-                <label className="form-label">Years of work experience <span style={{ fontWeight: 500, color: '#98a2b3' }}>(optional)</span></label>
+                <label className="form-label">Years of work experience <span style={{ fontWeight: 500, color: '#8a98ab' }}>(optional)</span></label>
                 <input
                   className="input"
                   type="number"
@@ -1506,15 +1575,15 @@ function SettingsView(props: any) {
               </div>
             </div>
 
-            <div style={{ marginTop: 14, padding: 11, borderRadius: 11, background: '#f8f7ff', color: '#667085', fontSize: 10, lineHeight: 1.55 }}>
-              <b style={{ color: '#5145cd' }}>What happens next:</b> these reviewed details become the profile context used by Brand Intelligence. LinkedIn does not overwrite anything you change here.
+            <div style={{ marginTop: 14, padding: 11, borderRadius: 11, background: '#eaf3ff', color: '#5f6f86', fontSize: 10, lineHeight: 1.55 }}>
+              <b style={{ color: '#1558b0' }}>What happens next:</b> these reviewed details become the profile context used by Brand Intelligence. LinkedIn does not overwrite anything you change here.
             </div>
           </section>
 
           <section className="panel settings-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <div>
-                <h2 className="settings-title">Voice calibration <span style={{ fontWeight: 500, color: '#98a2b3' }}>(optional)</span></h2>
+                <h2 className="settings-title">Voice calibration <span style={{ fontWeight: 500, color: '#8a98ab' }}>(optional)</span></h2>
                 <p className="settings-copy">Add 3–10 previous LinkedIn posts if you want Suvacya to learn your writing style from real examples. You can skip this and add them later.</p>
               </div>
               <span className={"status-pill " + (count ? 'approved' : 'edited')}>{count}/10 posts</span>
@@ -1542,7 +1611,7 @@ function SettingsView(props: any) {
               </button>
             </div>
             {!count && (
-              <div style={{ marginTop: 10, color: '#667085', fontSize: 10 }}>
+              <div style={{ marginTop: 10, color: '#5f6f86', fontSize: 10 }}>
                 No posts added. That is okay. Suvacya can start from your profile and learn from your content over time.
               </div>
             )}
@@ -1596,14 +1665,160 @@ function SettingsView(props: any) {
             <h2 className="settings-title">Brand Intelligence status</h2>
             <p className="settings-copy">{brand.summary || 'Brand Intelligence is active and ready to shape content.'}</p>
             <div className="learning-flow">
-              <div className="flow-step"><BrainCircuit size={15} color="#6d5dfc"/><b>Professional title</b><span>{brand.profile?.professional_title || 'Not set'}</span></div>
-              <div className="flow-step"><Target size={15} color="#6d5dfc"/><b>Industry</b><span>{brand.profile?.industry || 'Not set'}</span></div>
-              <div className="flow-step"><Sparkles size={15} color="#6d5dfc"/><b>Voice</b><span>{brand.profile?.tone || 'Not set'}</span></div>
-              <div className="flow-step"><Activity size={15} color="#6d5dfc"/><b>Experience</b><span>{brand.profile?.experience_years != null ? brand.profile.experience_years + ' years' : 'Optional / not provided'} · {brand.current_post_count ?? brand.source_post_count} signals</span></div>
+              <div className="flow-step"><BrainCircuit size={15} color="#1769e0"/><b>Professional title</b><span>{brand.profile?.professional_title || 'Not set'}</span></div>
+              <div className="flow-step"><Target size={15} color="#1769e0"/><b>Industry</b><span>{brand.profile?.industry || 'Not set'}</span></div>
+              <div className="flow-step"><Sparkles size={15} color="#1769e0"/><b>Voice</b><span>{brand.profile?.tone || 'Not set'}</span></div>
+              <div className="flow-step"><Activity size={15} color="#1769e0"/><b>Experience</b><span>{brand.profile?.experience_years != null ? brand.profile.experience_years + ' years' : 'Optional / not provided'} · {brand.current_post_count ?? brand.source_post_count} signals</span></div>
             </div>
           </section>
         </div>
       )}
+
+      <section className="panel settings-card" style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14 }}>
+          <div>
+            <h2 className="settings-title">Personal Insights</h2>
+            <p className="settings-copy">Things you have explicitly shared with Suvacya. These help personalize future research and content without automatically changing your core Brand DNA.</p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <span className="status-pill approved">● {personalThoughts.length} SAVED</span>
+            {personalThoughts.length > 1 && (
+              <button className="button" onClick={() => {
+                setThoughtSelectionMode?.((current: boolean) => !current);
+                setSelectedThoughtIds?.([]);
+              }}>
+                {thoughtSelectionMode ? 'Cancel selection' : 'Select'}
+              </button>
+            )}
+          </div>
+        </div>
+        {personalThoughts.length ? (
+          <div className="post-stack" style={{ marginTop: 14 }}>
+            {personalThoughts.map((thought: PersonalThought) => {
+              const expanded = expandedThoughtId === thought.id;
+              const preview = thought.content.trim().length > 180
+                ? thought.content.trim().slice(0, 180).replace(/\s+\S*$/, '') + '…'
+                : thought.content.trim();
+              return (
+                <article className="post-entry" key={thought.id} style={thoughtSelectionMode ? { borderColor: selectedThoughtIds.includes(thought.id) ? '#1769e0' : undefined } : undefined}>
+                  <div className="post-entry-head">
+                    {thoughtSelectionMode && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#5f6f86', fontSize: 10 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedThoughtIds.includes(thought.id)}
+                          onChange={(e) => setSelectedThoughtIds?.((current: number[]) => e.target.checked
+                            ? [...current, thought.id]
+                            : current.filter((id) => id !== thought.id))}
+                        />
+                        Select
+                      </label>
+                    )}
+                    <span className="post-index">PERSONAL INSIGHT</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {thought.created_at ? (
+                        <span style={{ color: '#8a98ab', fontSize: 10 }}>
+                          {new Date(thought.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </span>
+                      ) : null}
+                      <button
+                        className="link-button"
+                        style={{ color: '#b91c1c' }}
+                        onClick={() => onDeletePersonalThoughts?.([thought.id])}
+                        title="Delete personal insight"
+                        aria-label="Delete personal insight"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                  {thought.title ? <div style={{ fontWeight: 700, color: '#334b66', marginBottom: 5 }}>{thought.title}</div> : null}
+                  {thought.topic ? <div style={{ color: '#5f6f86', fontSize: 10, marginBottom: 7 }}>Topic · {thought.topic}</div> : null}
+                  <div style={{ color: '#334b66', fontSize: 11, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
+                    {expanded ? thought.content : preview}
+                  </div>
+                  {thought.content.trim().length > 180 && (
+                    <button
+                      className="link-button"
+                      style={{ marginTop: 7 }}
+                      onClick={() => setExpandedThoughtId(expanded ? null : thought.id)}
+                      aria-expanded={expanded}
+                    >
+                      {expanded ? 'Show less ↑' : 'Read more →'}
+                    </button>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="empty-state" style={{ minHeight: 120, marginTop: 14 }}>
+            <strong>No personal insights saved yet</strong>
+            <span>When you save a thought from Content Studio, it will appear here and become available as a learning signal.</span>
+          </div>
+        )}
+        {thoughtSelectionMode && selectedThoughtIds.length > 0 && (
+          <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ color: '#5f6f86', fontSize: 10 }}>{selectedThoughtIds.length} selected</span>
+            <button
+              className="link-button"
+              style={{ color: '#b91c1c', fontWeight: 700 }}
+              onClick={async () => {
+                await onDeletePersonalThoughts?.(selectedThoughtIds);
+                setSelectedThoughtIds?.([]);
+                setThoughtSelectionMode?.(false);
+              }}
+            >
+              Delete selected
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="panel settings-card" style={{ marginTop: 16 }}>
+        <h2 className="settings-title">Privacy & Data</h2>
+        <p className="settings-copy">Review your data controls, export your application data, or permanently delete your Suvacya account.</p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+          <button className="button" onClick={async () => {
+            try {
+              const csrf = document.cookie.split('; ').find((part) => part.startsWith('__Host-suvacya-csrf='))?.split('=').slice(1).join('=') || document.cookie.split('; ').find((part) => part.startsWith('suvacya-csrf='))?.split('=').slice(1).join('=') || '';
+              const res = await fetch(API_BASE + '/api/account/export', { credentials: 'include', headers: csrf ? { 'X-CSRF-Token': csrf } : {} });
+              const data = await res.json();
+              if (!res.ok) throw new Error(getApiError(data, 'Data export failed'));
+              const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const anchor = document.createElement('a');
+              anchor.href = url;
+              anchor.download = 'suvacya-data-export.json';
+              anchor.click();
+              URL.revokeObjectURL(url);
+              window.alert('Your Suvacya data export is ready.');
+            } catch (e) {
+              window.alert(e instanceof Error ? e.message : 'Data export failed');
+            }
+          }}><Download size={14}/> Export my data</button>
+          <a className="button" href="/privacy">Privacy Policy</a>
+          <a className="button" href="/terms">Terms</a>
+          <button className="button" style={{ color: '#b91c1c' }} onClick={async () => {
+            const confirmation = window.prompt('This permanently deletes your Suvacya account and application data. Type DELETE to confirm.');
+            if (confirmation !== 'DELETE') return;
+            try {
+              const csrf = document.cookie.split('; ').find((part) => part.startsWith('__Host-suvacya-csrf='))?.split('=').slice(1).join('=') || document.cookie.split('; ').find((part) => part.startsWith('suvacya-csrf='))?.split('=').slice(1).join('=') || '';
+              const res = await fetch(API_BASE + '/api/account', {
+                method: 'DELETE',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
+                body: JSON.stringify({ confirmation }),
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) throw new Error(getApiError(data, 'Account deletion failed'));
+              window.location.href = '/';
+            } catch (e) {
+              window.alert(e instanceof Error ? e.message : 'Account deletion failed');
+            }
+          }}><X size={14}/> Delete account</button>
+        </div>
+      </section>
 
       <section className="panel settings-card" style={{ marginTop: 16 }}>
         <h2 className="settings-title">LinkedIn connection</h2>
