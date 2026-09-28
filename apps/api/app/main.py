@@ -32,12 +32,22 @@ from app.services.brand_learning import BrandLearningService
 from app.guards.guardrails import normalize_human_style, run_content_guards
 from app.integrations.linkedin import OfficialLinkedInAdapter
 from app.models.base import Base
-from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LinkedInConnection, UserProfile, VoiceMemory, AgentRun, AuthSession
+from app.models.models import (
+    ApprovalRequest, AuditLog, AuthSession, AuthUser, AgentRun, BrandMemory, ContentItem,
+    ContentOpportunity, ContentVersion, DurableJob, FeedbackEntry, HistoricalPost,
+    LearningEvent, LearningMemory, LinkedInConnection, LinkedInOAuthExchange, LinkedInOAuthState,
+    ResearchSource, UserProfile, VoiceMemory,
+)
 from app.services.approval import ApprovalService
 from app.services.auth_service import AppUser, AuthService
 from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback, sync_missing_profile_data
 from app.services.linkedin_analytics import LinkedInAnalyticsService
 from app.services.gemini_service import ModelRouterService
+from app.services.security import (
+    CSRF_COOKIE, SESSION_COOKIE, clear_session_cookies, client_key, decrypt_linkedin_token, encrypt_linkedin_token,
+    endpoint_limit, migrate_plaintext_linkedin_tokens, rate_limiter, request_token,
+    security_event, set_session_cookies, validate_csrf_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +140,9 @@ async def lifespan(app: FastAPI):
             if "published_image_urn" not in approval_columns:
                 await conn.execute(text("ALTER TABLE approval_requests ADD COLUMN published_image_urn VARCHAR(255)"))
 
+            # Encrypt any legacy LinkedIn tokens exactly once per deployment instance.
+            # New connections are encrypted before they are persisted.
+            # This is deliberately best-effort for existing local test databases.
             retired_columns = {"audience", "goals", "brand_positioning"}
             for column_name in retired_columns.intersection(columns):
                 try:
@@ -145,6 +158,13 @@ async def lifespan(app: FastAPI):
                     await conn.execute(text('ALTER TABLE brand_memory DROP COLUMN "audience_json"'))
                 except Exception:
                     logger.warning("Could not drop retired brand_memory.audience_json")
+
+    try:
+        async with SessionLocal() as security_session:
+            await migrate_plaintext_linkedin_tokens(security_session)
+    except Exception:
+        logger.exception("LinkedIn token migration failed")
+        raise
 
     # Vercel functions are ephemeral. Supabase Cron owns scheduled execution
     # in the Vercel deployment, so never start an in-process scheduler there.
@@ -180,6 +200,51 @@ async def restore_vercel_api_prefix(request: Request, call_next):
             request.scope["path"] = restored
             request.scope["raw_path"] = restored.encode("utf-8")
     return await call_next(request)
+
+
+@app.middleware("http")
+async def security_controls(request: Request, call_next):
+    """Apply API rate limits, cookie-session CSRF protection and security headers."""
+    path = request.scope.get("path", "")
+    method = request.method.upper()
+    response = None
+
+    if path.startswith("/api/") and method != "OPTIONS":
+        if not path.startswith("/api/health"):
+            limit, window = endpoint_limit(path, method)
+            token = request.cookies.get(SESSION_COOKIE) or request.headers.get("authorization", "")
+            identity = hashlib.sha256(token.encode("utf-8")).hexdigest()[:24] if token else client_key(request)
+            limiter_key = f"{identity}:{method}:{path}"
+            if not rate_limiter.allow(limiter_key, limit, window):
+                security_event("rate_limited", request, method=method)
+                response = JSONResponse(
+                    {"detail": "Too many requests. Please try again later."},
+                    status_code=429,
+                    headers={"Retry-After": str(window)},
+                )
+
+        if response is None and method not in {"GET", "HEAD"}:
+            public_csrf_paths = {"/api/auth/linkedin/exchange"}
+            has_bearer = request.headers.get("authorization", "").lower().startswith("bearer ")
+            session_token = request.cookies.get(SESSION_COOKIE)
+            if session_token and not has_bearer and path not in public_csrf_paths:
+                supplied = request.headers.get("X-CSRF-Token")
+                cookie_value = request.cookies.get(CSRF_COOKIE)
+                if not validate_csrf_token(session_token, supplied, cookie_value):
+                    security_event("csrf_failed", request, method=method)
+                    response = JSONResponse({"detail": "CSRF validation failed."}, status_code=403)
+
+    if response is None:
+        response = await call_next(request)
+
+    response.headers["X-Request-ID"] = secrets.token_hex(16)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["X-Frame-Options"] = "DENY"
+    if settings.is_production:
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    return response
 
 
 
@@ -219,6 +284,11 @@ class LearningThoughtRequest(BaseModel):
     content: str
     topic: str | None = None
     title: str | None = None
+
+
+class LearningThoughtDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ids: list[int] = Field(default_factory=list)
 
 
 class VoiceRequest(BaseModel):
@@ -275,6 +345,12 @@ class LinkedInExchangeRequest(BaseModel):
 
     code: str
     oauth_nonce: str | None = None
+
+
+class AccountDeletionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation: str
 
 
 @app.get("/health")
@@ -353,7 +429,7 @@ async def linkedin_oauth_callback(
     if expected_state and not secrets.compare_digest(expected_state, state):
         logger.warning("LinkedIn OAuth state cookie mismatch; continuing with server-side state validation.")
 
-    browser_nonce = state.split(".", 1)[0] if "." in state else None
+    browser_nonce = state.split(".", 1)[1] if "." in state else None
     exchange = await handle_callback(session, code, state)
     frontend = (
         "https://linkedin-brand-os-alpha.vercel.app"
@@ -380,18 +456,25 @@ async def linkedin_oauth_exchange(
     # -> Suvacya redirect.
     if not req.oauth_nonce:
         raise HTTPException(status_code=400, detail="LinkedIn exchange is missing the browser nonce.")
-    result = await exchange_code(session, req.code)
-    response = JSONResponse(result)
+    result = await exchange_code(session, req.code, req.oauth_nonce)
+    response = JSONResponse({
+        "success": True,
+        "display_name": result["display_name"],
+        "role": result["role"],
+        "email": result["email"],
+    })
+    set_session_cookies(response, result["token"])
     response.delete_cookie("brand_os_oauth_state", path="/")
     return response
 
 
 @app.get("/api/linkedin/status")
 async def linkedin_status(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     session: AsyncSession = Depends(get_session),
 ):
-    user = await AuthService.get_user_from_token(session, credentials.credentials if credentials else None)
+    user = await AuthService.get_user_from_token(session, request_token(request))
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -421,10 +504,11 @@ async def linkedin_status(
 
 @app.post("/api/linkedin/profile/sync-missing")
 async def sync_missing_linkedin_profile(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     session: AsyncSession = Depends(get_session),
 ):
-    user = await AuthService.get_user_from_token(session, credentials.credentials if credentials else None)
+    user = await AuthService.get_user_from_token(session, request_token(request))
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
     return await sync_missing_profile_data(session, int(user.id))
@@ -444,7 +528,7 @@ async def auth_me(
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     session: AsyncSession = Depends(get_session),
 ):
-    token = credentials.credentials if credentials else None
+    token = request_token(request)
     if token is None:
         auth_header = request.headers.get("authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
@@ -465,10 +549,11 @@ async def auth_me(
 
 @app.post("/api/auth/logout")
 async def auth_logout(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     session: AsyncSession = Depends(get_session),
 ):
-    token = credentials.credentials if credentials else None
+    token = request_token(request)
     if token:
         token_hash = AuthService.hash_token(token)
         result = await session.execute(select(AuthSession).where(AuthSession.token_hash == token_hash))
@@ -476,7 +561,134 @@ async def auth_logout(
         if session_row is not None:
             await session.delete(session_row)
             await session.commit()
-    return {"success": True}
+    response = JSONResponse({"success": True})
+    clear_session_cookies(response)
+    return response
+
+@app.get("/api/account/export")
+async def export_account(
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
+):
+    profile_id = int(current_user.id)
+    profile = await session.get(UserProfile, profile_id)
+    brand = (await session.execute(select(BrandMemory).where(BrandMemory.profile_id == profile_id))).scalar_one_or_none()
+    voice = (await session.execute(select(VoiceMemory).where(VoiceMemory.profile_id == profile_id))).scalar_one_or_none()
+    linkedin = (await session.execute(select(LinkedInConnection).where(LinkedInConnection.user_id == profile_id))).scalar_one_or_none()
+    historical = (await session.execute(select(HistoricalPost).where(HistoricalPost.profile_id == profile_id))).scalars().all()
+    content_items = (await session.execute(select(ContentItem).where(ContentItem.profile_id == profile_id))).scalars().all()
+    versions = []
+    for item in content_items:
+        versions.extend((await session.execute(select(ContentVersion).where(ContentVersion.content_id == item.id))).scalars().all())
+    approvals = []
+    if versions:
+        approvals = (await session.execute(select(ApprovalRequest).where(ApprovalRequest.content_version_id.in_([v.id for v in versions])))).scalars().all()
+    feedback = []
+    if versions:
+        feedback = (await session.execute(select(FeedbackEntry).where(FeedbackEntry.content_version_id.in_([v.id for v in versions])))).scalars().all()
+    events = (await session.execute(select(LearningEvent).where(LearningEvent.profile_id == profile_id))).scalars().all()
+    memories = (await session.execute(select(LearningMemory).where(LearningMemory.profile_id == profile_id))).scalars().all()
+    sources = (await session.execute(select(ResearchSource).where(ResearchSource.profile_id == profile_id))).scalars().all()
+    opportunities = (await session.execute(select(ContentOpportunity).where(ContentOpportunity.profile_id == profile_id))).scalars().all()
+
+    def model_dict(row):
+        if row is None:
+            return None
+        return {
+            key: (value.isoformat() if isinstance(value, datetime) else value)
+            for key, value in row.__dict__.items()
+            if key != "_sa_instance_state"
+        }
+
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "account": {"id": current_user.id, "email": current_user.email, "role": current_user.role, "display_name": current_user.display_name},
+        "profile": model_dict(profile),
+        "brand_memory": model_dict(brand),
+        "voice_memory": model_dict(voice),
+        "linkedin_connection": {
+            "connected": linkedin is not None,
+            "member_sub": linkedin.member_sub if linkedin else None,
+            "email": linkedin.linkedin_email if linkedin else None,
+            "name": linkedin.linkedin_name if linkedin else None,
+            "headline": linkedin.linkedin_headline if linkedin else None,
+            "picture_url": linkedin.linkedin_picture_url if linkedin else None,
+            "locale": linkedin.linkedin_locale if linkedin else None,
+            "vanity_name": linkedin.linkedin_vanity_name if linkedin else None,
+            "token_expires_at": linkedin.token_expires_at if linkedin else None,
+        },
+        "historical_posts": [model_dict(row) for row in historical],
+        "content_items": [model_dict(row) for row in content_items],
+        "content_versions": [model_dict(row) for row in versions],
+        "approvals": [model_dict(row) for row in approvals],
+        "feedback": [model_dict(row) for row in feedback],
+        "learning_events": [model_dict(row) for row in events],
+        "learning_memories": [model_dict(row) for row in memories],
+        "research_sources": [model_dict(row) for row in sources],
+        "content_opportunities": [model_dict(row) for row in opportunities],
+    }
+
+
+@app.delete("/api/account")
+async def delete_account(
+    req: AccountDeletionRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
+):
+    if req.confirmation != "DELETE":
+        raise HTTPException(status_code=400, detail="Type DELETE to confirm account deletion.")
+
+    user_id = int(current_user.id)
+    profile_id = user_id
+
+    # Delete dependent data explicitly so the workflow is idempotent even where
+    # older migrations did not declare ON DELETE CASCADE.
+    content_ids = [row[0] for row in (await session.execute(
+        select(ContentItem.id).where(ContentItem.profile_id == profile_id)
+    )).all()]
+    version_ids = [row[0] for row in (await session.execute(
+        select(ContentVersion.id).where(ContentVersion.content_id.in_(content_ids))
+    )).all()] if content_ids else []
+
+    if version_ids:
+        await session.execute(delete(FeedbackEntry).where(FeedbackEntry.content_version_id.in_(version_ids)))
+        await session.execute(delete(ApprovalRequest).where(ApprovalRequest.content_version_id.in_(version_ids)))
+        await session.execute(delete(ContentVersion).where(ContentVersion.id.in_(version_ids)))
+    if content_ids:
+        await session.execute(delete(ContentItem).where(ContentItem.id.in_(content_ids)))
+
+    for model, column in [
+        (HistoricalPost, HistoricalPost.profile_id),
+        (ResearchSource, ResearchSource.profile_id),
+        (ContentOpportunity, ContentOpportunity.profile_id),
+        (LearningEvent, LearningEvent.profile_id),
+        (LearningMemory, LearningMemory.profile_id),
+        (DurableJob, DurableJob.profile_id),
+        (AgentRun, AgentRun.user_id),
+        (VoiceMemory, VoiceMemory.profile_id),
+        (BrandMemory, BrandMemory.profile_id),
+        (AuthSession, AuthSession.user_id),
+        (LinkedInOAuthExchange, LinkedInOAuthExchange.user_id),
+        (LinkedInConnection, LinkedInConnection.user_id),
+        (UserProfile, UserProfile.id),
+    ]:
+        await session.execute(delete(model).where(column == profile_id))
+
+    # Security/audit records are not part of the user's content export and may
+    # be retained only when needed for incident/compliance purposes. Remove
+    # records whose actor is directly identifiable as this account.
+    await session.execute(
+        delete(AuditLog).where(
+            (AuditLog.actor == str(user_id)) | (AuditLog.actor == current_user.email)
+        )
+    )
+    await session.execute(delete(AuthUser).where(AuthUser.id == user_id))
+    await session.commit()
+
+    response = JSONResponse({"success": True, "message": "Your Suvacya account and application data have been deleted."})
+    clear_session_cookies(response)
+    return response
+
 
 @app.get("/api/profile")
 async def get_profile(
@@ -1019,7 +1231,7 @@ async def research_discover(
         opportunities = await ResearchService(session).research_and_rank(
             profile_id=int(current_user.id),
             requested_topic=req.topic,
-            candidate_limit=8,
+            candidate_limit=10,
         )
         return {"opportunities": opportunities}
     except ValueError as exc:
@@ -1034,7 +1246,7 @@ async def research_opportunities(
     session: AsyncSession = Depends(get_session),
     current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
-    return {"opportunities": await ResearchService(session).list_opportunities(int(current_user.id), 20)}
+    return {"opportunities": await ResearchService(session).list_opportunities(int(current_user.id), 10)}
 
 
 @app.post("/api/research/evidence")
@@ -1047,6 +1259,56 @@ async def build_research_evidence(
         req.topic or "",
         req.sources,
     )
+
+
+@app.delete("/api/learning/thoughts")
+async def delete_learning_thoughts(
+    req: LearningThoughtDeleteRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
+):
+    if len(req.ids) > 50:
+        raise HTTPException(status_code=400, detail="You can delete at most 50 personal insights at once.")
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    deleted = await BrandLearningService(session).delete_manual_thoughts(
+        int(profile.id),
+        req.ids,
+    )
+    return {"deleted": deleted}
+
+
+@app.get("/api/learning/thoughts")
+async def learning_thoughts(
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
+):
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    result = await session.execute(
+        select(LearningEvent)
+        .where(
+            LearningEvent.profile_id == profile.id,
+            LearningEvent.event_type == "USER_THOUGHT",
+            LearningEvent.source_type == "manual_thought",
+        )
+        .order_by(LearningEvent.created_at.desc())
+        .limit(50)
+    )
+    thoughts = []
+    for event in result.scalars().all():
+        metadata = {}
+        try:
+            metadata = json.loads(event.metadata_json or "{}")
+        except (TypeError, ValueError):
+            metadata = {}
+        thoughts.append({
+            "id": int(event.id),
+            "content": event.content,
+            "title": str(metadata.get("title") or "").strip() or None,
+            "topic": str(metadata.get("topic") or "").strip() or None,
+            "status": event.status,
+            "created_at": event.created_at.isoformat() if event.created_at else None,
+        })
+    return {"thoughts": thoughts}
 
 
 @app.post("/api/learning/thought")
@@ -1186,7 +1448,6 @@ Rules:
 @app.get("/api/analytics/overview")
 async def analytics_overview(
     session: AsyncSession = Depends(get_session),
-    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
     async def count(query):
@@ -1200,9 +1461,7 @@ async def analytics_overview(
         "published_via_brand_os": await count(select(ApprovalRequest.id).join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id).join(ContentItem, ContentItem.id == ContentVersion.content_id).where(ContentItem.profile_id == int(current_user.id), ApprovalRequest.status == "EXECUTED")),
     }
 
-    user = await AuthService.get_user_from_token(session, credentials.credentials if credentials else None)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    user = current_user
 
     connection_result = await session.execute(
         select(LinkedInConnection).where(LinkedInConnection.user_id == int(user.id))
@@ -1230,14 +1489,18 @@ async def analytics_overview(
         }
 
     try:
-        linkedin_performance = await LinkedInAnalyticsService(connection.access_token).fetch(days=30)
+        linkedin_token, token_encrypted = decrypt_linkedin_token(connection.access_token)
+        if not token_encrypted:
+            connection.access_token = encrypt_linkedin_token(linkedin_token)
+            await session.commit()
+        linkedin_performance = await LinkedInAnalyticsService(linkedin_token).fetch(days=30)
     except Exception as exc:
         detail = str(exc)
         if "HTTP 401" in detail or "HTTP 403" in detail:
             linkedin_performance = {
                 "available": False,
                 "authorization_required": True,
-                "message": "LinkedIn analytics access is not enabled for this connection yet. The app needs r_member_postAnalytics, and r_member_profileAnalytics if follower trends are enabled. After LinkedIn grants the permissions, reconnect the account so the new consent is included.",
+                "message": "LinkedIn analytics access is not enabled for this connection yet. Reconnect after LinkedIn grants the required analytics permissions.",
             }
         else:
             logger.exception("LinkedIn analytics failed: %s", exc)
@@ -1376,7 +1639,12 @@ async def execute_approval(
             if len(image_bytes) > 4 * 1024 * 1024:
                 raise ValueError("Image must be 4 MB or smaller.")
 
-        publish_adapter = OfficialLinkedInAdapter(connection.access_token, connection.member_sub)
+        linkedin_token, token_encrypted = decrypt_linkedin_token(connection.access_token)
+        if not token_encrypted:
+            from app.services.security import encrypt_linkedin_token
+            connection.access_token = encrypt_linkedin_token(linkedin_token)
+            await session.commit()
+        publish_adapter = OfficialLinkedInAdapter(linkedin_token, connection.member_sub)
         publish_result = await ApprovalService(session).execute(
             approval_id,
             publish_adapter,
