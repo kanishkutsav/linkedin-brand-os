@@ -1,7 +1,7 @@
 /* Production deployment marker: frontend and FastAPI service ship together. */
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, ArrowUpRight, BarChart3, BrainCircuit, Check, ChevronRight, CircleCheck,
   Clock3, Command, Download, ExternalLink, FileText, Gauge, Globe2, LayoutDashboard, Link2,
@@ -22,7 +22,14 @@ function getApiError(data: any, fallback: string) {
 type ApprovalStatus = 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'PUBLISHING' | 'REJECTED' | 'EXECUTED';
 type ApprovalItem = { id: number; status: ApprovalStatus; action_type: string; reason: string | null; content: string; title?: string; topic?: string; approved_at?: string | null; created_at?: string };
 type Profile = { display_name: string; role?: string };
-type LinkedInStatus = { connected: boolean; name?: string | null; email?: string | null; expires_at?: string | null };
+type LinkedInStatus = {
+  connected: boolean;
+  name?: string | null;
+  email?: string | null;
+  expires_at?: string | null;
+  profile_sync_needed?: boolean;
+  missing_profile_fields?: string[];
+};
 type BrandStatus = {
   ready: boolean; status: string; source_post_count: number; current_post_count?: number;
   continuous_learning?: boolean; historical_import_optional?: boolean; brand_bootstrap_completed?: boolean; last_updated?: string | null;
@@ -56,6 +63,7 @@ export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile>({ display_name: 'User', role: 'owner' });
   const [linkedin, setLinkedin] = useState<LinkedInStatus>({ connected: false });
+  const linkedinSyncAttemptedToken = useRef<string | null>(null);
   const [brand, setBrand] = useState<BrandStatus>({ ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 });
   const [brandTitle, setBrandTitle] = useState('');
   const [brandIndustry, setBrandIndustry] = useState('');
@@ -261,6 +269,37 @@ useEffect(() => {
       let brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
 
       setBrand(brandJson);
+
+      // Existing LinkedIn connections may predate the profile metadata fields.
+      // Make at most one best-effort refresh per authenticated session, and
+      // only when at least one of the new fields is actually missing. The API
+      // fills missing values only and never overwrites values already stored.
+      if (
+        linkedinJson.connected &&
+        linkedinJson.profile_sync_needed &&
+        linkedinSyncAttemptedToken.current !== authToken
+      ) {
+        linkedinSyncAttemptedToken.current = authToken;
+        void fetch(API_BASE + '/api/linkedin/profile/sync-missing', {
+          method: 'POST',
+          headers: headers(authToken),
+        }).then(async (syncRes) => {
+          if (!syncRes.ok) return;
+          const syncJson = await syncRes.json();
+          if (!syncJson.updated || !syncJson.profile) return;
+          setBrand((current) => ({
+            ...current,
+            linkedin_profile: {
+              ...(current.linkedin_profile || {}),
+              ...syncJson.profile,
+              connected: true,
+            },
+          }));
+        }).catch(() => {
+          // Missing profile metadata is optional and must never block the workspace.
+        });
+      }
+
       const p = brandJson.profile || {};
       setBrandTitle(p.professional_title || '');
       setBrandIndustry(p.industry || '');

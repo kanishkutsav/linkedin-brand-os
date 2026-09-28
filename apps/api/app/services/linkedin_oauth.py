@@ -108,6 +108,93 @@ async def build_authorization_url(session: AsyncSession, browser_nonce: str | No
     return url, state
 
 
+async def sync_missing_profile_data(session: AsyncSession, user_id: int) -> dict:
+    """Refresh only missing LinkedIn OIDC profile fields for an existing connection.
+
+    This intentionally makes no LinkedIn request when all fields added by the
+    profile-sync feature are already present. Existing non-null values are never
+    overwritten. A failed refresh is non-fatal because the user may have an
+    expired token or LinkedIn may simply not return the optional claim.
+    """
+    result = await session.execute(
+        select(LinkedInConnection).where(LinkedInConnection.user_id == user_id)
+    )
+    connection = result.scalar_one_or_none()
+    if connection is None:
+        return {"connected": False, "attempted": False, "updated": False}
+
+    missing_fields = [
+        field for field, value in (
+            ("headline", connection.linkedin_headline),
+            ("picture_url", connection.linkedin_picture_url),
+            ("locale", connection.linkedin_locale),
+            ("vanity_name", connection.linkedin_vanity_name),
+        ) if not value or not str(value).strip()
+    ]
+    if not missing_fields:
+        return {"connected": True, "attempted": False, "updated": False, "missing_fields": []}
+
+    try:
+        userinfo = await asyncio.to_thread(
+            _request_json,
+            LINKEDIN_USERINFO_URL,
+            headers={"Authorization": f"Bearer {connection.access_token}"},
+        )
+    except HTTPException as exc:
+        logger.info("LinkedIn missing-profile sync skipped for user %s: %s", user_id, exc.detail)
+        return {
+            "connected": True,
+            "attempted": True,
+            "updated": False,
+            "missing_fields": missing_fields,
+            "error": "LinkedIn profile refresh was not available",
+        }
+
+    profile_data = dict(userinfo or {})
+    headline = str(profile_data.get("headline") or profile_data.get("localizedHeadline") or "").strip()[:500] or None
+    picture_url = str(profile_data.get("picture") or "").strip() or None
+    locale_value = profile_data.get("locale")
+    if isinstance(locale_value, dict):
+        language = str(locale_value.get("language") or "").strip()
+        country = str(locale_value.get("country") or "").strip()
+        locale = "-".join(part for part in (language, country) if part)[:30] or None
+    else:
+        locale = str(locale_value).strip()[:30] if locale_value else None
+    vanity_name = str(profile_data.get("vanityName") or "").strip()[:255] or None
+
+    updated_fields: list[str] = []
+    for field, value in (
+        ("headline", headline),
+        ("picture_url", picture_url),
+        ("locale", locale),
+        ("vanity_name", vanity_name),
+    ):
+        if not value:
+            continue
+        attr = "linkedin_" + field
+        if not getattr(connection, attr):
+            setattr(connection, attr, value)
+            updated_fields.append(field)
+
+    if updated_fields:
+        connection.linkedin_profile_synced_at = _utc_now()
+        await session.commit()
+
+    return {
+        "connected": True,
+        "attempted": True,
+        "updated": bool(updated_fields),
+        "updated_fields": updated_fields,
+        "missing_fields": missing_fields,
+        "profile": {
+            "headline": connection.linkedin_headline,
+            "picture_url": connection.linkedin_picture_url,
+            "locale": connection.linkedin_locale,
+            "vanity_name": connection.linkedin_vanity_name,
+        },
+    }
+
+
 async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
     result = await session.execute(
         select(LinkedInOAuthState).where(
@@ -232,11 +319,22 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
         connection.token_expires_at = token_expires_at
         connection.linkedin_email = email
         connection.linkedin_name = display_name
-        connection.linkedin_headline = headline
-        connection.linkedin_picture_url = picture_url
-        connection.linkedin_locale = locale
-        connection.linkedin_vanity_name = vanity_name
-        connection.linkedin_profile_synced_at = _utc_now()
+
+        # Existing connections keep any previously stored profile metadata.
+        # A reconnect may supply newer optional claims, but it must not replace
+        # values we already have. Missing fields are filled opportunistically.
+        metadata_added = False
+        for attr, value in (
+            ("linkedin_headline", headline),
+            ("linkedin_picture_url", picture_url),
+            ("linkedin_locale", locale),
+            ("linkedin_vanity_name", vanity_name),
+        ):
+            if value and not getattr(connection, attr):
+                setattr(connection, attr, value)
+                metadata_added = True
+        if metadata_added:
+            connection.linkedin_profile_synced_at = _utc_now()
 
     exchange_code = secrets.token_urlsafe(32)
     session.add(
