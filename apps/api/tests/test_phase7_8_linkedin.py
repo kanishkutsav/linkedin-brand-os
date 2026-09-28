@@ -92,7 +92,7 @@ class TestPhase7LinkedIn(unittest.TestCase):
              patch("app.main.agent_scheduler.stop", new_callable=AsyncMock) as stop:
             from fastapi.testclient import TestClient
             with TestClient(app) as client:
-                response = client.get("/health")
+                response = client.get("/api/health")
                 self.assertEqual(response.status_code, 200)
         start.assert_not_called()
         stop.assert_not_awaited()
