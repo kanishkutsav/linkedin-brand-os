@@ -3,13 +3,13 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Brand OS — Personal Brand Manager',
+  title: 'Suvacya — Personal Brand Manager',
   description: 'AI-powered personal brand management with human approval at the center.',
   manifest: '/manifest.webmanifest',
-  applicationName: 'Brand OS',
+  applicationName: 'Suvacya',
   appleWebApp: {
     capable: true,
-    title: 'Brand OS',
+    title: 'Suvacya',
     statusBarStyle: 'black-translucent',
   },
   icons: {
