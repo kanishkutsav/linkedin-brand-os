@@ -107,6 +107,22 @@ async def lifespan(app: FastAPI):
             })
             if "experience_years" not in columns:
                 await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN experience_years FLOAT"))
+            if "brand_bootstrap_completed" not in columns:
+                await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN brand_bootstrap_completed BOOLEAN NOT NULL DEFAULT FALSE"))
+
+            linkedin_columns = await conn.run_sync(lambda sync_conn: {
+                column["name"] for column in inspect(sync_conn).get_columns("linkedin_connections")
+            })
+            linkedin_column_sql = {
+                "linkedin_headline": "TEXT",
+                "linkedin_picture_url": "TEXT",
+                "linkedin_locale": "VARCHAR(30)",
+                "linkedin_vanity_name": "VARCHAR(255)",
+                "linkedin_profile_synced_at": "TIMESTAMP",
+            }
+            for column_name, column_type in linkedin_column_sql.items():
+                if column_name not in linkedin_columns:
+                    await conn.execute(text(f"ALTER TABLE linkedin_connections ADD COLUMN {column_name} {column_type}"))
 
             approval_columns = await conn.run_sync(lambda sync_conn: {
                 column["name"] for column in inspect(sync_conn).get_columns("approval_requests")
@@ -481,6 +497,10 @@ async def brand_status(
         and profile.tone and profile.tone.strip()
     )
     brand_ready = bool(memory and memory.status == "READY" and profile_complete)
+    linkedin_result = await session.execute(
+        select(LinkedInConnection).where(LinkedInConnection.user_id == int(profile.id)).limit(1)
+    )
+    linkedin_connection = linkedin_result.scalar_one_or_none()
     return {
         "status": "READY" if brand_ready else ("NEEDS_INPUT" if memory else "NOT_INITIALIZED"),
         "ready": brand_ready,
@@ -498,7 +518,11 @@ async def brand_status(
             "tone": profile.tone if profile else None,
         },
         "linkedin_profile": {
-            "connected": bool((await session.execute(select(LinkedInConnection.id).where(LinkedInConnection.user_id == int(profile.id)).limit(1))).scalar_one_or_none()),
+            "connected": bool(linkedin_connection),
+            "headline": linkedin_connection.linkedin_headline if linkedin_connection else None,
+            "picture_url": linkedin_connection.linkedin_picture_url if linkedin_connection else None,
+            "locale": linkedin_connection.linkedin_locale if linkedin_connection else None,
+            "vanity_name": linkedin_connection.linkedin_vanity_name if linkedin_connection else None,
         },
         "source_posts": [
             {"id": post.id, "body": post.body, "published_at": post.published_at, "source": post.source}
@@ -1031,9 +1055,8 @@ async def improve_content(
         not profile.professional_title
         or not profile.industry
         or not profile.tone
-        or profile.experience_years is None
     ):
-        raise HTTPException(status_code=400, detail="Complete Professional Title, Industry, Desired Tone and Years of Experience before improving content.")
+        raise HTTPException(status_code=400, detail="Complete Professional Title, Industry and Desired Tone before improving content.")
 
     brand_service = BrandIntelligenceService(session)
     memory = await brand_service.get_memory(profile.id)
@@ -1196,9 +1219,8 @@ async def create_draft(
         not profile.professional_title
         or not profile.industry
         or not profile.tone
-        or profile.experience_years is None
     ):
-        raise HTTPException(status_code=400, detail="Complete Professional Title, Industry, Desired Tone and Years of Experience before creating content.")
+        raise HTTPException(status_code=400, detail="Complete Professional Title, Industry and Desired Tone before creating content.")
     brand_memory = await BrandIntelligenceService(session).get_memory(profile.id)
     if brand_memory is None or brand_memory.status != "READY":
         raise HTTPException(status_code=400, detail="Complete Brand DNA setup before creating content.")
