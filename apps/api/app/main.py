@@ -35,7 +35,7 @@ from app.models.base import Base
 from app.models.models import ApprovalRequest, ContentItem, ContentVersion, HistoricalPost, LinkedInConnection, UserProfile, VoiceMemory, AgentRun, AuthSession
 from app.services.approval import ApprovalService
 from app.services.auth_service import AppUser, AuthService
-from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback
+from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback, sync_missing_profile_data
 from app.services.linkedin_analytics import LinkedInAnalyticsService
 from app.services.gemini_service import ModelRouterService
 
@@ -399,12 +399,35 @@ async def linkedin_status(
         select(LinkedInConnection).where(LinkedInConnection.user_id == int(user.id))
     )
     connection = result.scalar_one_or_none()
+    missing_profile_fields = []
+    if connection is not None:
+        missing_profile_fields = [
+            field for field, value in (
+                ("headline", connection.linkedin_headline),
+                ("picture_url", connection.linkedin_picture_url),
+                ("locale", connection.linkedin_locale),
+                ("vanity_name", connection.linkedin_vanity_name),
+            ) if not value or not str(value).strip()
+        ]
     return {
         "connected": connection is not None,
         "name": connection.linkedin_name if connection else None,
         "email": connection.linkedin_email if connection else None,
         "expires_at": connection.token_expires_at if connection else None,
+        "profile_sync_needed": bool(missing_profile_fields),
+        "missing_profile_fields": missing_profile_fields,
     }
+
+
+@app.post("/api/linkedin/profile/sync-missing")
+async def sync_missing_linkedin_profile(
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+    session: AsyncSession = Depends(get_session),
+):
+    user = await AuthService.get_user_from_token(session, credentials.credentials if credentials else None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return await sync_missing_profile_data(session, int(user.id))
 
 
 @app.post("/api/auth/linkedin/login")
