@@ -7,6 +7,9 @@ import json
 import re
 import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import unquote_plus
+
+from fastapi import Request
 from typing import Any
 
 import httpx
@@ -15,6 +18,116 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.models import JobSearchCache, ObservabilityEvent
+
+
+# Job-market location aliases used for deterministic provider filtering. The primary
+# signal is Vercel's IP country/city headers; LinkedIn locale is only a fallback.
+_COUNTRY_NAMES = {
+    "AE": "United Arab Emirates", "AU": "Australia", "BR": "Brazil", "CA": "Canada",
+    "CH": "Switzerland", "DE": "Germany", "ES": "Spain", "FR": "France",
+    "GB": "United Kingdom", "IE": "Ireland", "IN": "India", "IT": "Italy",
+    "JP": "Japan", "MX": "Mexico", "MY": "Malaysia", "NL": "Netherlands",
+    "NZ": "New Zealand", "PH": "Philippines", "PK": "Pakistan", "PL": "Poland",
+    "PT": "Portugal", "SG": "Singapore", "ZA": "South Africa", "SE": "Sweden",
+    "TR": "Türkiye", "US": "United States", "VN": "Vietnam",
+}
+_COUNTRY_ALIASES = {
+    "AE": {"uae", "united arab emirates"}, "AU": {"australia"}, "BR": {"brazil"},
+    "CA": {"canada"}, "CH": {"switzerland"}, "DE": {"germany"}, "ES": {"spain"},
+    "FR": {"france"}, "GB": {"uk", "united kingdom", "great britain", "england", "scotland", "wales"},
+    "IE": {"ireland"}, "IN": {"india", "bharat"}, "IT": {"italy"}, "JP": {"japan"},
+    "MX": {"mexico"}, "MY": {"malaysia"}, "NL": {"netherlands", "holland"},
+    "NZ": {"new zealand"}, "PH": {"philippines"}, "PK": {"pakistan"}, "PL": {"poland"},
+    "PT": {"portugal"}, "SG": {"singapore"}, "ZA": {"south africa"}, "SE": {"sweden"},
+    "TR": {"turkey", "türkiye"}, "US": {"usa", "us", "united states", "united states of america"},
+    "VN": {"vietnam", "viet nam"},
+}
+_WORLDWIDE_TERMS = {
+    "worldwide", "global", "anywhere", "any location", "all locations",
+    "work from anywhere", "remote - worldwide", "remote worldwide",
+}
+
+
+def _header_location(request: Request) -> tuple[str | None, str | None]:
+    country = (request.headers.get("x-vercel-ip-country") or "").strip().upper()
+    city = unquote_plus((request.headers.get("x-vercel-ip-city") or "").strip())
+    return country[:2] or None, city[:120] or None
+
+
+def _locale_country(locale: str | None) -> str | None:
+    raw = str(locale or "").strip().replace("_", "-")
+    if not raw:
+        return None
+    parts = [part.strip().upper() for part in raw.split("-") if part.strip()]
+    for part in reversed(parts):
+        if len(part) == 2 and part.isalpha():
+            return part
+    return None
+
+
+def resolve_job_location(
+    request: Request,
+    linkedin_locale: str | None,
+    default_country: str = "IN",
+) -> dict[str, str]:
+    ip_country, ip_city = _header_location(request)
+    if ip_country:
+        return {"country_code": ip_country, "country": _COUNTRY_NAMES.get(ip_country, ip_country),
+                "city": ip_city or "", "source": "ip"}
+
+    linkedin_country = _locale_country(linkedin_locale)
+    if linkedin_country:
+        return {"country_code": linkedin_country, "country": _COUNTRY_NAMES.get(linkedin_country, linkedin_country),
+                "city": "", "source": "linkedin"}
+
+    fallback = (default_country or "IN").strip().upper()[:2]
+    return {"country_code": fallback, "country": _COUNTRY_NAMES.get(fallback, fallback),
+            "city": "", "source": "configured_default"}
+
+
+def _contains_location_term(location: str, term: str) -> bool:
+    if len(term) <= 2:
+        return bool(re.search(rf"\b{re.escape(term)}\b", location))
+    return term in location
+
+
+def _location_matches(job_location: str, remote_type: str | None, target: dict[str, str]) -> bool:
+    location = _clean_text(job_location, 500).lower()
+    remote = _clean_text(remote_type, 120).lower()
+    if not location:
+        return "remote" in remote
+    if any(term in location for term in _WORLDWIDE_TERMS):
+        return True
+
+    country_code = target.get("country_code", "").upper()
+    country_name = target.get("country", "").lower()
+    aliases = _COUNTRY_ALIASES.get(country_code, set())
+    if country_name and country_name.lower() not in aliases:
+        aliases = set(aliases) | {country_name}
+    if any(_contains_location_term(location, alias) for alias in aliases):
+        return True
+
+    city = target.get("city", "").strip().lower()
+    if city and len(city) >= 3 and city in location:
+        return True
+
+    restricted_markets = ("usa", "us", "united states", "uk", "united kingdom", "canada", "australia")
+    if "remote" in location and not any(
+        _contains_location_term(location, restricted)
+        for restricted in restricted_markets if restricted not in aliases
+    ):
+        return True
+    return False
+
+
+def _filter_jobs_to_location(jobs: list[dict[str, Any]], target: dict[str, str]) -> list[dict[str, Any]]:
+    # Provider-side location queries are useful but not sufficient: providers
+    # can still return broad/global results. Apply the same deterministic
+    # market guard to every normalized result before it reaches the user.
+    return [
+        job for job in jobs
+        if _location_matches(job.get("location", ""), job.get("remote_type"), target)
+    ]
 
 
 def _clean_text(value: Any, limit: int = 4000) -> str:
@@ -62,13 +175,16 @@ def _normalize(**kwargs: Any) -> dict[str, Any]:
     }
 
 
-async def _adzuna(query: str) -> list[dict[str, Any]]:
+async def _adzuna(query: str, target: dict[str, str]) -> list[dict[str, Any]]:
     if not settings.adzuna_app_id or not settings.adzuna_app_key:
         return []
-    url = f"https://api.adzuna.com/v1/api/jobs/{settings.adzuna_country}/search/1"
+    country = target.get("country_code", "").lower() or settings.adzuna_country.lower()
+    url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
     params = {"app_id": settings.adzuna_app_id, "app_key": settings.adzuna_app_key,
               "results_per_page": min(settings.job_search_max_results, 20),
               "what": query, "content-type": "application/json"}
+    if target.get("city"):
+        params["where"] = target["city"]
     async with httpx.AsyncClient(timeout=8.0) as client:
         response = await client.get(url, params=params)
         response.raise_for_status()
@@ -81,11 +197,16 @@ async def _adzuna(query: str) -> list[dict[str, Any]]:
         for item in (data.get("results") or [])]
 
 
-async def _jooble(query: str) -> list[dict[str, Any]]:
+async def _jooble(query: str, target: dict[str, str]) -> list[dict[str, Any]]:
     if not settings.jooble_api_key:
         return []
+    configured_country = (settings.jooble_country or "").strip().upper()
+    target_country = target.get("country_code", "").strip().upper()
+    if configured_country and target_country and configured_country != target_country:
+        return []
     endpoint = f"{settings.jooble_base_url.rstrip('/')}/{settings.jooble_api_key}"
-    payload = {"keywords": query, "location": "India", "page": 1,
+    location = target.get("city") or target.get("country") or "India"
+    payload = {"keywords": query, "location": location, "page": 1,
                "ResultOnPage": min(settings.job_search_max_results, 20), "SearchMode": 0, "companysearch": False}
     async with httpx.AsyncClient(timeout=8.0) as client:
         response = await client.post(endpoint, json=payload)
@@ -97,10 +218,11 @@ async def _jooble(query: str) -> list[dict[str, Any]]:
         for item in (data.get("jobs") or [])]
 
 
-async def _themuse(query: str) -> list[dict[str, Any]]:
+async def _themuse(query: str, target: dict[str, str]) -> list[dict[str, Any]]:
     if not settings.themuse_api_key:
         return []
-    params = {"page": 0, "api_key": settings.themuse_api_key, "location": "India"}
+    params = {"page": 0, "api_key": settings.themuse_api_key,
+              "location": target.get("city") or target.get("country")}
     async with httpx.AsyncClient(timeout=8.0) as client:
         response = await client.get(f"{settings.themuse_base_url.rstrip('/')}/jobs", params=params)
         response.raise_for_status()
@@ -122,7 +244,7 @@ async def _themuse(query: str) -> list[dict[str, Any]]:
     return output[:settings.job_search_max_results]
 
 
-async def _remotive(query: str) -> list[dict[str, Any]]:
+async def _remotive(query: str, target: dict[str, str]) -> list[dict[str, Any]]:
     if not settings.remotive_enabled:
         return []
     async with httpx.AsyncClient(timeout=8.0) as client:
@@ -138,6 +260,22 @@ async def _remotive(query: str) -> list[dict[str, Any]]:
         for item in (data.get("jobs") or [])]
 
 
+def _filter_jobs_to_query(jobs: list[dict[str, Any]], query: str | None) -> list[dict[str, Any]]:
+    if not query or not query.strip():
+        return jobs
+    terms = [term.lower() for term in re.findall(r"[\\w-]+", query.lower()) if len(term) > 1]
+    if not terms:
+        return jobs
+    return [
+        job for job in jobs
+        if all(
+            term in str(job.get("title") or "").lower()
+            or term in str(job.get("company") or "").lower()
+            for term in terms
+        )
+    ]
+
+
 def _dedupe(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[str] = set()
     output = []
@@ -149,11 +287,37 @@ def _dedupe(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return output
 
 
-async def search_jobs(session: AsyncSession, title: str, years: float | None, domain: str, query: str | None = None) -> dict[str, Any]:
+def _cache_key(
+    search_query: str,
+    title: str,
+    years: float | None,
+    domain: str,
+    target: dict[str, str],
+) -> str:
+    location_key = f"{target.get('country_code','')}|{target.get('city','').lower()}"
+    return hashlib.sha256(
+        f"{search_query.lower()}|{title.lower()}|{years}|{domain.lower()}|{location_key}".encode()
+    ).hexdigest()
+
+
+async def search_jobs(
+    session: AsyncSession,
+    title: str,
+    years: float | None,
+    domain: str,
+    query: str | None = None,
+    location: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    target = location or {
+        "country_code": (settings.adzuna_country or "IN").upper()[:2],
+        "country": _COUNTRY_NAMES.get((settings.adzuna_country or "IN").upper()[:2], settings.adzuna_country),
+        "city": "",
+        "source": "configured_default",
+    }
     search_query = (query or _query(title, years, domain)).strip()[:240]
     if not search_query:
         search_query = _query(title, years, domain)
-    key = hashlib.sha256(f"{search_query.lower()}|{title.lower()}|{years}|{domain.lower()}".encode()).hexdigest()
+    key = _cache_key(search_query, title, years, domain, target)
     cached = (await session.execute(select(JobSearchCache).where(JobSearchCache.cache_key == key))).scalar_one_or_none()
     now = datetime.now(timezone.utc)
     if cached and cached.expires_at > now:
@@ -161,7 +325,12 @@ async def search_jobs(session: AsyncSession, title: str, years: float | None, do
         payload["cached"] = True
         return payload
 
-    providers = [("Adzuna", _adzuna), ("Jooble", _jooble), ("The Muse", _themuse), ("Remotive", _remotive)]
+    providers = [
+        ("Adzuna", lambda q: _adzuna(q, target)),
+        ("Jooble", lambda q: _jooble(q, target)),
+        ("The Muse", lambda q: _themuse(q, target)),
+        ("Remotive", lambda q: _remotive(q, target)),
+    ]
     async def call(name: str, fn: Any) -> tuple[str, list[dict[str, Any]], str | None, int]:
         started = time.perf_counter()
         try:
@@ -179,9 +348,26 @@ async def search_jobs(session: AsyncSession, title: str, years: float | None, do
         "The Muse": bool(settings.themuse_api_key),
         "Remotive": bool(settings.remotive_enabled),
     }
+    jooble_location_supported = (
+        not settings.jooble_api_key
+        or not settings.jooble_country
+        or settings.jooble_country.strip().upper() == target.get("country_code", "").strip().upper()
+    )
     for name, items, error, latency_ms in results:
-        provider_status.append({"provider": name, "configured": configured[name],
-                                "available": error is None, "returned_jobs": len(items), "error": error})
+        location_supported = jooble_location_supported if name == "Jooble" else True
+        provider_status.append({
+            "provider": name,
+            "configured": configured[name],
+            "location_supported": location_supported,
+            "available": error is None and location_supported,
+            "returned_jobs": len(items),
+            "error": error or (
+                f"Provider key is configured for {settings.jooble_country.upper()}, "
+                f"not {target.get('country_code', '').upper()}."
+                if name == "Jooble" and configured[name] and not location_supported
+                else None
+            ),
+        })
         session.add(ObservabilityEvent(
             correlation_id=key[:24], event_type="ProviderSucceeded" if error is None else "ProviderFailed",
             activity_type="JOB_SEARCH", status="SUCCESS" if error is None else "FAILED",
@@ -191,8 +377,18 @@ async def search_jobs(session: AsyncSession, title: str, years: float | None, do
         ))
         jobs.extend(items)
 
-    payload = {"query": search_query, "jobs": _dedupe(jobs)[:settings.job_search_max_results],
-               "providers": provider_status, "cached": False}
+    jobs = _filter_jobs_to_location(jobs, target)
+    jobs = _filter_jobs_to_query(jobs, query)
+
+    # Provider readiness/credentials are operational telemetry, not end-user
+    # content. Keep them in observability/admin surfaces instead of exposing
+    # configuration state through the user-facing Jobs response.
+    payload = {
+        "query": search_query,
+        "location": target,
+        "jobs": _dedupe(jobs)[:settings.job_search_max_results],
+        "cached": False,
+    }
     if cached:
         cached.payload_json = json.dumps(payload, ensure_ascii=False)
         cached.expires_at = now + timedelta(seconds=settings.job_search_cache_seconds)
