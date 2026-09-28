@@ -8,6 +8,21 @@ on:
     branches: ["main"]
 
 jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned frontend dependencies
+        run: npm install --package-lock=false
+      - name: Build frontend
+        run: npm run build
+
   backend:
     runs-on: ubuntu-latest
     defaults:
@@ -104,7 +119,9 @@ jobs:
           test -s api/index.py
           test -s requirements.txt
           test -s vercel.json
-          grep -q '"outputDirectory": "apps/web/.next"' vercel.json
+          grep -q '"root": "apps/web/"' vercel.json
+          grep -q '"root": "apps/api/"' vercel.json
+          grep -q '"entrypoint": "app.main:app"' vercel.json
           grep -q "NEXT_PUBLIC_API_URL" apps/web/app/page.tsx
           grep -q " : '';" apps/web/app/page.tsx
           ! grep -q "onrender.com" apps/web/vercel.json

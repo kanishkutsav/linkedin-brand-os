@@ -189,6 +189,7 @@ class LinkedInOAuthState(Base):
     __tablename__ = "linkedin_oauth_states"
     id: Mapped[int] = mapped_column(primary_key=True)
     state_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    browser_nonce_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
@@ -200,6 +201,7 @@ class LinkedInOAuthExchange(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("auth_users.id"), index=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used: Mapped[bool] = mapped_column(Boolean, default=False)
+    browser_nonce_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 

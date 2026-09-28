@@ -272,6 +272,59 @@ Return:
 
         return processed
 
+    async def delete_manual_thoughts(self, profile_id: int, thought_ids: list[int]) -> int:
+        """Soft-delete user-created thoughts and retire memories supported only by them."""
+        normalized_ids = sorted({int(value) for value in thought_ids if int(value) > 0})
+        if not normalized_ids:
+            return 0
+
+        result = await self.session.execute(
+            select(LearningEvent).where(
+                LearningEvent.profile_id == profile_id,
+                LearningEvent.id.in_(normalized_ids),
+                LearningEvent.event_type == "USER_THOUGHT",
+                LearningEvent.source_type == "manual_thought",
+                LearningEvent.status != "DELETED",
+            )
+        )
+        events = list(result.scalars().all())
+        if not events:
+            return 0
+
+        deleted_ids = {int(event.id) for event in events}
+        memories_result = await self.session.execute(
+            select(LearningMemory).where(LearningMemory.profile_id == profile_id)
+        )
+        memories = list(memories_result.scalars().all())
+
+        for memory in memories:
+            try:
+                metadata = json.loads(memory.metadata_json or "{}")
+            except (TypeError, ValueError):
+                metadata = {}
+            evidence = metadata.get("evidence_event_ids") or []
+            normalized_evidence = {int(value) for value in evidence if str(value).isdigit()}
+            if not normalized_evidence.intersection(deleted_ids):
+                continue
+
+            remaining = sorted(normalized_evidence - deleted_ids)
+            if remaining:
+                metadata["evidence_event_ids"] = remaining
+                memory.metadata_json = json.dumps(metadata, ensure_ascii=False)
+                memory.source_count = len(remaining)
+                memory.updated_at = _utcnow()
+            else:
+                await self.session.delete(memory)
+
+        for event in events:
+            event.status = "DELETED"
+            event.embedding = None
+            event.processed_at = _utcnow()
+            event.last_error = None
+
+        await self.session.commit()
+        return len(events)
+
     async def context(
         self,
         profile_id: int,

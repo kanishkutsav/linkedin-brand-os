@@ -9,6 +9,7 @@ from google import genai
 from google.genai import types
 
 from app.core.config import settings
+from app.services.security import minimize_ai_text
 
 
 class ModelRouterService:
@@ -21,6 +22,11 @@ class ModelRouterService:
     """
 
     def __init__(self) -> None:
+        self.allowed_providers = {
+            item.strip().lower()
+            for item in settings.ai_allowed_providers.split(",")
+            if item.strip()
+        } or {"openrouter", "groq", "gemini"}
         if not settings.openrouter_api_key and not settings.groq_api_key and not settings.gemini_api_key:
             raise RuntimeError(
                 "No LLM provider is configured. Set OPENROUTER_API_KEY, GROQ_API_KEY or GEMINI_API_KEY."
@@ -35,31 +41,34 @@ class ModelRouterService:
     ) -> dict:
         errors: list[str] = []
 
-        if settings.openrouter_api_key:
+        safe_system = minimize_ai_text(system_instruction)
+        safe_prompt = minimize_ai_text(prompt)
+
+        if settings.openrouter_api_key and "openrouter" in self.allowed_providers:
             try:
                 return await self._openrouter_json(
-                    system_instruction,
-                    prompt,
+                    safe_system,
+                    safe_prompt,
                     max_output_tokens=max_output_tokens,
                 )
             except Exception as exc:
                 errors.append(f"openrouter: {exc}")
 
-        if settings.groq_api_key:
+        if settings.groq_api_key and 'groq' in self.allowed_providers:
             try:
                 return await self._groq_json(
-                    system_instruction,
-                    prompt,
+                    safe_system,
+                    safe_prompt,
                     max_output_tokens=max_output_tokens,
                 )
             except Exception as exc:
                 errors.append(f"groq: {exc}")
 
-        if settings.gemini_api_key:
+        if settings.gemini_api_key and 'gemini' in self.allowed_providers:
             try:
                 return await self._gemini_json(
-                    system_instruction,
-                    prompt,
+                    safe_system,
+                    safe_prompt,
                     max_output_tokens=max_output_tokens,
                 )
             except Exception as exc:
@@ -158,9 +167,9 @@ class ModelRouterService:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
                 model=settings.gemini_model,
-                contents=prompt,
+                contents=minimize_ai_text(prompt),
                 config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
+                    system_instruction=minimize_ai_text(system_instruction),
                     response_mime_type="application/json",
                     max_output_tokens=max_output_tokens,
                 ),
@@ -287,6 +296,12 @@ class GeminiService:
         self.model = settings.gemini_model
 
     async def research_json(self, system_instruction: str, prompt: str) -> tuple[dict, dict]:
+        if "gemini" not in {
+            item.strip().lower()
+            for item in settings.ai_allowed_providers.split(",")
+            if item.strip()
+        }:
+            raise RuntimeError("Gemini is not an approved AI provider for this environment.")
         response = await self.client.aio.models.generate_content(
             model=self.model,
             contents=prompt,

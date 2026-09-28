@@ -18,6 +18,90 @@ from app.services.gemini_service import ModelRouterService
 from app.services.brand_learning import BrandLearningService
 
 
+
+
+_RESEARCH_TARGET = 10
+_RESEARCH_SOURCE_POOL = 48
+_STOP_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in",
+    "into", "is", "it", "of", "on", "or", "that", "the", "their", "this",
+    "to", "with", "your", "you", "my", "our", "how", "what", "why", "when",
+}
+
+
+def _tokens(value: str | None) -> set[str]:
+    words = re.findall(r"[a-z0-9]+", str(value or "").lower())
+    tokens: set[str] = set()
+    for word in words:
+        if len(word) < 3 or word in _STOP_WORDS:
+            continue
+        tokens.add(word)
+        if len(word) >= 7:
+            tokens.add(word[:6])
+    return tokens
+
+
+def _weighted_profile_terms(profile: UserProfile, brand_memory: dict, learning_memory: dict, requested_topic: str | None) -> dict[str, float]:
+    fields = [
+        (profile.professional_title, 3.0),
+        (profile.industry, 3.0),
+        (requested_topic, 4.0),
+        (brand_memory.get("summary"), 1.5),
+    ]
+    identity = brand_memory.get("identity") or {}
+    if isinstance(identity, dict):
+        fields.extend((value, 2.5) for values in identity.values() if isinstance(values, list) for value in values)
+    expertise = brand_memory.get("expertise") or []
+    if isinstance(expertise, list):
+        fields.extend(((item.get("area") or ""), 3.0) for item in expertise if isinstance(item, dict))
+    themes = brand_memory.get("themes") or []
+    if isinstance(themes, list):
+        fields.extend(((item.get("theme") or ""), 2.0) for item in themes if isinstance(item, dict))
+    memories = learning_memory.get("memories") or []
+    if isinstance(memories, list):
+        fields.extend(((item.get("content") or ""), 2.0) for item in memories if isinstance(item, dict))
+    semantic = (learning_memory.get("semantic_matches") or {}).get("memories", [])
+    if isinstance(semantic, list):
+        fields.extend(((item.get("content") or ""), 1.5) for item in semantic if isinstance(item, dict))
+
+    weighted: dict[str, float] = {}
+    for value, weight in fields:
+        for token in _tokens(value):
+            weighted[token] = max(weighted.get(token, 0.0), weight)
+    return weighted
+
+
+def _profile_relevance(candidate: dict, profile_terms: dict[str, float], requested_topic: str | None) -> float:
+    candidate_text = " ".join(
+        str(candidate.get(key) or "")
+        for key in ("title", "topic", "angle", "pillar", "objective")
+    )
+    candidate_tokens = _tokens(candidate_text)
+    if not profile_terms or not candidate_tokens:
+        return 0.0
+
+    total_weight = sum(profile_terms.values())
+    matched_weight = sum(weight for token, weight in profile_terms.items() if token in candidate_tokens)
+    base = matched_weight / total_weight if total_weight else 0.0
+
+    requested_tokens = _tokens(requested_topic)
+    requested_match = (
+        len(requested_tokens & candidate_tokens) / len(requested_tokens)
+        if requested_tokens else 0.0
+    )
+    anchor_bonus = min(0.18, 0.06 * max(0, len(profile_terms.keys() & candidate_tokens) - 1))
+    score = (base * 0.78) + (requested_match * 0.22) + anchor_bonus
+    return round(max(0.0, min(100.0, score * 100.0)), 1)
+
+
+def _candidate_similarity(left: dict, right: dict) -> float:
+    a = _tokens(" ".join(str(left.get(k) or "") for k in ("title", "topic")))
+    b = _tokens(" ".join(str(right.get(k) or "") for k in ("title", "topic")))
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
 class ResearchService:
     """Real-time research and evidence discovery using Gemini Google Search grounding."""
 
@@ -34,7 +118,7 @@ class ResearchService:
             queries.append(profile.professional_title)
         if profile.experience_years is not None:
             queries.append(f"{profile.industry or 'professional'} {profile.experience_years:g} years experience")
-        for learned in (learned_queries or [])[:2]:
+        for learned in (learned_queries or [])[:4]:
             if learned and learned not in queries:
                 queries.append(learned)
         if not queries:
@@ -57,7 +141,7 @@ class ResearchService:
             return items
 
         async with httpx.AsyncClient(timeout=5.0, follow_redirects=True, headers={"User-Agent": "BrandOS/1.0"}) as client:
-            batches = await asyncio.gather(*(fetch_query(client, query) for query in queries[:2]), return_exceptions=True)
+            batches = await asyncio.gather(*(fetch_query(client, query) for query in queries[:4]), return_exceptions=True)
 
         seen: set[str] = set()
         items: list[dict] = []
@@ -68,7 +152,7 @@ class ResearchService:
                 if item["url"] not in seen:
                     seen.add(item["url"])
                     items.append(item)
-        return items[:16]
+        return items[:32]
 
     async def _gdelt_sources(self, profile: UserProfile, requested_topic: str | None, learned_queries: list[str] | None = None) -> list[dict]:
         queries: list[str] = []
@@ -108,7 +192,7 @@ class ResearchService:
             ]
 
         async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, headers={"User-Agent": "BrandOS/1.0"}) as client:
-            batches = await asyncio.gather(*(fetch_query(client, query) for query in queries[:3]), return_exceptions=True)
+            batches = await asyncio.gather(*(fetch_query(client, query) for query in queries[:4]), return_exceptions=True)
 
         seen: set[str] = set()
         items: list[dict] = []
@@ -119,7 +203,7 @@ class ResearchService:
                 if item["url"] not in seen:
                     seen.add(item["url"])
                     items.append(item)
-        return items[:16]
+        return items[:32]
 
     async def _source_context(self, client: httpx.AsyncClient, source: dict) -> dict:
         """Fetch a small, source-grounded text excerpt for research summaries.
@@ -161,9 +245,11 @@ class ResearchService:
                 )
                 excerpt = html.unescape(description_match.group(1)).strip() if description_match else ""
 
+            canonical_url = str(response.url) or url
             if excerpt:
-                canonical_url = str(response.url) or url
                 return source | {"url": canonical_url, "source_excerpt": excerpt}
+            if canonical_url and canonical_url != url:
+                return source | {"url": canonical_url}
         except Exception:
             pass
         return source
@@ -191,7 +277,7 @@ class ResearchService:
         *,
         profile_id: int,
         requested_topic: str | None = None,
-        candidate_limit: int = 8,
+        candidate_limit: int = _RESEARCH_TARGET,
     ) -> list[dict]:
         if self.session is None:
             raise ValueError("A database session is required for live research.")
@@ -223,6 +309,8 @@ class ResearchService:
         )
         recent_content = [{"topic": row[0], "created_at": row[1].isoformat() if row[1] else None} for row in recent_content_result.all()]
 
+        brand_memory = context.get("brand_memory") or {}
+        profile_terms = _weighted_profile_terms(profile, brand_memory, learning_memory, requested_topic)
         source_errors: list[str] = []
         google_task = asyncio.create_task(self._live_sources(profile, requested_topic, learned_queries))
         gdelt_task = asyncio.create_task(self._gdelt_sources(profile, requested_topic, learned_queries))
@@ -244,7 +332,7 @@ class ResearchService:
         # Keep live research responsive on mobile and serverless runtimes.
         # RSS/GDELT metadata is already sufficient for fallback evidence, while
         # only a small set of sources needs article-body enrichment for ranking.
-        live_sources = deduped_sources[:8]
+        live_sources = deduped_sources[:_RESEARCH_SOURCE_POOL]
         live_sources = await self._enrich_source_context(live_sources)
 
         if requested_topic:
@@ -260,7 +348,7 @@ class ResearchService:
         if not live_sources:
             # Do not turn a temporary public-feed outage into a hard Research failure.
             # Return the latest persisted opportunities so the workspace remains usable.
-            cached = await self.list_opportunities(profile_id, min(candidate_limit, 8))
+            cached = await self.list_opportunities(profile_id, min(candidate_limit, _RESEARCH_TARGET))
             if cached:
                 return cached
             raise RuntimeError("Live source discovery failed. " + " | ".join(source_errors))
@@ -277,10 +365,10 @@ class ResearchService:
             "recent_historical_posts": [p.body[:600] for p in historical[:6]],
             "recent_content_topics": recent_content[:10],
             "requested_topic": requested_topic,
-            "candidate_limit": candidate_limit,
+            "candidate_limit": max(_RESEARCH_TARGET, candidate_limit),
             "live_sources": [
                 {key: value for key, value in source.items() if key != "source_excerpt" or value}
-                for source in live_sources[:16]
+                for source in live_sources[:_RESEARCH_SOURCE_POOL]
             ],
         }, ensure_ascii=False)
 
@@ -303,13 +391,13 @@ Hard rules:
 Return:
 {"opportunities":[{"title":"","topic":"","angle":"","pillar":"","format":"","objective":"","why_now":"","evidence_summary":"","source_hints":[],"source_urls":[],"brand_fit":0,"context_relevance":0,"timeliness":0,"evidence_strength":0,"novelty":0,"conversation_potential":0,"authenticity":0,"risk":0,"rationale":""}]}
 
-Generate 6-8 genuinely different opportunities. Every opportunity must cite at least one supplied source URL in source_urls. For evidence_summary, write one useful 80-120 word paragraph explaining what the supplied source says and why it matters. Only use claims supported by the supplied source excerpt or metadata. If no article text was available, be explicit that the summary is based on the available source metadata rather than inventing details.
+Generate 12-16 genuinely different opportunities so the application can independently score, deduplicate and select the strongest 10. Every opportunity must cite at least one supplied source URL in source_urls. For evidence_summary, write one useful 80-120 word paragraph explaining what the supplied source says and why it matters. Only use claims supported by the supplied source excerpt or metadata. If no article text was available, be explicit that the summary is based on the available source metadata rather than inventing details.
 """
 
         try:
             data = await asyncio.wait_for(
-                ModelRouterService().generate_json(system, prompt, max_output_tokens=1800),
-                timeout=8.0,
+                ModelRouterService().generate_json(system, prompt, max_output_tokens=3600),
+                timeout=12.0,
             )
             opportunities = data.get("opportunities") or []
         except Exception:
@@ -339,15 +427,16 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
                     "risk": 20,
                     "rationale": "Deterministic fallback based only on a current public source because the configured ranking model was unavailable.",
                 }
-                for source in live_sources[:6]
+                for source in live_sources[:_RESEARCH_TARGET]
             ]
         created: list[dict] = []
         source_by_url = {item["url"]: item for item in live_sources}
 
         for raw in opportunities:
             try:
+                brand_fit = _profile_relevance(raw, profile_terms, requested_topic)
                 scores = {
-                    "brand_fit": max(0.0, min(100.0, float(raw.get("brand_fit", 0) or 0))),
+                    "brand_fit": brand_fit,
                     "audience_relevance": max(0.0, min(100.0, float(raw.get("context_relevance", raw.get("audience_relevance", 0)) or 0))),
                     "timeliness": max(0.0, min(100.0, float(raw.get("timeliness", 0) or 0))),
                     "evidence_strength": max(0.0, min(100.0, float(raw.get("evidence_strength", 0) or 0))),
@@ -419,9 +508,17 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
             except (TypeError, ValueError):
                 continue
 
+        ranked = sorted(created, key=lambda item: item["total_score"], reverse=True)
+        selected: list[dict] = []
+        for item in ranked:
+            if any(_candidate_similarity(item, existing) >= 0.72 for existing in selected):
+                continue
+            selected.append(item)
+            if len(selected) >= max(1, min(candidate_limit, _RESEARCH_TARGET)):
+                break
+
         await self.session.commit()
-        created.sort(key=lambda item: item["total_score"], reverse=True)
-        return created
+        return selected
 
     async def list_opportunities(self, profile_id: int, limit: int = 20) -> list[dict]:
         if self.session is None:
@@ -432,9 +529,43 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
             .order_by(ContentOpportunity.total_score.desc(), ContentOpportunity.created_at.desc())
             .limit(max(1, min(limit, 50)))
         )
-        return [self.serialize(item) for item in result.scalars().all()]
+        items = list(result.scalars().all())
+        source_ids: set[int] = set()
+        for item in items:
+            source_ids.update(
+                int(source_id)
+                for source_id in json.loads(item.research_source_ids_json or "[]")
+                if str(source_id).isdigit()
+            )
 
-    def serialize(self, item: ContentOpportunity) -> dict:
+        sources_by_id: dict[int, ResearchSource] = {}
+        if source_ids:
+            source_result = await self.session.execute(
+                select(ResearchSource).where(
+                    ResearchSource.profile_id == profile_id,
+                    ResearchSource.id.in_(source_ids),
+                )
+            )
+            sources_by_id = {int(source.id): source for source in source_result.scalars().all()}
+
+        serialized: list[dict] = []
+        for item in items:
+            item_sources = []
+            for raw_id in json.loads(item.research_source_ids_json or "[]"):
+                try:
+                    source = sources_by_id.get(int(raw_id))
+                except (TypeError, ValueError):
+                    source = None
+                if source is not None and source.url:
+                    item_sources.append({
+                        "title": source.title,
+                        "url": source.url,
+                        "domain": source.domain,
+                    })
+            serialized.append(self.serialize(item, sources=item_sources))
+        return serialized
+
+    def serialize(self, item: ContentOpportunity, sources: list[dict] | None = None) -> dict:
         return {
             "id": item.id,
             "title": item.title,
@@ -458,6 +589,7 @@ Generate 6-8 genuinely different opportunities. Every opportunity must cite at l
             "rationale": item.rationale,
             "evidence": json.loads(item.evidence_json or "{}"),
             "source_ids": json.loads(item.research_source_ids_json or "[]"),
+            "sources": sources or [],
             "created_at": item.created_at.isoformat() if item.created_at else None,
         }
 
