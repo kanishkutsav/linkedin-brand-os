@@ -50,7 +50,7 @@ type PersonalThought = {
   status?: string;
   created_at?: string | null;
 };
-type Tab = 'Dashboard' | 'Research' | 'Content Studio' | 'LinkedIn Posts' | 'Analytics' | 'Brand DNA' | 'Profile';
+type Tab = 'Dashboard' | 'Research' | 'Content Studio' | 'LinkedIn Posts' | 'Analytics' | 'Brand DNA';
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -64,7 +64,6 @@ const nav = [
   ['LinkedIn Posts', ExternalLink, 'Published posts'],
   ['Analytics', BarChart3, 'Performance'],
   ['Brand DNA', Settings, 'Brand DNA'],
-  ['Profile', UserRound, 'Account & connection'],
 ] as const;
 
 export default function Home() {
@@ -113,6 +112,7 @@ export default function Home() {
   const [researchProgress, setResearchProgress] = useState(0);
   const [researchStage, setResearchStage] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
@@ -253,6 +253,8 @@ useEffect(() => {
         window.sessionStorage.removeItem('brand-os-oauth-nonce');
         document.cookie = 'suvacya_oauth_nonce=; Max-Age=0; Path=/; SameSite=Lax' + (window.location.protocol === 'https:' ? '; Secure' : '');
         setError('LinkedIn sign-in could not be verified in this browser. Please start the connection again.');
+        setOauthCompleting(false);
+        setAuthLoading(false);
         return;
       }
       window.sessionStorage.removeItem('brand-os-oauth-started-at');
@@ -865,16 +867,32 @@ useEffect(() => {
             <div><div className="eyebrow">Workspace / {tab}</div><div className="topbar-title">{tab === 'Dashboard' ? 'Command center' : nav.find((x) => x[0] === tab)?.[2]}</div></div>
           </div>
           <div className="topbar-actions">
-            <button className="avatar profile-avatar-button" title="Open Profile" onClick={() => go('Profile')} aria-label="Open Profile">
-              {linkedinAvatarUrl && !linkedinAvatarFailed ? (
-                <img
-                  src={linkedinAvatarUrl}
-                  alt={profile.display_name ? `${profile.display_name} profile` : 'Profile'}
-                  onError={() => setLinkedinAvatarFailed(true)}
-                  referrerPolicy="no-referrer"
-                />
-              ) : initials}
-            </button>
+            <div className="profile-menu-wrap">
+              <button className="avatar profile-avatar-button" title="Open profile menu" onClick={() => setProfileMenuOpen((open) => !open)} aria-label="Open profile menu" aria-expanded={profileMenuOpen}>
+                {linkedinAvatarUrl && !linkedinAvatarFailed ? (
+                  <img
+                    src={linkedinAvatarUrl}
+                    alt={profile.display_name ? `${profile.display_name} profile` : 'Profile'}
+                    onError={() => setLinkedinAvatarFailed(true)}
+                    referrerPolicy="no-referrer"
+                  />
+                ) : initials}
+              </button>
+              {profileMenuOpen && (
+                <>
+                  <button className="profile-menu-backdrop" aria-label="Close profile menu" onClick={() => setProfileMenuOpen(false)} />
+                  <div className="profile-menu" role="menu">
+                    <div className="profile-menu-head">
+                      <div className="profile-menu-name">{profile.display_name || 'User'}</div>
+                      <div className="profile-menu-status">{linkedin.connected ? 'LinkedIn connected' : 'LinkedIn not connected'}</div>
+                    </div>
+                    <button role="menuitem" onClick={() => { setProfileMenuOpen(false); connectLinkedIn(); }}><Link2 size={15}/><span>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</span></button>
+                    <button role="menuitem" onClick={() => { setProfileMenuOpen(false); refreshWorkspace(); }} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /><span>{loading ? 'Refreshing dashboard…' : 'Refresh dashboard'}</span></button>
+                    <button role="menuitem" className="profile-menu-danger" onClick={() => { setProfileMenuOpen(false); void deleteAccount(); }}><X size={15}/><span>Delete account</span></button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </header>
 
@@ -954,42 +972,6 @@ useEffect(() => {
           {tab === 'Content Studio' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
           {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />}
           {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
-          {tab === 'Profile' && (
-            <section className="settings-stack">
-              <div className="page-header">
-                <div>
-                  <div className="page-kicker"><UserRound size={13}/> Account</div>
-                  <h1 className="page-title">Your profile & connections.</h1>
-                  <p className="page-description">Manage account-level actions in one place. Brand DNA and privacy controls stay focused on their own responsibilities.</p>
-                </div>
-              </div>
-              <section className="panel settings-card">
-                <h2 className="settings-title">Profile</h2>
-                <p className="settings-copy">Your Suvacya account identity.</p>
-                <div className="profile-grid">
-                  <div className="form-group"><span className="form-label">Name</span><div className="readonly-field">{profile.display_name || 'User'}</div></div>
-                  <div className="form-group"><span className="form-label">Role</span><div className="readonly-field">{profile.role || 'user'}</div></div>
-                </div>
-              </section>
-              <section className="panel settings-card">
-                <h2 className="settings-title">LinkedIn connection</h2>
-                <p className="settings-copy">{linkedin.connected
-                  ? <>Signed in as <b>{profile.display_name}</b>. Your official LinkedIn connection is active and available for supported publishing workflows.</>
-                  : 'Connect LinkedIn to prefill the starting Brand DNA where available and enable supported publishing actions.'}</p>
-                <button className="button" onClick={connectLinkedIn}><Link2 size={14}/>{linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
-              </section>
-              <section className="panel settings-card">
-                <h2 className="settings-title">Workspace refresh</h2>
-                <p className="settings-copy">Refresh the dashboard data explicitly whenever you want the latest saved workflow state.</p>
-                <button className="button" onClick={refreshWorkspace} disabled={loading}><RefreshCw size={14} className={loading ? 'spin' : ''}/>{loading ? 'Refreshing…' : 'Refresh dashboard'}</button>
-              </section>
-              <section className="panel settings-card danger-account-card">
-                <h2 className="settings-title">Delete account</h2>
-                <p className="settings-copy">Permanently delete your Suvacya account and application data. This action cannot be undone.</p>
-                <button className="button danger" onClick={deleteAccount}><X size={14}/> Delete account</button>
-              </section>
-            </section>
-          )}
           {tab === 'Brand DNA' && (
             <SettingsView
               brand={brand}
@@ -1043,6 +1025,10 @@ useEffect(() => {
         </main>
       </div>
 
+      {loading && initialWorkspaceLoaded.current && (
+        <WorkspaceLoadingOverlay label="Loading…" />
+      )}
+
       <nav className="mobile-bottom-nav" aria-label="Mobile workspace navigation">
         {[
           ['Dashboard', LayoutDashboard, 'Home'],
@@ -1070,7 +1056,6 @@ useEffect(() => {
             <div className="mobile-more-grid">
               <button onClick={() => go('Analytics')}><BarChart3 size={18} /><span>Analytics</span></button>
               <button onClick={() => go('Brand DNA')}><Settings size={18} /><span>Brand DNA</span></button>
-              <button onClick={() => go('Profile')}><UserRound size={18} /><span>Profile</span></button>
               <button onClick={installSuvacya} disabled={isStandalone}><Download size={18} /><span>{isStandalone ? 'Installed' : 'Install Suvacya'}</span></button>
             </div>
             <button className="mobile-more-signout" onClick={logout}><LogOut size={17} /> Sign out</button>
@@ -1882,11 +1867,35 @@ function SettingsView(props: any) {
 function FullScreenLoading({ label = 'Loading…' }: { label?: string }) {
   return (
     <main className="full-screen-loading" aria-live="polite" aria-busy="true">
+      <div className="loading-workspace-preview" aria-hidden="true">
+        <aside className="loading-preview-sidebar">
+          <div className="loading-preview-brand"><span /><span /><span /></div>
+          <div className="loading-preview-nav" /><div className="loading-preview-nav" /><div className="loading-preview-nav" /><div className="loading-preview-nav" /><div className="loading-preview-nav" />
+        </aside>
+        <div className="loading-preview-main">
+          <div className="loading-preview-topbar" /><div className="loading-preview-hero" />
+          <div className="loading-preview-grid"><div /><div /><div /></div>
+          <div className="loading-preview-panel" />
+        </div>
+      </div>
+      <div className="loading-workspace-scrim" />
+      <div className="full-screen-loading-card">
+        <div className="brand-mark"><Sparkles size={18} /></div>
+        <div className="full-screen-loading-label">{label}</div>
+        <div className="full-screen-loading-hint">Your workspace is being prepared…</div>
+      </div>
+    </main>
+  );
+}
+
+function WorkspaceLoadingOverlay({ label = 'Loading…' }: { label?: string }) {
+  return (
+    <div className="workspace-loading-overlay" aria-live="polite" aria-busy="true">
       <div className="full-screen-loading-card">
         <div className="brand-mark"><Sparkles size={18} /></div>
         <div className="full-screen-loading-label">{label}</div>
       </div>
-    </main>
+    </div>
   );
 }
 

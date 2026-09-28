@@ -26,13 +26,27 @@ class Settings(BaseSettings):
     linkedin_analytics_oauth_enabled: bool = False
 
     # LLM provider routing
-    # OpenRouter is the primary free-inference provider.
+    # Groq is the primary free-inference provider. OpenRouter and Gemini are fallbacks.
     openrouter_api_key: str | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_model: str = "openrouter/free"
-    ai_allowed_providers: str = "openrouter,groq,gemini"
+    ai_allowed_providers: str = "groq,openrouter,gemini"
 
-    # Groq is the callback provider. GPT-OSS 120B is currently available on
+    groq_content_model: str = "openai/gpt-oss-120b"
+    groq_research_model: str = "openai/gpt-oss-120b"
+    groq_learning_model: str = "openai/gpt-oss-120b"
+    openrouter_content_model: str = "openrouter/free"
+    openrouter_research_model: str = "openrouter/free"
+    openrouter_learning_model: str = "openrouter/free"
+    gemini_content_model: str = "gemini-3.8-flash"
+    gemini_research_model: str = "gemini-3.8-flash"
+    gemini_learning_model: str = "gemini-3.8-flash"
+
+    def model_for(self, provider: str, task: str) -> str:
+        task_name = task if task in {"content", "research", "learning"} else "content"
+        return getattr(self, f"{provider}_{task_name}_model", getattr(self, f"{provider}_model"))
+
+    # Groq is the primary provider. GPT-OSS 120B is currently available on
     # Groq's free tier with rate limits; paid usage begins only after upgrading.
     groq_api_key: str | None = None
     groq_base_url: str = "https://api.groq.com/openai/v1"

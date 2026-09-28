@@ -103,7 +103,7 @@ def _candidate_similarity(left: dict, right: dict) -> float:
 
 
 class ResearchService:
-    """Real-time research and evidence discovery using Gemini Google Search grounding."""
+    """Real-time research and evidence discovery with durable multi-provider AI."""
 
     def __init__(self, session: AsyncSession | None = None):
         self.session = session
@@ -396,7 +396,7 @@ Generate 12-16 genuinely different opportunities so the application can independ
 
         try:
             data = await asyncio.wait_for(
-                ModelRouterService().generate_json(system, prompt, max_output_tokens=3600),
+                ModelRouterService().generate_json(system, prompt, max_output_tokens=3600, task="research"),
                 timeout=12.0,
             )
             opportunities = data.get("opportunities") or []

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from google import genai
@@ -13,7 +13,7 @@ from app.services.security import minimize_ai_text
 
 
 class ModelRouterService:
-    """OpenRouter-first LLM router with Groq and Gemini fallbacks.
+    """Groq-first task-aware LLM router with OpenRouter and Gemini fallbacks.
 
     User-entered Brand DNA is passed in the generation prompt, so every
     configured provider receives the same title, industry, experience, tone,
@@ -38,41 +38,31 @@ class ModelRouterService:
         prompt: str,
         *,
         max_output_tokens: int = 1800,
+        task: Literal["content", "research", "learning", "general"] = "general",
     ) -> dict:
         errors: list[str] = []
 
         safe_system = minimize_ai_text(system_instruction)
         safe_prompt = minimize_ai_text(prompt)
 
-        if settings.openrouter_api_key and "openrouter" in self.allowed_providers:
-            try:
-                return await self._openrouter_json(
-                    safe_system,
-                    safe_prompt,
-                    max_output_tokens=max_output_tokens,
-                )
-            except Exception as exc:
-                errors.append(f"openrouter: {exc}")
-
-        if settings.groq_api_key and 'groq' in self.allowed_providers:
-            try:
-                return await self._groq_json(
-                    safe_system,
-                    safe_prompt,
-                    max_output_tokens=max_output_tokens,
-                )
-            except Exception as exc:
-                errors.append(f"groq: {exc}")
-
-        if settings.gemini_api_key and 'gemini' in self.allowed_providers:
-            try:
-                return await self._gemini_json(
-                    safe_system,
-                    safe_prompt,
-                    max_output_tokens=max_output_tokens,
-                )
-            except Exception as exc:
-                errors.append(f"gemini: {exc}")
+        for provider in ("groq", "openrouter", "gemini"):
+            if provider not in self.allowed_providers:
+                continue
+            if provider == "groq" and settings.groq_api_key:
+                try:
+                    return await self._groq_json(safe_system, safe_prompt, max_output_tokens=max_output_tokens, task=task)
+                except Exception as exc:
+                    errors.append(f"groq: {exc}")
+            elif provider == "openrouter" and settings.openrouter_api_key:
+                try:
+                    return await self._openrouter_json(safe_system, safe_prompt, max_output_tokens=max_output_tokens, task=task)
+                except Exception as exc:
+                    errors.append(f"openrouter: {exc}")
+            elif provider == "gemini" and settings.gemini_api_key:
+                try:
+                    return await self._gemini_json(safe_system, safe_prompt, max_output_tokens=max_output_tokens, task=task)
+                except Exception as exc:
+                    errors.append(f"gemini: {exc}")
 
         raise RuntimeError(
             "All configured LLM providers failed. " + " | ".join(errors)
@@ -84,9 +74,10 @@ class ModelRouterService:
         prompt: str,
         *,
         max_output_tokens: int,
+        task: str = "general",
     ) -> dict:
         payload = {
-            "model": settings.openrouter_model,
+            "model": settings.model_for("openrouter", task),
             "messages": [
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": prompt},
@@ -125,9 +116,11 @@ class ModelRouterService:
         prompt: str,
         *,
         max_output_tokens: int,
+        task: str = "general",
     ) -> dict:
         payload = {
-            "model": settings.groq_model,
+            "model": settings.model_for("groq", task),
+            "reasoning_effort": {"content": "low", "research": "high", "learning": "medium", "general": "medium"}.get(task, "medium"),
             "messages": [
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": prompt},
@@ -162,11 +155,12 @@ class ModelRouterService:
         prompt: str,
         *,
         max_output_tokens: int,
+        task: str = "general",
     ) -> dict:
         client = genai.Client(api_key=settings.gemini_api_key)
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
-                model=settings.gemini_model,
+                model=settings.model_for("gemini", task),
                 contents=minimize_ai_text(prompt),
                 config=types.GenerateContentConfig(
                     system_instruction=minimize_ai_text(system_instruction),
@@ -279,7 +273,7 @@ Hard rules:
             },
             ensure_ascii=False,
         )
-        return await self.generate_json(system, prompt, max_output_tokens=900)
+        return await self.generate_json(system, prompt, max_output_tokens=900, task="content")
 
 
 class GeminiService:

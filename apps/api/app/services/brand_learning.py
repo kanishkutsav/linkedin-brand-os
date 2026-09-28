@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 import math
 from typing import Any
+import logging
 
 from google import genai
 from google.genai import types
@@ -15,6 +16,9 @@ from app.models.models import LearningEvent, LearningMemory
 from app.services.gemini_service import ModelRouterService
 from app.models.models import UserProfile
 from app.jobs.durable_queue import enqueue_learning_event
+
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -146,9 +150,13 @@ class BrandLearningService:
 
         for profile_id, profile_events in by_profile.items():
             try:
-                embeddings = await self._embed_documents(
-                    [f"event: {e.event_type} | source: {e.source_type} | text: {e.content[:6000]}" for e in profile_events]
-                )
+                try:
+                    embeddings = await self._embed_documents(
+                        [f"event: {e.event_type} | source: {e.source_type} | text: {e.content[:6000]}" for e in profile_events]
+                    )
+                except Exception as exc:
+                    embeddings = []
+                    logger.warning("Learning embeddings unavailable, continuing without them: %s", exc)
                 if embeddings and len(embeddings) == len(profile_events):
                     for event, embedding in zip(profile_events, embeddings):
                         if len(embedding) == self.EMBEDDING_DIMENSIONS:
@@ -192,6 +200,7 @@ Return:
                     system,
                     extraction_prompt,
                     max_output_tokens=1800,
+                    task="learning",
                 )
                 memories = extracted.get("memories") or []
                 memory_texts: list[str] = []
@@ -221,7 +230,11 @@ Return:
                         }
                     )
 
-                memory_embeddings = await self._embed_documents(memory_texts)
+                try:
+                    memory_embeddings = await self._embed_documents(memory_texts)
+                except Exception as exc:
+                    memory_embeddings = []
+                    logger.warning("Learning memory embeddings unavailable, keeping structured memories: %s", exc)
                 for index, row in enumerate(memory_rows):
                     existing = await self.session.execute(
                         select(LearningMemory).where(
