@@ -909,7 +909,7 @@ async def brand_status(
 ):
     service = BrandIntelligenceService(session)
     profile = await AuthService.get_or_create_profile(session, current_user)
-    memory = await service.get_memory(profile.id)
+    memory = await service.ensure_profile_memory(profile.id)
     posts = await service.get_posts(profile.id, limit=100)
     profile_complete = bool(
         profile.professional_title and profile.professional_title.strip()

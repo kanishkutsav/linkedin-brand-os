@@ -77,6 +77,8 @@ export default function Home() {
   const [linkedin, setLinkedin] = useState<LinkedInStatus>({ connected: false });
   const linkedinSyncAttemptedToken = useRef<string | null>(null);
   const [brand, setBrand] = useState<BrandStatus>({ ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 });
+  const [brandStatusLoaded, setBrandStatusLoaded] = useState(false);
+  const [brandStatusError, setBrandStatusError] = useState<string | null>(null);
   const [brandTitle, setBrandTitle] = useState('');
   const [brandIndustry, setBrandIndustry] = useState('');
   const [brandExperienceYears, setBrandExperienceYears] = useState<number | ''>('');
@@ -325,23 +327,45 @@ useEffect(() => {
     if (!authToken) return;
     setLoading(true);
     setBrandLoading(true);
+    setBrandStatusLoaded(false);
+    setBrandStatusError(null);
     try {
       const profilePromise = apiFetch(`${API_BASE}/api/auth/me`, { headers: headers(authToken) });
       const approvalsPromise = apiFetch(`${API_BASE}/api/dashboard/approvals`, { headers: headers(authToken) });
       const linkedinPromise = apiFetch(`${API_BASE}/api/linkedin/status`, { headers: headers(authToken) });
       const brandPromise = apiFetch(`${API_BASE}/api/brand/status`, { headers: headers(authToken) });
 
-      const [profileRes, approvalsRes] = await Promise.all([profilePromise, approvalsPromise]);
-      if (profileRes.status === 401 || approvalsRes.status === 401) {
+      const [profileSettled, approvalsSettled] = await Promise.allSettled([profilePromise, approvalsPromise]);
+      if (profileSettled.status !== 'fulfilled') {
+        throw new Error('Unable to verify your session. Please refresh and try again.');
+      }
+      const profileRes = profileSettled.value;
+      if (profileRes.status === 401) {
         setToken(null);
         setQueue([]);
         setLinkedin({ connected: false });
         throw new Error('Your session expired. Please sign in with LinkedIn again.');
       }
-      if (!profileRes.ok || !approvalsRes.ok) throw new Error('Unable to load dashboard data.');
+      if (!profileRes.ok) throw new Error('Unable to load your account. Please refresh and try again.');
 
       const profileJson = await profileRes.json();
-      const approvalsJson = await approvalsRes.json();
+      let approvalsJson: any = { pending_approvals: [], counts: {} };
+      if (approvalsSettled.status === 'fulfilled') {
+        const approvalsRes = approvalsSettled.value;
+        if (approvalsRes.status === 401) {
+          setToken(null);
+          setQueue([]);
+          setLinkedin({ connected: false });
+          throw new Error('Your session expired. Please sign in with LinkedIn again.');
+        }
+        if (approvalsRes.ok) {
+          approvalsJson = await approvalsRes.json();
+        } else {
+          setNotice('Dashboard activity is temporarily unavailable. Your account is still loaded.');
+        }
+      } else {
+        setNotice('Dashboard activity is temporarily unavailable. Your account is still loaded.');
+      }
       setProfile({
         display_name: profileJson.display_name || profileJson.name || '',
         role: profileJson.role || 'owner',
@@ -382,12 +406,23 @@ useEffect(() => {
 
       setLoading(false);
 
-      void Promise.all([linkedinPromise, brandPromise]).then(async ([linkedinRes, brandRes]) => {
-        const linkedinJson = linkedinRes.ok ? await linkedinRes.json() : { connected: false };
-        setLinkedin(linkedinJson);
-        const brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
+      void Promise.allSettled([linkedinPromise, brandPromise]).then(async ([linkedinResult, brandResult]) => {
+        const linkedinJson = linkedinResult.status === 'fulfilled' && linkedinResult.value.ok
+          ? await linkedinResult.value.json()
+          : null;
+        if (linkedinJson) setLinkedin(linkedinJson);
+
+        if (brandResult.status !== 'fulfilled' || !brandResult.value.ok) {
+          setBrandStatusError('Brand DNA status is temporarily unavailable. Your saved Brand DNA has not been changed.');
+          setBrandStatusLoaded(true);
+          return;
+        }
+
+        const brandJson = await brandResult.value.json();
         setBrand(brandJson);
-        const resolvedPicture = linkedinJson.picture_url || brandJson.linkedin_profile?.picture_url || null;
+        setBrandStatusError(null);
+        setBrandStatusLoaded(true);
+        const resolvedPicture = linkedinJson?.picture_url || brandJson.linkedin_profile?.picture_url || null;
         if (resolvedPicture) {
           setProfile((current) => ({ ...current, picture_url: current.picture_url || resolvedPicture }));
         }
@@ -443,6 +478,8 @@ useEffect(() => {
           }).catch(() => undefined);
         }
       }).catch(() => {
+        setBrandStatusError('Brand DNA status is temporarily unavailable. Your saved Brand DNA has not been changed.');
+        setBrandStatusLoaded(true);
         // Supplemental identity/Brand DNA data is non-blocking.
       }).finally(() => {
         setBrandLoading(false);
@@ -683,7 +720,9 @@ const loadAdminOverview = async () => {
   };
   const go = (next: Tab) => {
     setMoreOpen(false);
-    if (!brand.ready && next !== 'Brand DNA') {
+    // A failed/unfinished Brand DNA status request must never be interpreted as
+    // "not initialized". The backend remains the authority for protected actions.
+    if (brandStatusLoaded && !brandStatusError && !brand.ready && next !== 'Brand DNA') {
       setTab('Brand DNA');
       persistTab('Brand DNA');
       setNotice('Before using the workspace, complete your Brand DNA setup once.');
@@ -696,7 +735,7 @@ const loadAdminOverview = async () => {
   };
 
   const requireBrand = (actionLabel: string) => {
-    if (brand.ready) return true;
+    if (brand.ready || brandStatusError || !brandStatusLoaded) return true;
     go('Brand DNA');
     setError('Brand DNA is not set up yet. Before ' + actionLabel + ', complete the suggested Brand DNA details. Previous LinkedIn posts are optional and can be added later to improve voice calibration.');
     return false;
