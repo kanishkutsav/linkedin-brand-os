@@ -34,7 +34,7 @@ type BrandStatus = {
   ready: boolean; status: string; source_post_count: number; current_post_count?: number;
   continuous_learning?: boolean; historical_import_optional?: boolean; brand_bootstrap_completed?: boolean; last_updated?: string | null;
   summary?: string | null;
-  profile?: { display_name?: string; professional_title?: string | null; industry?: string | null; experience_years?: number | null; tone?: string | null };
+  profile?: { display_name?: string; professional_title?: string | null; industry?: string | null; experience_years?: number | null; job_location?: string | null; tone?: string | null };
   linkedin_profile?: { connected?: boolean; headline?: string | null; picture_url?: string | null; locale?: string | null; vanity_name?: string | null };
 };
 type Opportunity = {
@@ -83,6 +83,7 @@ export default function Home() {
   const [brandTitle, setBrandTitle] = useState('');
   const [brandIndustry, setBrandIndustry] = useState('');
   const [brandExperienceYears, setBrandExperienceYears] = useState<number | ''>('');
+  const [brandLocation, setBrandLocation] = useState('');
   const [brandTone, setBrandTone] = useState('');
   const [historicalPostEntries, setHistoricalPostEntries] = useState<string[]>([]);
   const [brandEditing, setBrandEditing] = useState(false);
@@ -455,7 +456,8 @@ useEffect(() => {
         const p = brandJson.profile || {};
         setBrandTitle(p.professional_title || '');
         setBrandIndustry(p.industry || '');
-        setBrandExperienceYears(typeof p.experience_years === 'number' ? p.experience_years : '');
+        setBrandExperienceYears(typeof p.experience_years === 'number' ? Math.round(p.experience_years) : '');
+        setBrandLocation(p.job_location || '');
         setBrandTone(p.tone || '');
 
         const sourcePosts = (brandJson.source_posts || [])
@@ -473,7 +475,8 @@ useEffect(() => {
             const bootstrapProfile = bootstrapJson.profile || {};
             if (bootstrapProfile.professional_title !== undefined) setBrandTitle(bootstrapProfile.professional_title || '');
             if (bootstrapProfile.industry !== undefined) setBrandIndustry(bootstrapProfile.industry || '');
-            if (bootstrapProfile.experience_years !== undefined) setBrandExperienceYears(typeof bootstrapProfile.experience_years === 'number' ? bootstrapProfile.experience_years : '');
+            if (bootstrapProfile.experience_years !== undefined) setBrandExperienceYears(typeof bootstrapProfile.experience_years === 'number' ? Math.round(bootstrapProfile.experience_years) : '');
+            if (bootstrapProfile.job_location !== undefined) setBrandLocation(bootstrapProfile.job_location || '');
             if (bootstrapProfile.tone !== undefined) setBrandTone(bootstrapProfile.tone || '');
             if (bootstrapJson.brand_memory) setBrand({ ...bootstrapJson.brand_memory, ready: bootstrapJson.ready === true });
           }).catch(() => undefined);
@@ -908,7 +911,8 @@ useEffect(() => {
         professional_title: title,
         industry,
         tone,
-        experience_years: experience,
+        experience_years: typeof experience === 'number' ? Math.round(experience) : null,
+        job_location: brandLocation.trim() || null,
         posts: blocks.map((body) => ({ body })),
       };
 
@@ -1140,6 +1144,8 @@ useEffect(() => {
               setBrandIndustry={setBrandIndustry}
               brandExperienceYears={brandExperienceYears}
               setBrandExperienceYears={setBrandExperienceYears}
+              brandLocation={brandLocation}
+              setBrandLocation={setBrandLocation}
               brandTone={brandTone}
               setBrandTone={setBrandTone}
               posts={historicalPostEntries}
@@ -1802,7 +1808,7 @@ function AnalyticsView({ loading, analytics }: { loading: boolean; analytics: an
 function SettingsView(props: any) {
   const {
     brand, profile, brandTitle, setBrandTitle, brandIndustry, setBrandIndustry,
-    brandExperienceYears, setBrandExperienceYears, brandTone, setBrandTone,
+    brandExperienceYears, setBrandExperienceYears, brandLocation, setBrandLocation, brandTone, setBrandTone,
     posts, updatePost, addPost, removePost, building, onBuild, linkedin, onConnect,
     editing, setEditing, onCancel, learningLoading = false, personalThoughts = [], onDeletePersonalThoughts,
     expandedThoughtId, setExpandedThoughtId, selectedThoughtIds = [], setSelectedThoughtIds,
@@ -1810,7 +1816,7 @@ function SettingsView(props: any) {
   } = props;
 
   const count = posts.filter((x: string) => x.trim()).length;
-  const experienceValue = brandExperienceYears === '' ? '' : String(brandExperienceYears);
+  const experienceValue = brandExperienceYears === '' ? '' : String(Math.round(Number(brandExperienceYears)));
   const linkedinProfile = brand.linkedin_profile || {};
   const hasLinkedInProfile = Boolean(linkedinProfile.connected || linkedin.connected);
   const linkedinPicture = linkedinProfile.picture_url || '';
@@ -1899,15 +1905,25 @@ function SettingsView(props: any) {
                   type="number"
                   min="0"
                   max="100"
-                  step="0.1"
+                  step="1"
                   value={experienceValue}
                   onChange={(e) => {
                     const raw = e.target.value;
-                    setBrandExperienceYears(raw === '' ? '' : Number(raw));
+                    setBrandExperienceYears(raw === '' ? '' : Math.round(Number(raw)));
                   }}
-                  placeholder="e.g. 8.5"
+                  placeholder="e.g. 8"
                 />
-                <span className="form-help">Leave blank if you do not want to add it yet.</span>
+                <span className="form-help">Use whole years. If a decimal is entered, it is rounded to the nearest whole year.</span>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Job search location <span style={{ fontWeight: 500, color: '#8a98ab' }}>(optional)</span></label>
+                <input
+                  className="input"
+                  value={brandLocation}
+                  onChange={(e) => setBrandLocation(e.target.value)}
+                  placeholder="e.g. Hyderabad, Bengaluru, Remote"
+                />
+                <span className="form-help">Used for Jobs. If blank, Suvacya falls back to your network-detected location.</span>
               </div>
             </div>
 
@@ -1966,6 +1982,7 @@ function SettingsView(props: any) {
                 ['Industry', brandIndustry],
                 ['Desired tone', brandTone],
                 ['Years of work experience', experienceValue ? experienceValue + ' years' : 'Optional / not provided'],
+                ['Job search location', brandLocation || 'Optional / uses network location'],
               ].map(([label, value]) => (
                 <div className="form-group" key={label as string}>
                   <span className="form-label">{label}</span>
@@ -2004,7 +2021,8 @@ function SettingsView(props: any) {
               <div className="flow-step"><BrainCircuit size={15} color="#1769e0"/><b>Professional title</b><span>{brand.profile?.professional_title || 'Not set'}</span></div>
               <div className="flow-step"><Target size={15} color="#1769e0"/><b>Industry</b><span>{brand.profile?.industry || 'Not set'}</span></div>
               <div className="flow-step"><Sparkles size={15} color="#1769e0"/><b>Voice</b><span>{brand.profile?.tone || 'Not set'}</span></div>
-              <div className="flow-step"><Activity size={15} color="#1769e0"/><b>Experience</b><span>{brand.profile?.experience_years != null ? brand.profile.experience_years + ' years' : 'Optional / not provided'} · {brand.current_post_count ?? brand.source_post_count} signals</span></div>
+              <div className="flow-step"><Activity size={15} color="#1769e0"/><b>Experience</b><span>{brand.profile?.experience_years != null ? Math.round(brand.profile.experience_years) + ' years' : 'Optional / not provided'} · {brand.current_post_count ?? brand.source_post_count} signals</span></div>
+              <div className="flow-step"><Target size={15} color="#1769e0"/><b>Job search location</b><span>{brand.profile?.job_location || 'Network location fallback'}</span></div>
             </div>
           </section>
         </div>
