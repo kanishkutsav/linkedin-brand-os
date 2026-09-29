@@ -119,6 +119,8 @@ async def lifespan(app: FastAPI):
             })
             if "experience_years" not in columns:
                 await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN experience_years FLOAT"))
+            if "job_location" not in columns:
+                await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN job_location VARCHAR(200)"))
             if "brand_bootstrap_completed" not in columns:
                 await conn.execute(text("ALTER TABLE user_profiles ADD COLUMN brand_bootstrap_completed BOOLEAN NOT NULL DEFAULT FALSE"))
 
@@ -317,6 +319,7 @@ class ProfileRequest(BaseModel):
     industry: str
     tone: str
     experience_years: float = Field(ge=0, le=100)
+    job_location: str | None = Field(default=None, max_length=200)
 
 
 class BrandOnboardingPost(BaseModel):
@@ -336,6 +339,7 @@ class BrandOnboardingRequest(BaseModel):
     industry: str = ""
     tone: str = ""
     experience_years: float | None = Field(default=None, ge=0, le=100)
+    job_location: str | None = Field(default=None, max_length=200)
     posts: list[BrandOnboardingPost] = Field(default_factory=list)
 
 
@@ -401,7 +405,11 @@ async def _job_search_inputs(request: Request, req: JobSearchRequest, session: A
         return title, req.experience, {**ip_location, "city": location, "source": "manual"}
     title = (profile.professional_title or "").strip()
     if not title: raise HTTPException(status_code=422, detail="Complete your Brand DNA with a target job title before searching jobs.")
-    return title, profile.experience_years, ip_location
+    experience = int(float(profile.experience_years) + 0.5) if profile.experience_years is not None else None
+    saved_location = (profile.job_location or "").strip()
+    if saved_location:
+        return title, experience, {**ip_location, "city": saved_location, "source": "brand_dna"}
+    return title, experience, ip_location
 
 
 @app.post("/api/jobs/search")
@@ -814,7 +822,8 @@ async def get_profile(
         "display_name": profile.display_name,
         "professional_title": profile.professional_title,
         "industry": profile.industry,
-        "experience_years": profile.experience_years,
+        "experience_years": round(profile.experience_years) if profile.experience_years is not None else None,
+        "job_location": profile.job_location,
         "tone": profile.tone,
         "role": profile.role or "owner",
     }
@@ -861,7 +870,8 @@ async def brand_status(
             "display_name": profile.display_name if profile else "User",
             "professional_title": profile.professional_title if profile else None,
             "industry": profile.industry if profile else None,
-            "experience_years": profile.experience_years if profile else None,
+            "experience_years": round(profile.experience_years) if profile and profile.experience_years is not None else None,
+            "job_location": profile.job_location if profile else None,
             "tone": profile.tone if profile else None,
         },
         "linkedin_profile": {
@@ -936,7 +946,8 @@ async def brand_bootstrap(
                 "display_name": profile.display_name,
                 "professional_title": profile.professional_title,
                 "industry": profile.industry,
-                "experience_years": profile.experience_years,
+                "experience_years": round(profile.experience_years) if profile.experience_years is not None else None,
+                "job_location": profile.job_location,
                 "tone": profile.tone,
             },
         }
@@ -996,7 +1007,8 @@ Rules:
             "display_name": profile.display_name,
             "professional_title": profile.professional_title,
             "industry": profile.industry,
-            "experience_years": profile.experience_years,
+            "experience_years": round(profile.experience_years) if profile.experience_years is not None else None,
+            "job_location": profile.job_location,
             "tone": profile.tone,
         },
         "linkedin_profile": {
@@ -1060,7 +1072,9 @@ async def brand_onboard(
     if req.industry.strip():
         profile.industry = req.industry.strip()[:200]
     if req.experience_years is not None:
-        profile.experience_years = float(req.experience_years)
+        profile.experience_years = float(int(float(req.experience_years) + 0.5))
+    if req.job_location is not None:
+        profile.job_location = req.job_location.strip()[:200] or None
     if req.tone.strip():
         profile.tone = req.tone.strip()[:200]
     profile.role = profile.role or current_user.role or "user"
