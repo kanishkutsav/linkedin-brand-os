@@ -7,7 +7,6 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "sqlite+aiosqlite:///./brand_os.db"
     emergency_stop: bool = False
-    approval_ttl_minutes: int = 60
     cors_origins: str = "http://localhost:3000"
     secret_key: str = "dev-secret-change-me"
     render_external_url: str | None = None

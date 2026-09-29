@@ -21,7 +21,6 @@ class ApprovalService:
             content_version_id=version.id,
             action_type=action_type,
             status="PENDING",
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.approval_ttl_minutes),
         )
         self.session.add(approval)
         self.session.add(AuditLog(event_type="APPROVAL_REQUESTED", actor="system", payload=f"version={version.id}"))
@@ -72,7 +71,6 @@ class ApprovalService:
             .where(
                 ContentItem.profile_id == profile_id,
                 ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED"]),
-                (ApprovalRequest.expires_at.is_(None)) | (ApprovalRequest.expires_at > datetime.now(timezone.utc)),
             )
         )
         return result.scalars().all()
@@ -157,10 +155,6 @@ class ApprovalService:
             raise ValueError("This post has already been approved and is locked.")
         if approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
             raise ValueError("Approval is not in an approvable state")
-        if approval.expires_at and approval.expires_at <= datetime.now(timezone.utc):
-            approval.status = "EXPIRED"
-            await self.session.commit()
-            raise ValueError("Approval has expired")
         version = await self.session.get(ContentVersion, approval.content_version_id)
         if not version:
             raise ValueError("Content version not found")
@@ -202,10 +196,6 @@ class ApprovalService:
         approval = await self._get_owned_approval(approval_id, profile_id)
         if not approval or approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
             raise ValueError("Approval is not editable in its current state")
-        if approval.expires_at and approval.expires_at <= datetime.now(timezone.utc):
-            approval.status = "EXPIRED"
-            await self.session.commit()
-            raise ValueError("Approval has expired")
         edited_body = (edited_body or "").strip()
         guard = run_content_guards(edited_body)
         if not guard.passed:
@@ -268,8 +258,8 @@ class ApprovalService:
         approval = await self._get_owned_approval(approval_id, profile_id)
         if not approval:
             raise ValueError("Approval not found")
-        if approval.status == "EXECUTED":
-            raise ValueError("Published content cannot be rejected from the approval workflow.")
+        if approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
+            raise ValueError("Only pending or reviewable content can be rejected.")
         approval.status = "REJECTED"
         approval.reason = reason or "Rejected by human reviewer."
         version = await self.session.get(ContentVersion, approval.content_version_id)
@@ -306,10 +296,6 @@ class ApprovalService:
         approval = await self._get_owned_approval(approval_id, profile_id)
         if not approval or approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
             raise ValueError("Approval is not regenerable in its current state")
-        if approval.expires_at and approval.expires_at <= datetime.now(timezone.utc):
-            approval.status = "EXPIRED"
-            await self.session.commit()
-            raise ValueError("Approval has expired")
         version = await self.session.get(ContentVersion, approval.content_version_id)
         if not version:
             raise ValueError("Content version not found")
@@ -446,10 +432,6 @@ class ApprovalService:
         if approval.status != "APPROVED":
             raise ValueError("Valid approved content is required")
 
-        if approval.expires_at and approval.expires_at < datetime.now(timezone.utc):
-            approval.status = "EXPIRED"
-            await self.session.commit()
-            raise ValueError("Approval has expired")
         if settings.emergency_stop:
             raise ValueError("Emergency stop is active")
         flags = (await self.session.execute(select(SystemFlag))).scalars().first()

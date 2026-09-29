@@ -144,6 +144,12 @@ async def lifespan(app: FastAPI):
             if "published_image_urn" not in approval_columns:
                 await conn.execute(text("ALTER TABLE approval_requests ADD COLUMN published_image_urn VARCHAR(255)"))
 
+            # Approval decisions are no longer time-limited. Normalize records created
+            # by the retired TTL workflow so they remain actionable, and clear the
+            # legacy timestamp without changing any user content.
+            await conn.execute(text("UPDATE approval_requests SET status = 'PENDING' WHERE status = 'EXPIRED'"))
+            await conn.execute(text("UPDATE approval_requests SET expires_at = NULL WHERE expires_at IS NOT NULL"))
+
             # Encrypt any legacy LinkedIn tokens exactly once per deployment instance.
             # New connections are encrypted before they are persisted.
             # This is deliberately best-effort for existing local test databases.
