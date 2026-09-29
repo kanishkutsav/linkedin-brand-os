@@ -117,10 +117,18 @@ export default function Home() {
   const [researchStage, setResearchStage] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
+  const researchLoadedRef = useRef(false);
+  const analyticsLoadedRef = useRef(false);
+  const learningLoadedRef = useRef(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [brandLoading, setBrandLoading] = useState(false);
+  const [researchLoading, setResearchLoading] = useState(false);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [learningLoading, setLearningLoading] = useState(false);
   const [learningStatus, setLearningStatus] = useState({ pending_events: 0, memory_count: 0 });
   const [personalThoughts, setPersonalThoughts] = useState<PersonalThought[]>([]);
   const [dashboardCounts, setDashboardCounts] = useState({
@@ -310,17 +318,18 @@ useEffect(() => {
   const fetchData = async (authToken: string | null = token) => {
     if (!authToken) return;
     setLoading(true);
+    setBrandLoading(true);
     try {
-      // Load the core workspace first. Optional panels must never block the
-      // dashboard/Brand DNA from appearing.
-      const [profileRes, approvalsRes, linkedinRes, brandRes] = await Promise.all([
-        apiFetch(`${API_BASE}/api/auth/me`, { headers: headers(authToken) }),
-        apiFetch(`${API_BASE}/api/dashboard/approvals`, { headers: headers(authToken) }),
-        apiFetch(`${API_BASE}/api/linkedin/status`, { headers: headers(authToken) }),
-        apiFetch(`${API_BASE}/api/brand/status`, { headers: headers(authToken) }),
-      ]);
+      const profilePromise = apiFetch(`${API_BASE}/api/auth/me`, { headers: headers(authToken) });
+      const approvalsPromise = apiFetch(`${API_BASE}/api/dashboard/approvals`, { headers: headers(authToken) });
+      const linkedinPromise = apiFetch(`${API_BASE}/api/linkedin/status`, { headers: headers(authToken) });
+      const brandPromise = apiFetch(`${API_BASE}/api/brand/status`, { headers: headers(authToken) });
+
+      const [profileRes, approvalsRes] = await Promise.all([profilePromise, approvalsPromise]);
       if (profileRes.status === 401 || approvalsRes.status === 401) {
-        setToken(null); setQueue([]); setLinkedin({ connected: false });
+        setToken(null);
+        setQueue([]);
+        setLinkedin({ connected: false });
         throw new Error('Your session expired. Please sign in with LinkedIn again.');
       }
       if (!profileRes.ok || !approvalsRes.ok) throw new Error('Unable to load dashboard data.');
@@ -329,77 +338,6 @@ useEffect(() => {
       const approvalsJson = await approvalsRes.json();
       setProfile({ display_name: profileJson.display_name || 'User', role: profileJson.role || 'owner' });
       if (profileJson.role === 'admin' && new URLSearchParams(window.location.search).get('admin') === '1') setTab('Admin');
-      const linkedinJson = linkedinRes.ok ? await linkedinRes.json() : { connected: false };
-      setLinkedin(linkedinJson);
-
-      let brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
-
-      setBrand(brandJson);
-
-      // Existing LinkedIn connections may predate the profile metadata fields.
-      // Make at most one best-effort refresh per authenticated session, and
-      // only when at least one of the new fields is actually missing. The API
-      // fills missing values only and never overwrites values already stored.
-      if (
-        linkedinJson.connected &&
-        linkedinJson.profile_sync_needed &&
-        linkedinSyncAttemptedToken.current !== authToken
-      ) {
-        linkedinSyncAttemptedToken.current = authToken;
-        void apiFetch(API_BASE + '/api/linkedin/profile/sync-missing', {
-          method: 'POST',
-          headers: headers(authToken),
-        }).then(async (syncRes) => {
-          if (!syncRes.ok) return;
-          const syncJson = await syncRes.json();
-          if (!syncJson.updated || !syncJson.profile) return;
-          setBrand((current) => ({
-            ...current,
-            linkedin_profile: {
-              ...(current.linkedin_profile || {}),
-              ...syncJson.profile,
-              connected: true,
-            },
-          }));
-        }).catch(() => {
-          // Missing profile metadata is optional and must never block the workspace.
-        });
-      }
-
-      const p = brandJson.profile || {};
-      setBrandTitle(p.professional_title || '');
-      setBrandIndustry(p.industry || '');
-      setBrandExperienceYears(typeof p.experience_years === 'number' ? p.experience_years : '');
-      setBrandTone(p.tone || '');
-
-      // First-time LinkedIn users get a one-time, best-effort Brand DNA
-      // bootstrap. It uses only the official profile data we already received.
-      if (linkedinJson.connected && brandJson.brand_bootstrap_completed === false) {
-        void apiFetch(`${API_BASE}/api/brand/bootstrap`, { method: 'POST', headers: headers(authToken) })
-          .then(async (bootstrapRes) => {
-            if (!bootstrapRes.ok) return;
-            const bootstrapJson = await bootstrapRes.json();
-            const bootstrapProfile = bootstrapJson.profile || {};
-            if (bootstrapProfile.professional_title !== undefined) setBrandTitle(bootstrapProfile.professional_title || '');
-            if (bootstrapProfile.industry !== undefined) setBrandIndustry(bootstrapProfile.industry || '');
-            if (bootstrapProfile.experience_years !== undefined) setBrandExperienceYears(typeof bootstrapProfile.experience_years === 'number' ? bootstrapProfile.experience_years : '');
-            if (bootstrapProfile.tone !== undefined) setBrandTone(bootstrapProfile.tone || '');
-            if (bootstrapJson.brand_memory) {
-              setBrand({ ...bootstrapJson.brand_memory, ready: bootstrapJson.ready === true });
-            }
-            await fetchData(authToken);
-          })
-          .catch(() => {
-            // Bootstrap is optional. Never block the core workspace if it fails.
-          });
-      }
-
-      // Brand status now carries the frozen source-post snapshot, so Brand DNA
-      // does not depend on a second request just to display the user's posts.
-      const sourcePosts = (brandJson.source_posts || [])
-        .map((item: any) => item.body)
-        .filter((body: any) => typeof body === 'string' && body.trim());
-      setHistoricalPostEntries(sourcePosts.slice(0, 10));
 
       const nextQueue: ApprovalItem[] = (approvalsJson.pending_approvals || []).map((item: any) => ({
         id: item.id, status: item.status, action_type: item.action_type, reason: item.reason, content: item.content || '',
@@ -418,10 +356,6 @@ useEffect(() => {
         pending_filter: pendingFilterCount,
       });
 
-      // On the initial workspace load, take the user to actionable work first:
-      // Pending has priority; if it is empty, show Needs review; if both are
-      // empty, keep the normal Pending empty state. Do not re-run this fallback
-      // after actions because the user may have intentionally changed filters.
       if (!initialReviewFilterResolved.current) {
         setStatusFilter(pendingFilterCount > 0 ? 'PENDING' : needsReviewCount > 0 ? 'NEEDS_REVIEW' : 'PENDING');
         initialReviewFilterResolved.current = true;
@@ -430,31 +364,134 @@ useEffect(() => {
 
       setLoading(false);
 
-      // Optional workspace panels load independently. A slow research feed or
-      // analytics query must not blank/freeze the main workspace.
-      void Promise.all([
-        apiFetch(`${API_BASE}/api/research/opportunities`, { headers: headers(authToken) }),
-        apiFetch(`${API_BASE}/api/analytics/overview`, { headers: headers(authToken) }),
-        apiFetch(`${API_BASE}/api/learning/status`, { headers: headers(authToken) }),
-        apiFetch(`${API_BASE}/api/learning/thoughts`, { headers: headers(authToken) }),
-       ]).then(async ([opportunityRes, analyticsRes, learningRes, thoughtsRes]) => {
-        const opportunityJson = opportunityRes.ok ? await opportunityRes.json() : { opportunities: [] };
-        setOpportunities(opportunityJson.opportunities || []);
-        const analyticsJson = analyticsRes.ok ? await analyticsRes.json() : null;
-        setAnalytics(analyticsJson);
-        if (learningRes.ok) setLearningStatus(await learningRes.json());
-        if (thoughtsRes.ok) {
-          const thoughtsJson = await thoughtsRes.json();
-          setPersonalThoughts(thoughtsJson.thoughts || []);
+      void Promise.all([linkedinPromise, brandPromise]).then(async ([linkedinRes, brandRes]) => {
+        const linkedinJson = linkedinRes.ok ? await linkedinRes.json() : { connected: false };
+        setLinkedin(linkedinJson);
+        const brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
+        setBrand(brandJson);
+
+        if (
+          linkedinJson.connected &&
+          linkedinJson.profile_sync_needed &&
+          linkedinSyncAttemptedToken.current !== authToken
+        ) {
+          linkedinSyncAttemptedToken.current = authToken;
+          void apiFetch(`${API_BASE}/api/linkedin/profile/sync-missing`, {
+            method: 'POST',
+            headers: headers(authToken),
+          }).then(async (syncRes) => {
+            if (!syncRes.ok) return;
+            const syncJson = await syncRes.json();
+            if (!syncJson.updated || !syncJson.profile) return;
+            setBrand((current) => ({
+              ...current,
+              linkedin_profile: {
+                ...(current.linkedin_profile || {}),
+                ...syncJson.profile,
+                connected: true,
+              },
+            }));
+          }).catch(() => undefined);
+        }
+
+        const p = brandJson.profile || {};
+        setBrandTitle(p.professional_title || '');
+        setBrandIndustry(p.industry || '');
+        setBrandExperienceYears(typeof p.experience_years === 'number' ? p.experience_years : '');
+        setBrandTone(p.tone || '');
+
+        const sourcePosts = (brandJson.source_posts || [])
+          .map((item: any) => item.body)
+          .filter((body: any) => typeof body === 'string' && body.trim());
+        setHistoricalPostEntries(sourcePosts.slice(0, 10));
+
+        if (linkedinJson.connected && brandJson.brand_bootstrap_completed === false) {
+          void apiFetch(`${API_BASE}/api/brand/bootstrap`, {
+            method: 'POST',
+            headers: headers(authToken),
+          }).then(async (bootstrapRes) => {
+            if (!bootstrapRes.ok) return;
+            const bootstrapJson = await bootstrapRes.json();
+            const bootstrapProfile = bootstrapJson.profile || {};
+            if (bootstrapProfile.professional_title !== undefined) setBrandTitle(bootstrapProfile.professional_title || '');
+            if (bootstrapProfile.industry !== undefined) setBrandIndustry(bootstrapProfile.industry || '');
+            if (bootstrapProfile.experience_years !== undefined) setBrandExperienceYears(typeof bootstrapProfile.experience_years === 'number' ? bootstrapProfile.experience_years : '');
+            if (bootstrapProfile.tone !== undefined) setBrandTone(bootstrapProfile.tone || '');
+            if (bootstrapJson.brand_memory) setBrand({ ...bootstrapJson.brand_memory, ready: bootstrapJson.ready === true });
+          }).catch(() => undefined);
         }
       }).catch(() => {
-        // Optional panels are allowed to fail without affecting the core workspace.
+        // Supplemental identity/Brand DNA data is non-blocking.
+      }).finally(() => {
+        setBrandLoading(false);
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load dashboard data');
       setLoading(false);
+      setBrandLoading(false);
     }
   };
+
+  const loadResearchData = async (force = false) => {
+    if (!token || (researchLoadedRef.current && !force)) return;
+    setResearchLoading(true);
+    try {
+      const response = await apiFetch(`${API_BASE}/api/research/opportunities`, { headers: headers() });
+      if (!response.ok) throw new Error('Failed to load. Please try again.');
+      const data = await response.json();
+      setOpportunities(data.opportunities || []);
+      researchLoadedRef.current = true;
+    } catch (e) {
+      setError('Failed to load. Please try again.');
+    } finally {
+      setResearchLoading(false);
+    }
+  };
+
+  const loadAnalyticsData = async (force = false) => {
+    if (!token || (analyticsLoadedRef.current && !force)) return;
+    setAnalyticsLoading(true);
+    try {
+      const response = await apiFetch(`${API_BASE}/api/analytics/overview`, { headers: headers() });
+      if (!response.ok) throw new Error('Analytics data could not be loaded.');
+      setAnalytics(await response.json());
+      analyticsLoadedRef.current = true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Analytics data could not be loaded.');
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  const loadLearningData = async (force = false) => {
+    if (!token || (learningLoadedRef.current && !force)) return;
+    setLearningLoading(true);
+    try {
+      const [learningRes, thoughtsRes] = await Promise.all([
+        apiFetch(`${API_BASE}/api/learning/status`, { headers: headers() }),
+        apiFetch(`${API_BASE}/api/learning/thoughts`, { headers: headers() }),
+      ]);
+      if (learningRes.ok) setLearningStatus(await learningRes.json());
+      if (thoughtsRes.ok) {
+        const thoughtsJson = await thoughtsRes.json();
+        setPersonalThoughts(thoughtsJson.thoughts || []);
+      }
+      if (!learningRes.ok && !thoughtsRes.ok) throw new Error('Learning data could not be loaded.');
+      learningLoadedRef.current = true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Learning data could not be loaded.');
+    } finally {
+      setLearningLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!token) return;
+    if (tab === 'Research') void loadResearchData();
+    if (tab === 'Analytics') void loadAnalyticsData();
+    if (tab === 'Content Studio' || tab === 'Brand DNA') void loadLearningData();
+  }, [tab, token]);
+
   useEffect(() => { fetchData(token); }, [token]);
   const loadJobs = async (requestedQuery?: string) => {
     if (!token) return;
