@@ -12,7 +12,22 @@ def _clean_text(value: Any, limit: int=6000)->str:
     text=html.unescape(str(value or "")); text=re.sub(r"<[^>]+>"," ",text); return re.sub(r"\s+"," ",text).strip()[:limit]
 def _normalize_title(value: Any)->str: return re.sub(r"[^a-z0-9]+"," ",_clean_text(value,300).lower()).strip()
 def _title_matches(job_title:str, requested_title:str)->bool:
-    requested,actual=_normalize_title(requested_title),_normalize_title(job_title); return bool(requested and actual and requested in actual)
+    requested, actual = _normalize_title(requested_title), _normalize_title(job_title)
+    if not requested or not actual:
+        return False
+    if requested in actual:
+        return True
+    requested_tokens, actual_tokens = requested.split(), actual.split()
+    if len(requested_tokens) == 1:
+        return requested_tokens[0] in actual_tokens
+    if not all(token in actual_tokens for token in requested_tokens):
+        return False
+    requested_pairs = {
+        (requested_tokens[index], requested_tokens[index + 1])
+        for index in range(len(requested_tokens) - 1)
+    }
+    actual_pairs = set(zip(actual_tokens, actual_tokens[1:]))
+    return bool(requested_pairs & actual_pairs)
 def _experience_matches(min_years:Any,max_years:Any,requested:float|None)->bool:
     if requested is None:return True
     try: minimum=float(min_years) if min_years not in (None,"") else None; maximum=float(max_years) if max_years not in (None,"") else None
@@ -65,6 +80,8 @@ def _filter_and_dedupe(jobs:list[dict[str,Any]],title:str,experience:float|None)
     return output
 async def search_jobs_apify(*,title:str,experience:float|None,location:dict[str,str],page:int=1,limit:int=20)->dict[str,Any]:
     requested_limit,requested_page=min(max(int(limit),1),_SOURCE_LIMIT),max(int(page),1)
+    if experience is not None:
+        experience = max(0, int(float(experience) + 0.5))
     async def call(actor,payload):
         try:return await _call_actor(actor,payload)
         except Exception:return []
