@@ -117,7 +117,6 @@ export default function Home() {
   const [researchStage, setResearchStage] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const researchLoadedRef = useRef(false);
   const analyticsLoadedRef = useRef(false);
   const learningLoadedRef = useRef(false);
