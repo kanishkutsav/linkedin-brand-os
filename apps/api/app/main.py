@@ -378,6 +378,19 @@ class FeedbackRequest(BaseModel):
     context: str | None = Field(default=None, max_length=1000)
 
 
+class AdminUserCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(min_length=3, max_length=255)
+    display_name: str | None = Field(default=None, max_length=150)
+
+
+class AdminUserUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    active: bool | None = None
+    whitelisted: bool | None = None
+    display_name: str | None = Field(default=None, max_length=150)
+
+
 class FeedbackStatusRequest(BaseModel):
     status: str
     priority: str | None = None
@@ -467,6 +480,147 @@ async def admin_users(session: AsyncSession = Depends(get_session), current_user
         "whitelisted": u.is_whitelisted,
         "created_at": u.created_at,
     } for u in users]}
+
+
+@app.post("/api/admin/users")
+async def admin_create_user(
+    req: AdminUserCreateRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin")),
+):
+    email = AuthService.normalize_email(req.email)
+    if not email:
+        raise HTTPException(status_code=400, detail="A valid email address is required.")
+
+    existing = (await session.execute(select(AuthUser).where(AuthUser.email == email))).scalar_one_or_none()
+    if existing is not None:
+        existing.is_active = True
+        existing.is_whitelisted = True
+        if req.display_name and req.display_name.strip():
+            existing.display_name = req.display_name.strip()
+        user = existing
+        action = "USER_REACTIVATED"
+    else:
+        user = AuthUser(
+            email=email,
+            display_name=(req.display_name or "").strip() or email.split("@", 1)[0],
+            role="user",
+            is_active=True,
+            is_whitelisted=True,
+        )
+        session.add(user)
+        await session.flush()
+        action = "USER_CREATED"
+
+    session.add(AuditLog(
+        event_type=action,
+        actor=str(current_user.id),
+        payload=json.dumps({"user_id": user.id, "email": user.email}),
+    ))
+    await session.commit()
+    await session.refresh(user)
+    return {
+        "id": user.id,
+        "email": user.email,
+        "display_name": user.display_name,
+        "role": user.role,
+        "active": user.is_active,
+        "whitelisted": user.is_whitelisted,
+        "created_at": user.created_at,
+    }
+
+
+@app.patch("/api/admin/users/{user_id}")
+async def admin_update_user(
+    user_id: int,
+    req: AdminUserUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin")),
+):
+    user = await session.get(AuthUser, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    if user.id == int(current_user.id):
+        if req.active is False or req.whitelisted is False:
+            raise HTTPException(status_code=400, detail="You cannot deactivate or remove yourself from the whitelist.")
+
+    changes = {}
+    if req.active is not None:
+        user.is_active = req.active
+        changes["active"] = req.active
+    if req.whitelisted is not None:
+        user.is_whitelisted = req.whitelisted
+        changes["whitelisted"] = req.whitelisted
+    if req.display_name is not None:
+        user.display_name = req.display_name.strip() or user.display_name
+
+    if not changes:
+        return {
+            "id": user.id,
+            "email": user.email,
+            "display_name": user.display_name,
+            "role": user.role,
+            "active": user.is_active,
+            "whitelisted": user.is_whitelisted,
+            "created_at": user.created_at,
+        }
+
+    if user.is_active and user.is_whitelisted:
+        audit_event = "USER_UPDATED"
+    elif not user.is_active and not user.is_whitelisted:
+        audit_event = "USER_REMOVED"
+    elif not user.is_active:
+        audit_event = "USER_DEACTIVATED"
+    else:
+        audit_event = "USER_UNWHITELISTED"
+
+    # Invalidate existing sessions as soon as access is disabled.
+    if not user.is_active or not user.is_whitelisted:
+        await session.execute(delete(AuthSession).where(AuthSession.user_id == user.id))
+
+    session.add(AuditLog(
+        event_type=audit_event,
+        actor=str(current_user.id),
+        payload=json.dumps({"user_id": user.id, "email": user.email, **changes}),
+    ))
+    await session.commit()
+    await session.refresh(user)
+    return {
+        "id": user.id,
+        "email": user.email,
+        "display_name": user.display_name,
+        "role": user.role,
+        "active": user.is_active,
+        "whitelisted": user.is_whitelisted,
+        "created_at": user.created_at,
+    }
+
+
+@app.delete("/api/admin/users/{user_id}")
+async def admin_remove_user(
+    user_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin")),
+):
+    user = await session.get(AuthUser, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if user.id == int(current_user.id):
+        raise HTTPException(status_code=400, detail="You cannot remove your own account from the Admin directory.")
+
+    # Keep historical/audit data intact. "Remove" revokes access and whitelist
+    # status rather than hard-deleting the account and breaking foreign keys.
+    user.is_active = False
+    user.is_whitelisted = False
+    await session.execute(delete(AuthSession).where(AuthSession.user_id == user.id))
+    session.add(AuditLog(
+        event_type="USER_REMOVED",
+        actor=str(current_user.id),
+        payload=json.dumps({"user_id": user.id, "email": user.email}),
+    ))
+    await session.commit()
+    return {"id": user.id, "active": False, "whitelisted": False}
 
 
 @app.get("/api/admin/failures")
