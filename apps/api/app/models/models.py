@@ -37,6 +37,7 @@ class UserProfile(Base):
     professional_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     industry: Mapped[str | None] = mapped_column(String(200), nullable=True)
     experience_years: Mapped[float | None] = mapped_column(Float, nullable=True)
+    job_location: Mapped[str | None] = mapped_column(String(200), nullable=True)
     tone: Mapped[str | None] = mapped_column(String(200), nullable=True)
     role: Mapped[str | None] = mapped_column(String(50), nullable=True, default="owner")
     brand_bootstrap_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
