@@ -166,12 +166,9 @@ async def lifespan(app: FastAPI):
             tables=[ObservabilityEvent.__table__, UserFeedback.__table__, JobSearchCache.__table__],
             checkfirst=True,
         ))
-        auth_users_exists = await conn.run_sync(
-            lambda sync_conn: inspect(sync_conn).has_table("auth_users")
-        )
-        if auth_users_exists:
-            await conn.execute(text("UPDATE auth_users SET role = 'user' WHERE role = 'admin' AND lower(email) != lower(:email)"), {"email": settings.admin_email})
-            await conn.execute(text("UPDATE auth_users SET role = 'admin' WHERE lower(email) = lower(:email)"), {"email": settings.admin_email})
+        # Roles are application data and must remain under explicit account
+        # administration. Never rewrite auth_users.role during application
+        # startup: doing so can silently undo an intentional role change.
 
     try:
         async with SessionLocal() as security_session:
