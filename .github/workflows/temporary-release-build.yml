@@ -1,9 +1,9 @@
 name: Temporary release build check
 
 on:
-  push:
+  pull_request:
     branches:
-      - release/loading-skeleton-resilience-20260929
+      - master
 
 jobs:
   build:
