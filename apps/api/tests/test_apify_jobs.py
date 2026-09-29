@@ -2,7 +2,10 @@ from app.services.apify_jobs import _experience_matches, _parse_experience_text,
 
 def test_title_matching():
     assert _title_matches("Senior Product Manager", "Product Manager")
+    assert _title_matches("Program Manager - AI", "AI Program Manager")
+    assert _title_matches("AI Technical Program Manager", "AI Program Manager")
     assert not _title_matches("Product Marketing Manager", "Product Manager")
+    assert not _title_matches("AI Product Manager", "AI Program Manager")
 
 def test_experience():
     assert _experience_matches(3, 8, 5)
