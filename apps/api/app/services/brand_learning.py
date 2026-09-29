@@ -378,53 +378,66 @@ Return:
         if query and query.strip():
             try:
                 embedding = await self._embed_query(query)
-            except Exception:
+            except Exception as exc:
                 embedding = []
+                logger.warning("Learning query embedding unavailable, continuing without semantic matches: %s", exc)
+
             if len(embedding) == self.EMBEDDING_DIMENSIONS:
                 literal = _vector_literal(embedding)
-                event_rows = await self.session.execute(
-                    text("""
-                        select id, event_type, source_type, source_id, content, metadata_json, created_at, similarity
-                        from public.match_learning_events(
-                            :profile_id,
-                            cast(:embedding as extensions.vector(768)),
-                            :threshold,
-                            :count
+                try:
+                    # Keep the optional vector lookup isolated. Some Supabase
+                    # databases have the pgvector extension in the extensions
+                    # schema while the helper function resolves operators using
+                    # a public-only search_path. That must never break research,
+                    # content, or learning reads.
+                    async with self.session.begin_nested():
+                        event_rows = await self.session.execute(
+                            text("""
+                                select id, event_type, source_type, source_id, content, metadata_json, created_at, similarity
+                                from public.match_learning_events(
+                                    :profile_id,
+                                    cast(:embedding as extensions.vector(768)),
+                                    :threshold,
+                                    :count
+                                )
+                            """),
+                            {
+                                "profile_id": profile_id,
+                                "embedding": literal,
+                                "threshold": 0.42,
+                                "count": semantic_limit,
+                            },
                         )
-                    """),
-                    {
-                        "profile_id": profile_id,
-                        "embedding": literal,
-                        "threshold": 0.42,
-                        "count": semantic_limit,
-                    },
-                )
-                semantic_events = []
-                for row in event_rows.all():
-                    item = dict(row._mapping)
-                    semantic_events.append(_json_safe(item))
+                        semantic_events = [
+                            _json_safe(dict(row._mapping))
+                            for row in event_rows.all()
+                        ]
 
-                memory_rows = await self.session.execute(
-                    text("""
-                        select id, memory_key, memory_type, content, confidence, importance, source_count, metadata_json, updated_at, similarity
-                        from public.match_learning_memories(
-                            :profile_id,
-                            cast(:embedding as extensions.vector(768)),
-                            :threshold,
-                            :count
+                        memory_rows = await self.session.execute(
+                            text("""
+                                select id, memory_key, memory_type, content, confidence, importance, source_count, metadata_json, updated_at, similarity
+                                from public.match_learning_memories(
+                                    :profile_id,
+                                    cast(:embedding as extensions.vector(768)),
+                                    :threshold,
+                                    :count
+                                )
+                            """),
+                            {
+                                "profile_id": profile_id,
+                                "embedding": literal,
+                                "threshold": 0.42,
+                                "count": semantic_limit,
+                            },
                         )
-                    """),
-                    {
-                        "profile_id": profile_id,
-                        "embedding": literal,
-                        "threshold": 0.42,
-                        "count": semantic_limit,
-                    },
-                )
-                semantic_memories = []
-                for row in memory_rows.all():
-                    item = dict(row._mapping)
-                    semantic_memories.append(_json_safe(item))
+                        semantic_memories = [
+                            _json_safe(dict(row._mapping))
+                            for row in memory_rows.all()
+                        ]
+                except Exception as exc:
+                    logger.warning("Semantic learning lookup unavailable, continuing without semantic matches: %s", exc)
+                    semantic_events = []
+                    semantic_memories = []
 
         return {
             "memories": [
