@@ -499,16 +499,12 @@ useEffect(() => {
 
   useEffect(() => {
     if (!token) return;
+    // Load section data on demand. The previous broad background prefetch
+    // fired Research, Analytics and Learning together from the Dashboard,
+    // multiplying API/database work and contributing to connection pressure.
     if (tab === 'Research') void loadResearchData();
     if (tab === 'Analytics') void loadAnalyticsData();
     if (tab === 'Content Studio' || tab === 'Brand DNA') void loadLearningData();
-
-    const prefetchTimer = window.setTimeout(() => {
-      if (tab !== 'Research') void loadResearchData();
-      if (tab !== 'Analytics') void loadAnalyticsData();
-      if (tab !== 'Content Studio' && tab !== 'Brand DNA') void loadLearningData();
-    }, 1200);
-    return () => window.clearTimeout(prefetchTimer);
   }, [tab, token]);
 
   const persistTab = (next: Tab) => {
