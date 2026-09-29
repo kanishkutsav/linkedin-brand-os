@@ -213,6 +213,95 @@ Return:
         await self.session.refresh(memory)
         return self.serialize(memory)
 
+    async def ensure_profile_memory(self, profile_id: int) -> BrandMemory | None:
+        """Repair completed profiles whose derived BrandMemory is missing.
+
+        BrandMemory is derived state. If a user's saved profile is complete but
+        the derived record is absent, rebuild a deterministic minimal memory
+        without an LLM call so a transient analysis failure cannot force the
+        user back through onboarding.
+        """
+        profile = await self.session.get(UserProfile, profile_id)
+        if profile is None:
+            return None
+
+        profile_complete = bool(
+            profile.professional_title and profile.professional_title.strip()
+            and profile.industry and profile.industry.strip()
+            and profile.tone and profile.tone.strip()
+        )
+        if not profile_complete:
+            return await self.get_memory(profile_id)
+
+        memory = await self.get_memory(profile_id)
+        if memory is not None:
+            return memory
+
+        count_result = await self.session.execute(
+            select(func.count(HistoricalPost.id)).where(HistoricalPost.profile_id == profile_id)
+        )
+        source_post_count = int(count_result.scalar_one() or 0)
+
+        memory = BrandMemory(
+            profile_id=profile_id,
+            status="READY",
+            version=1,
+            summary=(
+                f"{profile.professional_title.strip()} in {profile.industry.strip()}. "
+                f"Writing preference: {profile.tone.strip()}."
+            ),
+            identity_json=_json({
+                "role": [profile.professional_title.strip()],
+                "industry": [profile.industry.strip()],
+            }),
+            expertise_json=_json([{
+                "area": profile.professional_title.strip(),
+                "evidence": "profile",
+                "confidence": "high",
+            }]),
+            themes_json=_json([]),
+            opinions_json=_json([]),
+            experiences_json=_json([]),
+            formats_json=_json([]),
+            patterns_json=_json({}),
+            voice_json=_json({
+                "tone": profile.tone.strip(),
+                "sentence_style": "clear and concise",
+                "technical_depth": "moderate",
+                "storytelling": "concrete",
+                "preferred_phrases": [],
+                "avoid_phrases": [],
+            }),
+            source_post_count=source_post_count,
+            initialized_at=datetime.now(timezone.utc),
+        )
+        self.session.add(memory)
+
+        voice_result = await self.session.execute(
+            select(VoiceMemory).where(VoiceMemory.profile_id == profile_id).limit(1)
+        )
+        if voice_result.scalar_one_or_none() is None:
+            self.session.add(
+                VoiceMemory(
+                    profile_id=profile_id,
+                    tone=profile.tone.strip(),
+                    sentence_style="clear and concise",
+                    preferred_phrases=_json([]),
+                    avoid_phrases=_json([]),
+                    emoji_usage="limited",
+                    technical_depth="moderate",
+                    opinion_style="grounded in observed content",
+                    storytelling_style="concrete",
+                )
+            )
+
+        if not profile.brand_bootstrap_completed:
+            profile.brand_bootstrap_completed = True
+
+        await self.session.commit()
+        await self.session.refresh(memory)
+        return memory
+
     def serialize(self, memory: BrandMemory | None) -> dict:
         if memory is None:
             return {"status": "NOT_INITIALIZED", "source_post_count": 0}
@@ -235,7 +324,7 @@ Return:
         }
 
     async def generation_context(self, profile_id: int, query: str | None = None) -> dict:
-        memory = await self.get_memory(profile_id)
+        memory = await self.ensure_profile_memory(profile_id)
         if memory is None or memory.status != "READY":
             raise ValueError("Brand Intelligence is not initialized. Complete the Brand DNA setup first.")
         profile = await self.session.get(UserProfile, profile_id)
