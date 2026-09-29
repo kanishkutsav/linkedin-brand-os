@@ -63,7 +63,6 @@ const nav = [
   ['Content Studio', FileText, 'Draft & refine'],
   ['Jobs', Briefcase, 'Job opportunities'],
   ['LinkedIn Posts', ExternalLink, 'Published posts'],
-  ['Feedback', MessageSquare, 'Share feedback'],
   ['Analytics', BarChart3, 'Performance'],
   ['Brand DNA', Settings, 'Brand DNA'],
   ['Admin', ShieldAlert, 'Operations & reliability'],
@@ -621,28 +620,6 @@ const loadAdminOverview = async () => {
     window.location.href = '/api/auth/linkedin/start?browser_nonce=' + encodeURIComponent(nonce);
   };
   const cancelBrandEdit = async () => { await fetchData(); setBrandEditing(false); };
-  const exportAccountData = async () => {
-    try {
-      const csrf = readCookie('__Host-suvacya-csrf') || readCookie('suvacya-csrf');
-      const res = await apiFetch(API_BASE + '/api/account/export', {
-        credentials: 'include',
-        headers: csrf ? { 'X-CSRF-Token': csrf } : {},
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(getApiError(data, 'Data export failed'));
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = 'suvacya-data-export.json';
-      anchor.click();
-      URL.revokeObjectURL(url);
-      setNotice('Your Suvacya data export is ready.');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Data export failed');
-    }
-  };
-
   const deleteAccount = async () => {
     const confirmation = window.prompt('This permanently deletes your Suvacya account and application data. Type DELETE to confirm.');
     if (confirmation !== 'DELETE') return;
@@ -977,7 +954,7 @@ const loadAdminOverview = async () => {
       <div className="main-shell">
         <header className="topbar">
           <div className="topbar-left">
-            <div><div className="eyebrow">Workspace / {tab}</div><div className="topbar-title">{tab === 'Dashboard' ? 'Command center' : nav.find((x) => x[0] === tab)?.[2]}</div></div>
+            <div><div className="eyebrow">Workspace / {tab}</div><div className="topbar-title">{tab === 'Dashboard' ? 'Command center' : nav.find((x) => x[0] === tab)?.[2] || (tab === 'Feedback' ? 'Share feedback' : '')}</div></div>
           </div>
           <div className="topbar-actions">
             <div className="profile-menu-wrap">
@@ -989,10 +966,8 @@ const loadAdminOverview = async () => {
                 <button onClick={() => { setProfileMenuOpen(false); connectLinkedIn(); }}><Link2 size={14}/> {linkedin.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}</button>
                 <button onClick={() => { setProfileMenuOpen(false); void fetchData(); }}><RefreshCw size={14}/> Refresh dashboard</button>
                 <button onClick={() => { setProfileMenuOpen(false); go('Feedback'); }}><MessageSquare size={14}/> Send feedback</button>
-                <button onClick={() => { setProfileMenuOpen(false); void exportAccountData(); }}><Download size={14}/> Export my data</button>
                 <a href="/privacy" onClick={() => setProfileMenuOpen(false)}><ShieldCheck size={14}/> Privacy Policy</a>
                 <a href="/terms" onClick={() => setProfileMenuOpen(false)}><FileText size={14}/> Terms</a>
-                {profile.role === 'admin' && <button onClick={() => { setProfileMenuOpen(false); go('Admin'); }}><ShieldAlert size={14}/> Admin panel</button>}
                 <button className="danger" onClick={() => { setProfileMenuOpen(false); void deleteAccount(); }}><X size={14}/> Delete account</button>
               </div>}
             </div>
@@ -2090,17 +2065,9 @@ function JobsView({ jobs, location, query, setQuery, loading, expandedId, setExp
     <section className="panel" style={{ marginTop: 16, padding: 18 }}><SkeletonBlock width={110} height={15}/><div style={{ marginTop: 10 }}><SkeletonBlock width={180} height={9}/></div><div style={{ marginTop: 14, display: 'grid', gap: 10 }}>{[1,2,3].map((item) => <div className="post-entry" key={item}><SkeletonBlock width="45%" height={13}/><div style={{ marginTop: 8 }}><SkeletonBlock width="70%" height={9}/></div><div style={{ marginTop: 12 }}><SkeletonBlock width={170} height={30} radius={8}/></div></div>)}</div></section>
   </>;
 
-  const locationLabel = location?.city && location?.country
-    ? location.city + ', ' + location.country
-    : (location?.country || 'your detected location');
-  const locationSource = location?.source === 'ip'
-    ? 'approximate IP location'
-    : location?.source === 'linkedin'
-      ? 'LinkedIn profile locale'
-      : 'configured default';
   return <>
     <div className="page-header"><div><div className="page-kicker"><Briefcase size={13}/> Career opportunities</div><h1 className="page-title">Job opportunities</h1><p className="page-description">Search openings using your professional title, experience and domain. Suvacya does not apply for jobs on your behalf.</p></div></div>
-    <section className="panel" style={{ padding: 18 }}><div style={{ display: 'flex', gap: 10, alignItems: 'center' }}><input className="input" style={{ flex: 1 }} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void onSearch(query); }} placeholder="Search a position, e.g. Product Manager" /><button className="button primary" onClick={() => void onSearch(query)} disabled={loading}><Search size={14}/>{loading ? 'Searching…' : 'Search jobs'}</button></div><div style={{ marginTop: 10, color: '#7a899d', fontSize: 11 }}>Profile context is used when the search box is empty. Matching is deterministic and does not use AI.</div><div style={{ marginTop: 9, color: '#5f6f86', fontSize: 11 }}><b>Search location:</b> {locationLabel} <span style={{ color: '#8a98ab' }}>· {locationSource}</span></div></section>
+    <section className="panel" style={{ padding: 18 }}><div style={{ display: 'flex', gap: 10, alignItems: 'center' }}><input className="input" style={{ flex: 1 }} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void onSearch(query); }} placeholder="Search a position, e.g. Product Manager" /><button className="button primary" onClick={() => void onSearch(query)} disabled={loading}><Search size={14}/>{loading ? 'Searching…' : 'Search jobs'}</button></div><div style={{ marginTop: 10, color: '#7a899d', fontSize: 11 }}>Profile context is used when the search box is empty. Matching is deterministic and does not use AI.</div><div className="jobs-search-context">Profile context is used when the search box is empty. Matching is deterministic and does not use AI.</div></section>
     <section className="panel" style={{ marginTop: 16, padding: 18 }}><div className="panel-head"><div><h2 className="settings-title">Openings</h2><p className="settings-copy">{jobs.length ? jobs.length + ' openings found' : 'No openings returned yet.'}</p></div></div>
       {jobs.length ? jobs.map((job: any) => { const id = job.provider + ':' + job.provider_job_id; const open = expandedId === id; return <article key={id} className="post-entry" style={{ marginTop: 10 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}><div><div style={{ fontWeight: 800, color: '#10233f' }}>{job.title}</div><div style={{ marginTop: 4, fontSize: 12, color: '#5f6f86' }}>{job.company} · {job.location}{job.experience_level ? ' · ' + job.experience_level : ''}</div></div></div><div style={{ marginTop: 9, display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="button" onClick={() => setExpandedId(open ? null : id)}>{open ? 'Hide description' : 'View description'}</button>{job.application_url ? <a className="button primary" href={job.application_url} target="_blank" rel="noopener noreferrer">Apply externally <ExternalLink size={13}/></a> : null}</div>{open ? <div style={{ marginTop: 12, color: '#334b66', fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{job.description || 'No description supplied by the source.'}</div> : null}</article>; }) : <EmptyState icon={Briefcase} title="No jobs to show yet" text="Try a broader search or check again later." />}
     </section>
@@ -2114,34 +2081,34 @@ function FeedbackView({ type, setType, subject, setSubject, description, setDesc
 }
 
 function AdminView({ overview, activity, feedback, users, aiProviders, jobProviders, sections, sectionLoading, onToggle, onRefresh }: any) {
-  if (!overview) return <>
+  if (!overview) return <div className="admin-page">
     <div className="page-header"><div><SkeletonBlock width={130} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={310} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={520} height={10}/></div></div><SkeletonBlock width={82} height={34} radius={9}/></div>
-    <div className="metric-grid">{[1,2,3,4].map((item) => <div className="metric-card" key={item}><SkeletonBlock width="48%" height={10}/><div style={{ marginTop: 15 }}><SkeletonBlock width="35%" height={25}/></div></div>)}</div>
-    {[1,2,3,4,5].map((item) => <section className="panel settings-card" key={item} style={{ marginTop: 16, padding: 0 }}><div style={{ padding: '18px 20px' }}><SkeletonBlock width={180} height={14}/></div></section>)}
-  </>;
+    <div className="admin-metric-grid">{[1,2,3,4].map((item) => <div className="admin-metric-card" key={item}><SkeletonBlock width="48%" height={10}/><div style={{ marginTop: 15 }}><SkeletonBlock width="35%" height={25}/></div></div>)}</div>
+    {[1,2,3,4,5].map((item) => <section className="panel admin-section-card" key={item}><div className="admin-section-loading"><SkeletonBlock width={180} height={14}/></div></section>)}
+  </div>;
 
   const Section = ({ id, title, eyebrow, children }: any) => {
     const open = !!sections[id];
-    return <section className="panel settings-card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
-      <button type="button" onClick={() => onToggle(id)} aria-expanded={open} className="settings-title" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '18px 20px', background: 'transparent', border: 0, cursor: 'pointer', textAlign: 'left' }}>
-        <span>{eyebrow && <span className="page-kicker" style={{ display: 'block', marginBottom: 4 }}>{eyebrow}</span>}<span>{title}</span></span>
+    return <section className="panel admin-section-card">
+      <button type="button" onClick={() => onToggle(id)} aria-expanded={open} className="admin-section-toggle">
+        <span>{eyebrow && <span className="admin-section-kicker">{eyebrow}</span>}<span className="admin-section-title">{title}</span></span>
         <ChevronDown size={17} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 160ms ease', flexShrink: 0 }} />
       </button>
-      {open && <div style={{ borderTop: '1px solid var(--border, #e6ebf2)', padding: '16px 20px 20px' }}>{sectionLoading[id] ? <div className="post-entry"><SkeletonBlock width="72%" height={12}/><div style={{ marginTop: 10 }}><SkeletonBlock width="94%" height={9}/><div style={{ marginTop: 8 }}><SkeletonBlock width="68%" height={9}/></div></div></div> : children}</div>}
+      {open && <div className="admin-section-body">{sectionLoading[id] ? <div className="post-entry"><SkeletonBlock width="72%" height={12}/><div style={{ marginTop: 10 }}><SkeletonBlock width="94%" height={9}/><div style={{ marginTop: 8 }}><SkeletonBlock width="68%" height={9}/></div></div></div> : children}</div>}
     </section>;
   };
-  return <>
-    <div className="page-header"><div><div className="page-kicker"><ShieldAlert size={13}/> Admin operations</div><h1 className="page-title">Operations & reliability</h1><p className="page-description">Open a section only when you need its data; each section loads on demand.</p></div><button className="button" onClick={() => void onRefresh()}><RefreshCw size={13}/> Refresh</button></div>
-    <div className="metric-grid">
-      <div className="metric-card"><span>Successful activity</span><strong>{overview?.reliability?.successful_requests ?? 0} / {overview?.reliability?.events ?? 0}</strong><small>successful / total API activity</small></div>
-      <div className="metric-card"><span>Failed requests</span><strong>{overview?.reliability?.failed_requests ?? 0}</strong></div>
-      <div className="metric-card"><span>Users</span><strong>{overview?.users?.total ?? 0}</strong></div>
-      <div className="metric-card"><span>Open feedback</span><strong>{overview?.feedback?.open ?? 0}</strong></div>
+  return <div className="admin-page">
+    <div className="page-header admin-page-header"><div><div className="page-kicker"><ShieldAlert size={13}/> Admin operations</div><h1 className="page-title">Operations & reliability</h1><p className="page-description">Open a section only when you need its data; each section loads on demand.</p></div><button className="button admin-refresh-button" onClick={() => void onRefresh()}><RefreshCw size={13}/> Refresh</button></div>
+    <div className="admin-metric-grid">
+      <div className="admin-metric-card"><div className="admin-metric-top"><span>Successful activity</span><span className="admin-metric-icon"><Activity size={15}/></span></div><strong>{overview?.reliability?.successful_requests ?? 0} / {overview?.reliability?.events ?? 0}</strong><small>successful / total API activity</small></div>
+      <div className="admin-metric-card"><div className="admin-metric-top"><span>Failed requests</span><span className="admin-metric-icon"><ShieldAlert size={15}/></span></div><strong>{overview?.reliability?.failed_requests ?? 0}</strong><small>Requests requiring attention</small></div>
+      <div className="admin-metric-card"><div className="admin-metric-top"><span>Users</span><span className="admin-metric-icon"><UserRound size={15}/></span></div><strong>{overview?.users?.total ?? 0}</strong><small>Accounts in the workspace</small></div>
+      <div className="admin-metric-card"><div className="admin-metric-top"><span>Open feedback</span><span className="admin-metric-icon"><MessageSquare size={15}/></span></div><strong>{overview?.feedback?.open ?? 0}</strong><small>Feedback awaiting review</small></div>
     </div>
     <Section id="ai-providers" title="AI providers" eyebrow="PROVIDER READINESS"><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{Object.entries(aiProviders?.configured || {}).map(([k,v]: any) => <span className="tag" key={k}>{k} · {v ? 'configured' : 'not configured'}</span>)}</div></Section>
     <Section id="job-providers" title="Job providers" eyebrow="PROVIDER READINESS"><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{Object.entries(jobProviders?.configured || {}).map(([k,v]: any) => <span className="tag" key={k}>{k} · {v ? 'available' : 'not configured'}</span>)}</div></Section>
     <Section id="failures" title="Failed requests" eyebrow="OBSERVABILITY">{activity.length ? activity.slice(0, 30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}><b>{x.activity_type}</b> · {x.failure_category || 'UNKNOWN'} · {x.http_status || '—'} · {x.latency_ms ?? 0}ms<div style={{ marginTop: 4, color: '#6f7f93' }}>Correlation #{x.correlation_id}</div>{x.details && Object.keys(x.details).length > 0 && <div style={{ marginTop: 5, color: '#5f6f86' }}>{JSON.stringify(x.details)}</div>}</div>) : <div className="post-entry" style={{ color: '#6f7f93' }}>No failed requests recorded.</div>}</Section>
     <Section id="feedback" title="Feedback inbox" eyebrow="PRODUCT FEEDBACK">{feedback.length ? feedback.slice(0, 30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}><b>{x.type}</b> · {x.subject} · {x.status} · {x.priority}<div style={{ marginTop: 5, color:'#5f6f86' }}>{x.description}</div></div>) : <div className="post-entry" style={{ color: '#6f7f93' }}>No feedback submitted.</div>}</Section>
     <Section id="users" title="Users" eyebrow="ACCOUNT DIRECTORY">{users.length ? users.slice(0, 30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}>{x.display_name || 'User'} · {x.email} · <b>{x.role}</b> · {x.active ? 'active' : 'inactive'}</div>) : <div className="post-entry" style={{ color: '#6f7f93' }}>No users found.</div>}</Section>
-  </>;
+  </div>;
 }
