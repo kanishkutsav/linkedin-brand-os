@@ -159,6 +159,25 @@ export default function Home() {
   };
 
   useEffect(() => {
+    if (!profileMenuOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && !document.querySelector('.profile-menu-wrap')?.contains(target)) {
+        setProfileMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setProfileMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [profileMenuOpen]);
+
+  useEffect(() => {
     const standalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
     setIsStandalone(standalone);
 
@@ -190,6 +209,12 @@ export default function Home() {
     const timer = window.setTimeout(() => setNotice(null), noticeTtl);
     return () => window.clearTimeout(timer);
   }, [notice, noticeTtl]);
+
+  useEffect(() => {
+    if (!error) return;
+    const timer = window.setTimeout(() => setError(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [error]);
 
   useEffect(() => {
     if (!isGenerating) {
@@ -753,7 +778,8 @@ const loadAdminOverview = async () => {
     } catch (e) {
       setResearchProgress(0);
       setResearchStage('');
-      setError(e instanceof Error ? e.message : 'Live research failed');
+      // Never expose provider/source configuration or infrastructure details to end users.
+      setError('Failed to load. Please try again.');
     } finally {
       setIsResearching(false);
     }
@@ -958,7 +984,6 @@ const loadAdminOverview = async () => {
                 <a href="/terms" onClick={() => setProfileMenuOpen(false)}><FileText size={14}/> Terms</a>
                 {profile.role === 'admin' && <button onClick={() => { setProfileMenuOpen(false); go('Admin'); }}><ShieldAlert size={14}/> Admin panel</button>}
                 <button className="danger" onClick={() => { setProfileMenuOpen(false); void deleteAccount(); }}><X size={14}/> Delete account</button>
-                <button className="danger" onClick={() => { setProfileMenuOpen(false); void logout(); }}><LogOut size={14}/> Sign out</button>
               </div>}
             </div>
           </div>
@@ -1368,7 +1393,7 @@ function ResearchView({ opportunities, researchFocus, setResearchFocus, isResear
   return (
     <>
       <div className="page-header">
-        <div><div className="page-kicker"><Search size={13}/> Intelligence layer</div><h1 className="page-title">Research & opportunities</h1><p className="page-description">{hasResearch ? 'Your latest research is below. Add a focus whenever you want Suvacya to explore a specific topic.' : 'Live evidence is combined with your Brand DNA, recent research interests and learned context before an idea reaches the drafting engine.'}</p></div>
+        <div><div className="page-kicker"><Search size={13}/> Intelligence layer</div><h1 className="page-title">Research</h1><p className="page-description">{hasResearch ? 'Your latest research is below. Add a focus whenever you want Suvacya to explore a specific topic.' : 'Live evidence is combined with your Brand DNA, recent research interests and learned context before an idea reaches the drafting engine.'}</p></div>
         <button className="button primary progress-button" onClick={onResearch} disabled={isResearching}>
           <span className="button-content"><Search size={14}/>{isResearching ? researchStage || 'Researching…' : hasResearch ? 'Research now' : 'Run research'}</span>
           {isResearching && <span className="button-progress-track"><span style={{ width: researchProgress + '%' }} /></span>}
