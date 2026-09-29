@@ -470,7 +470,7 @@ async def admin_overview(session: AsyncSession = Depends(get_session), current_u
 
 @app.get("/api/admin/users")
 async def admin_users(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
-    users = (await session.execute(select(AuthUser).order_by(AuthUser.created_at.desc()).limit(500))).scalars().all()
+    users = (await session.execute(select(AuthUser).order_by(AuthUser.created_at.desc()))).scalars().all()
     return {"items": [{
         "id": u.id,
         "email": u.email,
