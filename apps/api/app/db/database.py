@@ -1,4 +1,5 @@
 from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -22,7 +23,13 @@ def _serverless_database_config() -> tuple[str, dict]:
         # Vercel + Supabase can inject either a direct PostgreSQL URL or a
         # pooler URL. Disable asyncpg prepared statements for every PostgreSQL
         # serverless connection so neither shape can leak PgBouncer failures.
+        # SQLAlchemy's asyncpg dialect prepares every statement itself. The
+        # asyncpg-level statement_cache_size alone does not disable that
+        # dialect cache, so explicitly disable SQLAlchemy's cache and use
+        # globally unique statement names for PgBouncer transaction pooling.
         connect_args["statement_cache_size"] = 0
+        connect_args["prepared_statement_cache_size"] = 0
+        connect_args["prepared_statement_name_func"] = lambda: f"__asyncpg_{uuid4()}__"
 
     if "pooler.supabase.com" in (parsed.hostname or ""):
         pooler_port = parsed.port or 5432
