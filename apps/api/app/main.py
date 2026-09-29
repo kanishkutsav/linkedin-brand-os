@@ -425,6 +425,136 @@ async def jobs_search_legacy(request: Request, query: str | None = None, session
     return await search_jobs_apify(title=title, experience=experience, location=location, page=1, limit=20)
 
 
+@app.get("/api/admin/overview")
+async def admin_overview(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    total_users = len((await session.execute(select(AuthUser.id))).scalars().all())
+    active_users = len((await session.execute(select(AuthUser.id).where(AuthUser.is_active == True))).scalars().all())
+    total_events = len((await session.execute(select(ObservabilityEvent.id))).scalars().all())
+    failed = len((await session.execute(select(ObservabilityEvent.id).where(ObservabilityEvent.status == "FAILED"))).scalars().all())
+    successful = len((await session.execute(select(ObservabilityEvent.id).where(ObservabilityEvent.status == "SUCCESS"))).scalars().all())
+    total_feedback = len((await session.execute(select(UserFeedback.id))).scalars().all())
+    open_feedback = len((await session.execute(select(UserFeedback.id).where(UserFeedback.status.in_(["NEW", "REVIEWING", "PLANNED", "IN_PROGRESS"])))).scalars().all())
+    return {
+        "users": {"total": total_users, "active": active_users},
+        "reliability": {
+            "events": total_events,
+            "successful_requests": successful,
+            "failed_requests": failed,
+            "error_rate": failed / total_events if total_events else 0,
+        },
+        "feedback": {"total": total_feedback, "open": open_feedback},
+        "ai_providers": {
+            "groq": bool(settings.groq_api_key),
+            "openrouter": bool(settings.openrouter_api_key),
+            "gemini": bool(settings.gemini_api_key),
+        },
+        "job_providers": {
+            "Indeed": bool(settings.apify_api_token),
+            "Naukri": bool(settings.apify_api_token),
+        },
+    }
+
+
+@app.get("/api/admin/users")
+async def admin_users(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    users = (await session.execute(select(AuthUser).order_by(AuthUser.created_at.desc()).limit(500))).scalars().all()
+    return {"items": [{
+        "id": u.id,
+        "email": u.email,
+        "display_name": u.display_name,
+        "role": u.role,
+        "active": u.is_active,
+        "whitelisted": u.is_whitelisted,
+        "created_at": u.created_at,
+    } for u in users]}
+
+
+@app.get("/api/admin/failures")
+async def admin_failures(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    rows = (
+        await session.execute(
+            select(ObservabilityEvent)
+            .where(ObservabilityEvent.status == "FAILED")
+            .order_by(ObservabilityEvent.created_at.desc())
+            .limit(100)
+        )
+    ).scalars().all()
+    return {"items": [{
+        "id": x.id,
+        "user_id": x.user_id,
+        "correlation_id": x.correlation_id,
+        "event_type": x.event_type,
+        "activity_type": x.activity_type,
+        "status": x.status,
+        "failure_category": x.failure_category,
+        "http_status": x.http_status,
+        "latency_ms": x.latency_ms,
+        "provider": x.provider,
+        "fallback_used": x.fallback_used,
+        "final_provider": x.final_provider,
+        "created_at": x.created_at,
+        "details": json.loads(x.details_json or "{}"),
+    } for x in rows]}
+
+
+@app.get("/api/admin/feedback")
+async def admin_feedback(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    rows = (
+        await session.execute(
+            select(UserFeedback).order_by(UserFeedback.created_at.desc()).limit(300)
+        )
+    ).scalars().all()
+    return {"items": [{
+        "id": x.id,
+        "user_id": x.user_id,
+        "type": x.feedback_type,
+        "subject": x.subject,
+        "description": x.description,
+        "context": x.context,
+        "status": x.status,
+        "priority": x.priority,
+        "created_at": x.created_at,
+        "updated_at": x.updated_at,
+    } for x in rows]}
+
+
+@app.patch("/api/admin/feedback/{feedback_id}")
+async def admin_update_feedback(
+    feedback_id: int,
+    req: FeedbackStatusRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin")),
+):
+    if req.status not in {"NEW", "REVIEWING", "PLANNED", "IN_PROGRESS", "RESOLVED", "DUPLICATE", "NOT_PLANNED"}:
+        raise HTTPException(status_code=400, detail="Invalid feedback status.")
+    if req.priority and req.priority not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
+        raise HTTPException(status_code=400, detail="Invalid feedback priority.")
+    item = (await session.execute(select(UserFeedback).where(UserFeedback.id == feedback_id))).scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=404, detail="Feedback not found.")
+    item.status = req.status
+    if req.priority:
+        item.priority = req.priority
+    session.add(AuditLog(
+        event_type="FEEDBACK_UPDATED",
+        actor=str(current_user.id),
+        payload=json.dumps({"feedback_id": feedback_id, "status": req.status, "priority": req.priority}),
+    ))
+    await session.commit()
+    return {"id": item.id, "status": item.status, "priority": item.priority}
+
+
+@app.get("/api/admin/ai-providers")
+async def admin_ai_providers(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    return {
+        "configured": {
+            "groq": bool(settings.groq_api_key),
+            "openrouter": bool(settings.openrouter_api_key),
+            "gemini": bool(settings.gemini_api_key),
+        }
+    }
+
+
 @app.get("/api/admin/job-providers")
 async def admin_job_providers(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
     return {"configured": {"Indeed": bool(settings.apify_api_token), "Naukri": bool(settings.apify_api_token)}}
