@@ -186,8 +186,8 @@ async def _adzuna(query: str, target: dict[str, str], client: httpx.AsyncClient)
     if target.get("city"):
         params["where"] = target["city"]
     response = await client.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()
+    response.raise_for_status()
+    data = response.json()
     return [_normalize(provider="Adzuna", job_id=item.get("id"), title=item.get("title"),
         company=(item.get("company") or {}).get("display_name"), description=item.get("description"),
         location=(item.get("location") or {}).get("display_name"), url=item.get("redirect_url"),
@@ -208,8 +208,8 @@ async def _jooble(query: str, target: dict[str, str], client: httpx.AsyncClient)
     payload = {"keywords": query, "location": location, "page": 1,
                "ResultOnPage": min(settings.job_search_max_results, 20), "SearchMode": 0, "companysearch": False}
     response = await client.post(endpoint, json=payload)
-        response.raise_for_status()
-        data = response.json()
+    response.raise_for_status()
+    data = response.json()
     return [_normalize(provider="Jooble", job_id=item.get("id") or item.get("link"),
         title=item.get("title"), company=item.get("company"), description=item.get("snippet"),
         location=item.get("location"), url=item.get("link"), posted_at=item.get("updated"), salary=item.get("salary"))
@@ -222,8 +222,8 @@ async def _themuse(query: str, target: dict[str, str], client: httpx.AsyncClient
     params = {"page": 0, "api_key": settings.themuse_api_key,
               "location": target.get("city") or target.get("country")}
     response = await client.get(f"{settings.themuse_base_url.rstrip('/')}/jobs", params=params)
-        response.raise_for_status()
-        data = response.json()
+    response.raise_for_status()
+    data = response.json()
     terms = [part.lower() for part in query.split() if len(part) > 2]
     output = []
     for item in (data.get("results") or []):
@@ -246,8 +246,8 @@ async def _remotive(query: str, target: dict[str, str], client: httpx.AsyncClien
         return []
     response = await client.get("https://remotive.com/api/remote-jobs",
                                 params={"search": query, "limit": min(settings.job_search_max_results, 50)})
-        response.raise_for_status()
-        data = response.json()
+    response.raise_for_status()
+    data = response.json()
     return [_normalize(provider="Remotive", job_id=item.get("id"), title=item.get("title"),
         company=item.get("company_name"), description=item.get("description"),
         location=item.get("candidate_required_location"), url=item.get("url"),
