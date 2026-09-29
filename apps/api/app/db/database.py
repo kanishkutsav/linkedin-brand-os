@@ -12,17 +12,29 @@ def _serverless_database_config() -> tuple[str, dict]:
     connect_args: dict = {}
     parsed = urlsplit(url)
 
-    # Supabase session-mode poolers have a small per-session client limit.
-    # Vercel functions should use transaction mode instead. asyncpg prepared
-    # statement caching must be disabled for transaction pooling.
-    if "pooler.supabase.com" in (parsed.hostname or "") and parsed.port == 5432:
-        url = urlunsplit((
-            parsed.scheme,
-            parsed.netloc.rsplit(":5432", 1)[0] + ":6543",
-            parsed.path,
-            parsed.query,
-            parsed.fragment,
-        ))
+    # Supabase's transaction pooler (PgBouncer) does not support asyncpg
+    # prepared statements. This must be true for every pooler URL shape:
+    # some environments include :5432, some omit the port, and some already
+    # provide :6543. A partial check here can make auth intermittently fail
+    # with DuplicatePreparedStatementError during cold starts.
+    if "pooler.supabase.com" in (parsed.hostname or ""):
+        pooler_port = parsed.port or 5432
+        if pooler_port == 5432:
+            host = parsed.hostname or ""
+            authority = parsed.netloc
+            userinfo = authority.rsplit("@", 1)[0] if "@" in authority else ""
+            netloc = f"{userinfo}@{host}:6543" if userinfo else f"{host}:6543"
+            url = urlunsplit((
+                parsed.scheme,
+                netloc,
+                parsed.path,
+                parsed.query,
+                parsed.fragment,
+            ))
+
+        # PgBouncer transaction pooling and asyncpg prepared statements are
+        # incompatible. Disable the statement cache even when the URL already
+        # points at :6543 or credentials are encoded in the authority.
         connect_args["statement_cache_size"] = 0
 
     # Never retain a second client pool inside a serverless process.
