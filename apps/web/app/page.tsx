@@ -152,8 +152,7 @@ export default function Home() {
       const csrf = readCookie('__Host-suvacya-csrf') || readCookie('suvacya-csrf');
       if (csrf) requestHeaders.set('X-CSRF-Token', csrf);
     }
-    return fetch(input, { ...init, headers: requestHeaders, credentials: 'include' })
-      ;
+    return fetch(input, { ...init, headers: requestHeaders, credentials: 'include' });
   };
 
   useEffect(() => {
