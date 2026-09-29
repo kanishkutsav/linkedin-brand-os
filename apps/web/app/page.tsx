@@ -914,32 +914,9 @@ const loadAdminOverview = async () => {
     finally { setIsBusy(false); }
   };
 
-  const globalLoading = pendingRequests > 0 || loading || jobsLoading || (tab === 'Admin' && !adminOverview) || isBusy || isGenerating || isResearching || isImproving || isBuildingBrand || savingThought || feedbackSending || authChecking;
-  const globalLoadingMessage = authChecking
-    ? 'Loading your workspace…'
-    : (tab === 'Admin' && !adminOverview)
-      ? 'Loading admin data…'
-      : jobsLoading
-        ? 'Searching jobs…'
-        : isResearching
-          ? 'Researching opportunities…'
-          : isGenerating
-            ? 'Generating content…'
-            : isImproving
-              ? 'Improving your content…'
-              : isBuildingBrand
-                ? 'Updating your Brand DNA…'
-                : feedbackSending
-                  ? 'Submitting feedback…'
-                  : savingThought
-                    ? 'Saving your learning…'
-                    : isBusy
-                      ? 'Processing your request…'
-                      : loading
-                        ? 'Loading your workspace…'
-                        : 'Loading…';
+  const authLoadingMessage = 'Loading your workspace…';
 
-  if (authChecking) return <div style={{ minHeight: '100vh', background: '#f5f8fc' }}><WorkspaceLoading message={globalLoadingMessage} /></div>;
+  if (authChecking) return <div style={{ minHeight: '100vh', background: '#f5f8fc' }}><WorkspaceLoading message={authLoadingMessage} /></div>;
   if (!token) return <LoginScreen error={error} onConnect={connectLinkedIn} />;
 
   return (
@@ -992,11 +969,9 @@ const loadAdminOverview = async () => {
         <main className="page">
           {notice && <div className="notice success"><CircleCheck size={15} /><span>{notice}</span></div>}
           {error && <div className="notice error"><X size={15} /><span>{error}</span></div>}
-          {globalLoading && <WorkspaceLoading message={globalLoadingMessage} />}
-
           {tab === 'Dashboard' && (
-            <>
-              <section className="hero" onClick={!brand.ready ? () => go('Brand DNA') : undefined} style={!brand.ready ? { cursor: 'pointer' } : undefined}>
+            loading ? <DashboardSkeleton /> : <>
+              {brandLoading ? <DashboardHeroSkeleton /> : <section className="hero" onClick={!brand.ready ? () => go('Brand DNA') : undefined} style={!brand.ready ? { cursor: 'pointer' } : undefined}>
                 <div className="hero-grid">
                   <div>
                     <div className="page-kicker" style={{ color: '#b9d7f7' }}>
@@ -1055,14 +1030,14 @@ const loadAdminOverview = async () => {
                   isBusy={isBusy} busyAction={busyAction} operationProgress={operationProgress} operationStage={operationStage}
                   onAction={runApprovalAction}
                 />
-              </section>
+              </section>}
             </>
           )}
 
-          {tab === 'Research' && <ResearchView opportunities={opportunities} researchFocus={researchFocus} setResearchFocus={setResearchFocus} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
-          {tab === 'Content Studio' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
-          {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />}
-          {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
+          {tab === 'Research' && <ResearchView loading={researchLoading} opportunities={opportunities} researchFocus={researchFocus} setResearchFocus={setResearchFocus} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
+          {tab === 'Content Studio' && <ContentStudio learningLoading={learningLoading} profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
+          {tab === 'LinkedIn Posts' && (loading ? <LinkedInPostsSkeleton /> : <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />)}
+          {tab === 'Analytics' && <AnalyticsView loading={analyticsLoading} analytics={analytics} />}
           {tab === 'Jobs' && <JobsView jobs={jobs} location={jobLocation} query={jobQuery} setQuery={setJobQuery} loading={jobsLoading} expandedId={expandedJobId} setExpandedId={setExpandedJobId} onSearch={loadJobs} />}
           {tab === 'Feedback' && <FeedbackView type={feedbackType} setType={setFeedbackType} subject={feedbackSubject} setSubject={setFeedbackSubject} description={feedbackDescription} setDescription={setFeedbackDescription} context={feedbackContext} setContext={setFeedbackContext} sending={feedbackSending} onSubmit={async () => { if (!feedbackSubject.trim() || !feedbackDescription.trim() || !token) return; setFeedbackSending(true); try { const res = await apiFetch(API_BASE + '/api/feedback', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback_type: feedbackType, subject: feedbackSubject, description: feedbackDescription, context: feedbackContext }) }); const data = await res.json(); if (!res.ok) throw new Error(getApiError(data, 'Feedback could not be submitted.')); setFeedbackSubject(''); setFeedbackDescription(''); setFeedbackContext(''); setNotice('Thanks. Your feedback was submitted.'); } catch (e) { setError(e instanceof Error ? e.message : 'Feedback could not be submitted.'); } finally { setFeedbackSending(false); } }} />}
           {tab === 'Admin' && profile.role === 'admin' && <AdminView overview={adminOverview} activity={adminActivity} feedback={adminFeedback} users={adminUsers} aiProviders={adminAiProviders} jobProviders={adminJobProviders} sections={adminSections} sectionLoading={adminSectionLoading} onToggle={toggleAdminSection} onRefresh={refreshAdmin} />}
@@ -1089,6 +1064,7 @@ const loadAdminOverview = async () => {
               editing={brandEditing}
               setEditing={setBrandEditing}              onCancel={cancelBrandEdit}
               personalThoughts={personalThoughts}
+              learningLoading={learningLoading}
               onDeletePersonalThoughts={async (ids: number[]) => {
                 if (!ids.length) return;
                 if (!window.confirm(ids.length === 1
@@ -1388,7 +1364,287 @@ function LinkedInPostsView({ posts, totalPublished }: { posts: ApprovalItem[]; t
   );
 }
 
-function ResearchView({ opportunities, researchFocus, setResearchFocus, isResearching, researchProgress, researchStage, onResearch }: { opportunities: Opportunity[]; researchFocus: string; setResearchFocus: (value: string) => void; isResearching: boolean; researchProgress: number; researchStage: string; onResearch: () => void }) {
+// Surface-level skeletons keep the workspace interactive while each API-backed section hydrates.
+function SkeletonBlock({ width = '100%', height = 14, radius = 8 }: { width?: string | number; height?: number; radius?: number }) {
+  return <div className="skeleton" style={{ width, height, borderRadius: radius }} aria-hidden="true" />;
+}
+
+function DashboardHeroSkeleton() {
+  return <section className="hero">
+    <div className="hero-grid">
+      <div style={{ width: '100%' }}>
+        <SkeletonBlock width={170} height={10} />
+        <div style={{ marginTop: 14, display: 'grid', gap: 9 }}>
+          <SkeletonBlock width="82%" height={32} radius={10} />
+          <SkeletonBlock width="68%" height={32} radius={10} />
+        </div>
+        <div style={{ marginTop: 14, display: 'grid', gap: 7, maxWidth: 620 }}>
+          <SkeletonBlock width="100%" height={11} />
+          <SkeletonBlock width="92%" height={11} />
+        </div>
+        <div className="hero-actions" style={{ marginTop: 22 }}>
+          <SkeletonBlock width={138} height={38} radius={10} />
+          <SkeletonBlock width={170} height={38} radius={10} />
+        </div>
+      </div>
+      <div className="hero-status"><SkeletonBlock width={72} height={72} radius={24} /></div>
+    </div>
+  </section>;
+}
+
+function DashboardSkeleton() {
+  return <>
+    <section className="hero">
+      <div className="hero-grid">
+        <div style={{ width: '100%' }}>
+          <SkeletonBlock width={170} height={10} />
+          <div style={{ marginTop: 14, display: 'grid', gap: 9 }}>
+            <SkeletonBlock width="82%" height={32} radius={10} />
+            <SkeletonBlock width="68%" height={32} radius={10} />
+          </div>
+          <div style={{ marginTop: 14, display: 'grid', gap: 7, maxWidth: 620 }}>
+            <SkeletonBlock width="100%" height={11} />
+            <SkeletonBlock width="92%" height={11} />
+          </div>
+          <div className="hero-actions" style={{ marginTop: 22 }}>
+            <SkeletonBlock width={138} height={38} radius={10} />
+            <SkeletonBlock width={170} height={38} radius={10} />
+          </div>
+        </div>
+        <div className="hero-status"><SkeletonBlock width={72} height={72} radius={24} /></div>
+      </div>
+    </section>
+    <div className="metrics">
+      {[1,2,3,4,5].map((item) => <div className="metric-card" key={item}><SkeletonBlock width="52%" height={10}/><div style={{ marginTop: 15 }}><SkeletonBlock width="38%" height={26}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width="72%" height={9}/></div></div>)}
+    </div>
+    <section className="panel approval-panel">
+      <div className="panel-head"><div style={{ width: '48%' }}><SkeletonBlock width={150} height={15}/><div style={{ marginTop: 8 }}><SkeletonBlock width="90%" height={9}/></div></div><SkeletonBlock width={92} height={34} radius={9}/></div>
+      <div style={{ display: 'grid', gap: 9, padding: '0 18px 18px' }}>
+        {[1,2,3].map((item) => <div className="post-entry" key={item}><SkeletonBlock width="28%" height={9}/><div style={{ marginTop: 10 }}><SkeletonBlock width="72%" height={13}/></div><div style={{ marginTop: 8 }}><SkeletonBlock width="94%" height={9}/></div></div>)}
+      </div>
+    </section>
+  </>;
+}
+
+function LinkedInPostsSkeleton() {
+  return <>
+    <div className="page-header"><div><SkeletonBlock width={170} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={280} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={420} height={10}/></div></div></div>
+    <section className="panel settings-card">
+      {[1,2,3].map((item) => <div className="post-entry" key={item} style={{ marginTop: item === 1 ? 0 : 10 }}><SkeletonBlock width="24%" height={9}/><div style={{ marginTop: 10 }}><SkeletonBlock width="82%" height={13}/></div><div style={{ marginTop: 8 }}><SkeletonBlock width="96%" height={9}/><div style={{ marginTop: 6 }}><SkeletonBlock width="76%" height={9}/></div></div></div>)}
+    </section>
+  </>;
+}
+
+function SettingsSkeleton() {
+  return <>
+    <div className="page-header"><div><SkeletonBlock width={120} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={230} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={520} height={10}/></div></div></div>
+    <section className="panel settings-card">
+      <div className="profile-grid">{[1,2,3,4].map((item) => <div className="form-group" key={item}><SkeletonBlock width={90} height={9}/><div style={{ marginTop: 7 }}><SkeletonBlock width="100%" height={40} radius={9}/></div></div>)}</div>
+      <div style={{ marginTop: 18 }}><SkeletonBlock width={150} height={10}/><div style={{ marginTop: 9 }}><SkeletonBlock width="100%" height={70} radius={10}/></div></div>
+    </section>
+    <section className="panel settings-card" style={{ marginTop: 16 }}><SkeletonBlock width={150} height={14}/><div style={{ marginTop: 10 }}><SkeletonBlock width="72%" height={9}/></div><div style={{ marginTop: 16 }}><SkeletonBlock width="100%" height={90} radius={10}/></div></section>
+  </>;
+}
+
+function ResearchSkeleton() {
+  return <>
+    <div className="page-header"><div><SkeletonBlock width={130} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={310} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={520} height={10}/></div></div><SkeletonBlock width={118} height={36} radius={9}/></div>
+    <section className="panel research-focus-panel"><SkeletonBlock width={180} height={13}/><div style={{ marginTop: 8 }}><SkeletonBlock width="78%" height={9}/></div><div style={{ marginTop: 14 }}><SkeletonBlock width="100%" height={42} radius={9}/></div></section>
+    <div className="research-grid">{[1,2,3].map((item) => <article className="research-card" key={item}><SkeletonBlock width={130} height={9}/><div style={{ marginTop: 12 }}><SkeletonBlock width="82%" height={16}/></div><div style={{ marginTop: 8 }}><SkeletonBlock width="95%" height={9}/><div style={{ marginTop: 6 }}><SkeletonBlock width="72%" height={9}/></div></div><div className="research-relevance-grid" style={{ marginTop: 16 }}><SkeletonBlock width="100%" height={55} radius={9}/><SkeletonBlock width="100%" height={55} radius={9}/></div></article>)}</div>
+  </>;
+}
+
+function AnalyticsSkeleton() {
+  return <>
+    <div className="page-header"><div><SkeletonBlock width={150} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={320} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={550} height={10}/></div></div></div>
+    <div className="metrics">{[1,2,3,4].map((item) => <div className="metric-card" key={item}><SkeletonBlock width="50%" height={10}/><div style={{ marginTop: 15 }}><SkeletonBlock width="36%" height={25}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width="78%" height={9}/></div></div>)}</div>
+  </>;
+}
+
+
+
+function MiniStat({ icon: Icon, label, value }: any) {
+  return <div className="score-item"><div className="score-name" style={{ display: 'flex', gap: 5, alignItems: 'center' }}><Icon size={11}/>{label}</div><div className="score-value" style={{ fontSize: 11, lineHeight: 1.35 }}>{value}</div></div>;
+}
+
+// Production copy sync marker: ensure latest UI copy is included in deployment.
+function ApprovalWorkspace(props: any) {
+  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, dashboardCounts, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction } = props;
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [mobileReviewOpen, setMobileReviewOpen] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedImage(null);
+    setImagePreview(null);
+  }, [selectedId]);
+
+  const chooseImage = (file: File | null) => {
+    if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
+      window.alert('Only JPEG or PNG images are supported.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      window.alert('Image must be 4 MB or smaller.');
+      return;
+    }
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setSelectedImage(file);
+    setImagePreview(URL.createObjectURL(file));
+  };
+
+  return (
+    <div className="queue-layout">
+      <div className="queue-list">
+        <div className="queue-tools">
+          <div className="searchbox"><Search size={13}/><input className="input" placeholder="Search drafts…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
+          <div className="filter-row">
+            {([
+              ['PENDING', 'Pending'],
+              ['NEEDS_REVIEW', 'Needs review'],
+              ['REJECTED', 'Rejected'],
+              ['EXECUTED', 'Published'],
+            ] as const).map(([value, label]) => (
+              <button key={value} className={`filter-chip ${statusFilter === value ? 'active' : ''}`} onClick={() => setStatusFilter(value)}>
+  <span>{label}</span>
+  <em className="filter-count">{value === 'PENDING' ? dashboardCounts.pending_filter : value === 'NEEDS_REVIEW' ? dashboardCounts.needs_review : value === 'REJECTED' ? dashboardCounts.rejected : dashboardCounts.published}</em>
+</button>
+            ))}
+          </div>
+        </div>
+        <div className="queue-items">
+          {queue.length ? queue.map((item: ApprovalItem) => (
+            <button key={item.id} className={`queue-item ${selectedId === item.id ? 'selected' : ''}`} onClick={() => { setSelectedId(item.id); setMobileReviewOpen(true); }}>
+              <div className="queue-item-top"><span className="queue-id">POST #{item.id}</span><StatusPill status={item.status}/></div>
+              <div className="queue-action">{item.action_type}</div>
+              <div className="queue-preview">{item.content.slice(0, 88)}{item.content.length > 88 ? '…' : ''}</div>
+            </button>
+          )) : <div className="empty-state"><div className="empty-icon"><FileText size={18}/></div><strong>Queue is clear</strong><span>Create a draft or generate content to start the review flow.</span></div>}
+        </div>
+      </div>
+      <div className={`review-pane ${mobileReviewOpen ? 'mobile-review-open' : ''}`}>
+        {selected ? (
+          <>
+            <button className="mobile-review-back" onClick={() => setMobileReviewOpen(false)}><ChevronRight size={16} style={{ transform: 'rotate(180deg)' }} /> Back to queue</button>
+            <div className="review-head"><div><div className="review-label">Editorial review · post #{selected.id}</div><div className="review-title">{selected.action_type}</div></div><StatusPill status={selected.status}/></div>
+
+            {['PENDING','EDITED','REGENERATED'].includes(selected.status) ? (
+              <div className="review-editor">
+                <div className="editor-toolbar"><span>Exact content bound to approval</span><span>{editedBody.length} chars</span></div>
+                <textarea className="textarea" value={editedBody} onChange={(e) => setEditedBody(e.target.value)} />
+                <div className="review-label" style={{ marginTop: 10, marginBottom: 7 }}>Feedback for regeneration <span className="form-help">(optional)</span></div>
+                <textarea
+                  className="textarea"
+                  style={{ minHeight: 82, marginTop: 0 }}
+                  value={reviewNote}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setReviewNote(value);
+                    if (selected?.id) {
+                      const key = `brand-os-regeneration-feedback:${selected.id}`;
+                      if (value.trim()) window.localStorage.setItem(key, value);
+                      else window.localStorage.removeItem(key);
+                    }
+                  }}
+                  placeholder="Tell us what to change, add, or remove. Example: Make the opening less polished and add the point about stakeholder alignment."
+                />
+                <div className="review-actions">
+                  <button className="button success progress-button" disabled={isBusy} onClick={() => onAction('approve')}>
+                    <span className="button-content"><Check size={14}/> {busyAction === 'approve' ? operationStage || 'Approving…' : 'Approve'}</span>
+                    {busyAction === 'approve' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
+                  </button>
+                  <button className="button" disabled={isBusy || editedBody === selected.content} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>
+                  <button className="button progress-button" disabled={isBusy || !reviewNote.trim()} title={!reviewNote.trim() ? 'Add feedback before regenerating.' : 'Regenerate using your feedback'} onClick={() => onAction('regenerate', { reason: reviewNote.trim() })}>
+                    <span className="button-content"><RotateCcw size={14}/> {busyAction === 'regenerate' ? operationStage || 'Regenerating…' : 'Regenerate'}</span>
+                    {busyAction === 'regenerate' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
+                  </button>
+                  <button className="button danger" disabled={isBusy} onClick={() => onAction('reject', { reason: reviewNote || 'Rejected by reviewer.' })}><X size={14}/> Reject</button>
+                </div>
+                <div className="form-help" style={{ marginTop: 8 }}>{reviewNote.trim() ? 'Regenerate will use this feedback and keep the new version behind the approval gate.' : 'Add feedback above to enable Regenerate.'}</div>
+              </div>
+            ) : selected.status === 'APPROVED' ? (
+              <div className="review-editor">
+                <div className="notice success" style={{ marginTop: 0 }}><CircleCheck size={15}/><span>Approved and locked. The content can no longer be edited or regenerated.</span></div>
+                <div className="editor-toolbar" style={{ marginTop: 12 }}><span>Locked approved content</span><span>{selected.content.length} chars</span></div>
+                <div className="readonly-field" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65, minHeight: 150 }}>{selected.content}</div>
+                <div style={{ marginTop: 14, padding: 12, border: '1px dashed #c8d4e2', borderRadius: 12, background: '#fbfdff' }}>
+                  <div className="review-label" style={{ marginBottom: 7 }}>Optional photograph</div>
+                  <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG or PNG image (up to 4 MB). The image is sent directly to LinkedIn during execution and is not stored by Suvacya.</div>
+                  <input type="file" accept="image/jpeg,image/png" onChange={(e) => chooseImage(e.target.files?.[0] || null)} disabled={isBusy} />
+                  {imagePreview && (
+                    <div style={{ marginTop: 10 }}>
+                      <img src={imagePreview} alt="Selected LinkedIn post image preview" style={{ display: 'block', width: '100%', maxHeight: 280, objectFit: 'contain', borderRadius: 10, background: '#f1f5f9' }} />
+                      <button className="link-button" style={{ marginTop: 7 }} onClick={() => { if (imagePreview) URL.revokeObjectURL(imagePreview); setImagePreview(null); setSelectedImage(null); }}>Remove image</button>
+                    </div>
+                  )}
+                </div>
+                <div className="review-actions" style={{ marginTop: 14 }}>
+                  <button className="button success progress-button" disabled={isBusy} onClick={() => onAction('execute', selectedImage)}>
+                    <span className="button-content"><ExternalLink size={14}/> {busyAction === 'execute' ? operationStage || 'Publishing…' : 'Execute'}</span>
+                    {busyAction === 'execute' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className={selected.status === 'EXECUTED' ? 'notice success' : 'notice error'} style={{ marginTop: 0 }}>
+                <CircleCheck size={15}/><span>{selected.status === 'EXECUTED' ? 'Approved and published to LinkedIn. This post is permanently locked.' : 'This post is no longer awaiting a decision.'}</span>
+              </div>
+            )}
+
+            <div style={{ marginTop: 17 }}>
+              <div className="review-label" style={{ marginBottom: 9 }}>Safety rail</div>
+              <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>{['Claim guard','Voice guard','Duplicate guard','Action guard'].map((x) => <span key={x} className="tag"><ShieldCheck size={10}/>{x}</span>)}</div>
+            </div>
+          </>
+        ) : <EmptyState icon={FileText} title="Select a draft" text="Your editorial workspace will appear here." />}
+      </div>
+    </div>
+  );
+}
+
+function StatusPill({ status, label }: { status: string; label?: string }) {
+  const cls = status.toLowerCase();
+  return <span className={`status-pill ${cls}`}><span>●</span>{label || status}</span>;
+}
+
+function LinkedInPostsView({ posts, totalPublished }: { posts: ApprovalItem[]; totalPublished: number }) {
+  if (loading) return <ResearchSkeleton />;
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <div className="page-kicker"><ExternalLink size={13}/> LinkedIn content</div>
+          <h1 className="page-title">Your published LinkedIn posts.</h1>
+          <p className="page-description">Your 10 most recently published LinkedIn posts are shown here. Older posts are retained as learning signals, not as a full content archive.</p>
+        </div>
+      </div>
+      <section className="panel">
+        <div className="panel-head">
+          <div><div className="panel-title">Published posts</div><div className="panel-subtitle">{totalPublished > 10 ? `Showing the 10 most recent of ${totalPublished} published posts` : `Showing all ${totalPublished} published posts`}</div></div>
+        </div>
+        <div className="post-stack">
+          {posts.length ? posts.map((post) => (
+            <article className="post-entry" key={post.id}>
+              <div className="post-entry-head">
+                <span className="post-index">POST #{post.id}</span>
+                <StatusPill status={post.status} label="Published"/>
+              </div>
+              {post.title ? <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 7 }}>{post.title}</div> : null}
+              {post.topic ? <div className="form-help" style={{ marginBottom: 9 }}>{post.topic}</div> : null}
+              <div style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.7, color: '#334b66' }}>{post.content}</div>
+              {post.approved_at ? <div className="form-help" style={{ marginTop: 10 }}>Approved {new Date(post.approved_at).toLocaleString()}</div> : null}
+            </article>
+          )) : <EmptyState icon={ExternalLink} title="No published posts yet" text="Once you publish a post through Suvacya, it will appear here automatically." />}
+        </div>
+      </section>
+    </>
+  );
+}
+
+
+function ResearchView({ loading, opportunities, researchFocus, setResearchFocus, isResearching, researchProgress, researchStage, onResearch }: { loading: boolean; opportunities: Opportunity[]; researchFocus: string; setResearchFocus: (value: string) => void; isResearching: boolean; researchProgress: number; researchStage: string; onResearch: () => void }) {
+  if (loading) return <ResearchSkeleton />;
   const hasResearch = opportunities.length > 0;
   return (
     <>
@@ -1480,7 +1736,7 @@ function ResearchCard({ item }: { item: Opportunity }) {
   );
 }
 
-function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBody, language, setLanguage, busy, improving, improvementProgress, improvementNotes, onImprove, onSubmit, savingThought, onSaveThought, learningStatus }: any) {
+function ContentStudio({ learningLoading, profile, title, setTitle, topic, setTopic, body, setBody, language, setLanguage, busy, improving, improvementProgress, improvementNotes, onImprove, onSubmit, savingThought, onSaveThought, learningStatus }: any) {
   return (
     <>
       <div className="page-header">
@@ -1488,7 +1744,9 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
           <div className="page-kicker"><WandSparkles size={13}/> Editorial studio</div>
           <h1 className="page-title">Write it your way. Let Suvacya polish it.</h1>
           <p className="page-description">Start with your own idea and wording in any language. Suvacya can improve structure and clarity using your Brand DNA, then you preview the exact version before it enters the approval queue.</p>
-          <div className="form-help" style={{ marginTop: 8 }}>Brand learning is active · {learningStatus?.memory_count ?? 0} learned signals · {learningStatus?.pending_events ?? 0} queued for processing</div>
+          <div className="form-help" style={{ marginTop: 8 }}>
+            {learningLoading ? <span style={{ display: 'inline-flex', width: 280 }}><SkeletonBlock width="100%" height={10} /></span> : <>Brand learning is active · {learningStatus?.memory_count ?? 0} learned signals · {learningStatus?.pending_events ?? 0} queued for processing</>}
+          </div>
         </div>
       </div>
       <section className="panel studio-grid">
@@ -1525,7 +1783,8 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
   );
 }
 
-function AnalyticsView({ analytics }: { analytics: any }) {
+function AnalyticsView({ loading, analytics }: { loading: boolean; analytics: any }) {
+  if (loading) return <AnalyticsSkeleton />;
   const p = analytics?.pipeline || {};
   const live = analytics?.linkedin_performance || {};
   const totals = live.totals || {};
@@ -1636,7 +1895,7 @@ function SettingsView(props: any) {
     brand, profile, brandTitle, setBrandTitle, brandIndustry, setBrandIndustry,
     brandExperienceYears, setBrandExperienceYears, brandTone, setBrandTone,
     posts, updatePost, addPost, removePost, building, onBuild, linkedin, onConnect,
-    editing, setEditing, onCancel, personalThoughts = [], onDeletePersonalThoughts,
+    editing, setEditing, onCancel, learningLoading = false, personalThoughts = [], onDeletePersonalThoughts,
     expandedThoughtId, setExpandedThoughtId, selectedThoughtIds = [], setSelectedThoughtIds,
     thoughtSelectionMode = false, setThoughtSelectionMode
   } = props;
@@ -1860,7 +2119,11 @@ function SettingsView(props: any) {
             )}
           </div>
         </div>
-        {personalThoughts.length ? (
+        {learningLoading ? (
+          <div className="post-stack" style={{ marginTop: 14 }}>
+            {[1,2].map((item) => <article className="post-entry" key={item}><SkeletonBlock width={120} height={9}/><div style={{ marginTop: 10 }}><SkeletonBlock width="62%" height={13}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width="96%" height={9}/><div style={{ marginTop: 6 }}><SkeletonBlock width="78%" height={9}/></div></div></article>)}
+          </div>
+        ) : personalThoughts.length ? (
           <div className="post-stack" style={{ marginTop: 14 }}>
             {personalThoughts.map((thought: PersonalThought) => {
               const expanded = expandedThoughtId === thought.id;
@@ -1970,6 +2233,12 @@ function LinkedInMark({ size = 18, color }: { size?: number; color?: string }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill={color || 'currentColor'} aria-hidden="true"><path d="M6.5 8.2H3.2V20h3.3V8.2ZM4.85 3A1.95 1.95 0 1 0 4.85 6.9 1.95 1.95 0 0 0 4.85 3ZM20.8 13.25c0-3.52-1.88-5.16-4.4-5.16-2.02 0-2.92 1.11-3.43 1.89V8.2H9.67V20h3.3v-5.84c0-1.54.29-3.03 2.2-3.03 1.88 0 1.91 1.76 1.91 3.13V20h3.3l.02-6.75Z"/></svg>;
 }
 function JobsView({ jobs, location, query, setQuery, loading, expandedId, setExpandedId, onSearch }: any) {
+  if (loading && !jobs.length) return <>
+    <div className="page-header"><div><SkeletonBlock width={140} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={260} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={510} height={10}/></div></div></div>
+    <section className="panel" style={{ padding: 18 }}><SkeletonBlock width="100%" height={42} radius={9}/><div style={{ marginTop: 10 }}><SkeletonBlock width={340} height={9}/></div><div style={{ marginTop: 8 }}><SkeletonBlock width={230} height={9}/></div></section>
+    <section className="panel" style={{ marginTop: 16, padding: 18 }}><SkeletonBlock width={110} height={15}/><div style={{ marginTop: 10 }}><SkeletonBlock width={180} height={9}/></div><div style={{ marginTop: 14, display: 'grid', gap: 10 }}>{[1,2,3].map((item) => <div className="post-entry" key={item}><SkeletonBlock width="45%" height={13}/><div style={{ marginTop: 8 }}><SkeletonBlock width="70%" height={9}/></div><div style={{ marginTop: 12 }}><SkeletonBlock width={170} height={30} radius={8}/></div></div>)}</div></section>
+  </>;
+
   const locationLabel = location?.city && location?.country
     ? location.city + ', ' + location.country
     : (location?.country || 'your detected location');
@@ -1994,6 +2263,12 @@ function FeedbackView({ type, setType, subject, setSubject, description, setDesc
 }
 
 function AdminView({ overview, activity, feedback, users, aiProviders, jobProviders, sections, sectionLoading, onToggle, onRefresh }: any) {
+  if (!overview) return <>
+    <div className="page-header"><div><SkeletonBlock width={130} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={310} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={520} height={10}/></div></div><SkeletonBlock width={82} height={34} radius={9}/></div>
+    <div className="metric-grid">{[1,2,3,4].map((item) => <div className="metric-card" key={item}><SkeletonBlock width="48%" height={10}/><div style={{ marginTop: 15 }}><SkeletonBlock width="35%" height={25}/></div></div>)}</div>
+    {[1,2,3,4,5].map((item) => <section className="panel settings-card" key={item} style={{ marginTop: 16, padding: 0 }}><div style={{ padding: '18px 20px' }}><SkeletonBlock width={180} height={14}/></div></section>)}
+  </>;
+
   const Section = ({ id, title, eyebrow, children }: any) => {
     const open = !!sections[id];
     return <section className="panel settings-card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
@@ -2001,7 +2276,7 @@ function AdminView({ overview, activity, feedback, users, aiProviders, jobProvid
         <span>{eyebrow && <span className="page-kicker" style={{ display: 'block', marginBottom: 4 }}>{eyebrow}</span>}<span>{title}</span></span>
         <ChevronDown size={17} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 160ms ease', flexShrink: 0 }} />
       </button>
-      {open && <div style={{ borderTop: '1px solid var(--border, #e6ebf2)', padding: '16px 20px 20px' }}>{sectionLoading[id] ? <div className="post-entry" style={{ color: '#6f7f93' }}>Loading…</div> : children}</div>}
+      {open && <div style={{ borderTop: '1px solid var(--border, #e6ebf2)', padding: '16px 20px 20px' }}>{sectionLoading[id] ? <div className="post-entry"><SkeletonBlock width="72%" height={12}/><div style={{ marginTop: 10 }}><SkeletonBlock width="94%" height={9}/><div style={{ marginTop: 8 }}><SkeletonBlock width="68%" height={9}/></div></div></div> : children}</div>}
     </section>;
   };
   return <>
