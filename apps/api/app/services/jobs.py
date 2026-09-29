@@ -175,7 +175,7 @@ def _normalize(**kwargs: Any) -> dict[str, Any]:
     }
 
 
-async def _adzuna(query: str, target: dict[str, str]) -> list[dict[str, Any]]:
+async def _adzuna(query: str, target: dict[str, str], client: httpx.AsyncClient) -> list[dict[str, Any]]:
     if not settings.adzuna_app_id or not settings.adzuna_app_key:
         return []
     country = target.get("country_code", "").lower() or settings.adzuna_country.lower()
@@ -185,8 +185,7 @@ async def _adzuna(query: str, target: dict[str, str]) -> list[dict[str, Any]]:
               "what": query, "content-type": "application/json"}
     if target.get("city"):
         params["where"] = target["city"]
-    async with httpx.AsyncClient(timeout=8.0) as client:
-        response = await client.get(url, params=params)
+    response = await client.get(url, params=params)
         response.raise_for_status()
         data = response.json()
     return [_normalize(provider="Adzuna", job_id=item.get("id"), title=item.get("title"),
@@ -197,7 +196,7 @@ async def _adzuna(query: str, target: dict[str, str]) -> list[dict[str, Any]]:
         for item in (data.get("results") or [])]
 
 
-async def _jooble(query: str, target: dict[str, str]) -> list[dict[str, Any]]:
+async def _jooble(query: str, target: dict[str, str], client: httpx.AsyncClient) -> list[dict[str, Any]]:
     if not settings.jooble_api_key:
         return []
     configured_country = (settings.jooble_country or "").strip().upper()
@@ -208,8 +207,7 @@ async def _jooble(query: str, target: dict[str, str]) -> list[dict[str, Any]]:
     location = target.get("city") or target.get("country") or "India"
     payload = {"keywords": query, "location": location, "page": 1,
                "ResultOnPage": min(settings.job_search_max_results, 20), "SearchMode": 0, "companysearch": False}
-    async with httpx.AsyncClient(timeout=8.0) as client:
-        response = await client.post(endpoint, json=payload)
+    response = await client.post(endpoint, json=payload)
         response.raise_for_status()
         data = response.json()
     return [_normalize(provider="Jooble", job_id=item.get("id") or item.get("link"),
@@ -218,13 +216,12 @@ async def _jooble(query: str, target: dict[str, str]) -> list[dict[str, Any]]:
         for item in (data.get("jobs") or [])]
 
 
-async def _themuse(query: str, target: dict[str, str]) -> list[dict[str, Any]]:
+async def _themuse(query: str, target: dict[str, str], client: httpx.AsyncClient) -> list[dict[str, Any]]:
     if not settings.themuse_api_key:
         return []
     params = {"page": 0, "api_key": settings.themuse_api_key,
               "location": target.get("city") or target.get("country")}
-    async with httpx.AsyncClient(timeout=8.0) as client:
-        response = await client.get(f"{settings.themuse_base_url.rstrip('/')}/jobs", params=params)
+    response = await client.get(f"{settings.themuse_base_url.rstrip('/')}/jobs", params=params)
         response.raise_for_status()
         data = response.json()
     terms = [part.lower() for part in query.split() if len(part) > 2]
@@ -244,12 +241,11 @@ async def _themuse(query: str, target: dict[str, str]) -> list[dict[str, Any]]:
     return output[:settings.job_search_max_results]
 
 
-async def _remotive(query: str, target: dict[str, str]) -> list[dict[str, Any]]:
+async def _remotive(query: str, target: dict[str, str], client: httpx.AsyncClient) -> list[dict[str, Any]]:
     if not settings.remotive_enabled:
         return []
-    async with httpx.AsyncClient(timeout=8.0) as client:
-        response = await client.get("https://remotive.com/api/remote-jobs",
-                                    params={"search": query, "limit": min(settings.job_search_max_results, 50)})
+    response = await client.get("https://remotive.com/api/remote-jobs",
+                                params={"search": query, "limit": min(settings.job_search_max_results, 50)})
         response.raise_for_status()
         data = response.json()
     return [_normalize(provider="Remotive", job_id=item.get("id"), title=item.get("title"),
@@ -339,7 +335,12 @@ async def search_jobs(
         except Exception as exc:
             return name, [], str(exc)[:300], int((time.perf_counter() - started) * 1000)
 
-    results = await asyncio.gather(*(call(name, fn) for name, fn in providers))
+    timeout = httpx.Timeout(6.0, connect=2.5)
+    limits = httpx.Limits(max_connections=8, max_keepalive_connections=8)
+    async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
+        results = await asyncio.gather(
+            *(call(name, lambda q, fn=fn: fn(q, target, client)) for name, fn in providers)
+        )
     jobs: list[dict[str, Any]] = []
     provider_status = []
     configured = {
