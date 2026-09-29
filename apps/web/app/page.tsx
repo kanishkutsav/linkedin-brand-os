@@ -20,7 +20,7 @@ function getApiError(data: any, fallback: string) {
 
 type ApprovalStatus = 'PENDING' | 'EDITED' | 'REGENERATED' | 'APPROVED' | 'PUBLISHING' | 'REJECTED' | 'EXECUTED';
 type ApprovalItem = { id: number; status: ApprovalStatus; action_type: string; reason: string | null; content: string; title?: string; topic?: string; approved_at?: string | null; created_at?: string };
-type Profile = { display_name: string; role?: string };
+type Profile = { display_name: string; role?: string; picture_url?: string | null };
 type LinkedInStatus = {
   connected: boolean;
   name?: string | null;
@@ -71,7 +71,8 @@ const nav = [
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
-  const [profile, setProfile] = useState<Profile>({ display_name: 'User', role: 'owner' });
+  const [profile, setProfile] = useState<Profile>({ display_name: '', role: 'owner', picture_url: null });
+  const [identityLoading, setIdentityLoading] = useState(true);
   const [linkedinAvatarFailed, setLinkedinAvatarFailed] = useState(false);
   const [linkedin, setLinkedin] = useState<LinkedInStatus>({ connected: false });
   const linkedinSyncAttemptedToken = useRef<string | null>(null);
@@ -341,7 +342,12 @@ useEffect(() => {
 
       const profileJson = await profileRes.json();
       const approvalsJson = await approvalsRes.json();
-      setProfile({ display_name: profileJson.display_name || 'User', role: profileJson.role || 'owner' });
+      setProfile({
+        display_name: profileJson.display_name || profileJson.name || '',
+        role: profileJson.role || 'owner',
+        picture_url: profileJson.picture_url || profileJson.avatar_url || null,
+      });
+      setIdentityLoading(false);
       if (profileJson.role === 'admin' && new URLSearchParams(window.location.search).get('admin') === '1') setTab('Admin');
       if (profileJson.role !== 'admin' && tab === 'Admin') {
         setTab('Dashboard');
@@ -381,6 +387,10 @@ useEffect(() => {
         setLinkedin(linkedinJson);
         const brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
         setBrand(brandJson);
+        const resolvedPicture = linkedinJson.picture_url || brandJson.linkedin_profile?.picture_url || null;
+        if (resolvedPicture) {
+          setProfile((current) => ({ ...current, picture_url: current.picture_url || resolvedPicture }));
+        }
 
         if (
           linkedinJson.connected &&
@@ -610,8 +620,8 @@ const loadAdminOverview = async () => {
     executed: dashboardCounts.published,
   };
 
-  const initials = (profile.display_name || 'User').split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase();
-  const linkedinAvatarUrl = brand.linkedin_profile?.picture_url || null;
+  const initials = (profile.display_name || 'User').trim().split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase();
+  const linkedinAvatarUrl = profile.picture_url || brand.linkedin_profile?.picture_url || null;
   useEffect(() => { setLinkedinAvatarFailed(false); }, [linkedinAvatarUrl]);
   const closeMore = () => setMoreOpen(false);
   const isIosDevice = () => /iphone|ipad|ipod/i.test(window.navigator.userAgent) || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
@@ -984,7 +994,7 @@ const loadAdminOverview = async () => {
           <div className="topbar-actions">
             <div className="profile-menu-wrap">
               <button className="avatar profile-trigger" title="Account menu" onClick={() => setProfileMenuOpen((v) => !v)} aria-expanded={profileMenuOpen}>
-                {linkedinAvatarUrl && !linkedinAvatarFailed ? <img src={linkedinAvatarUrl} alt={profile.display_name ? profile.display_name + ' profile' : 'Profile'} onError={() => setLinkedinAvatarFailed(true)} referrerPolicy="no-referrer" /> : initials}
+                {identityLoading ? <span className="avatar-loading" aria-label="Loading profile" /> : linkedinAvatarUrl && !linkedinAvatarFailed ? <img src={linkedinAvatarUrl} alt={profile.display_name ? profile.display_name + ' profile' : 'Profile'} onError={() => setLinkedinAvatarFailed(true)} referrerPolicy="no-referrer" /> : initials}
               </button>
               {profileMenuOpen && <div className="profile-menu">
                 <div className="profile-menu-head"><strong>{profile.display_name || 'Profile'}</strong><span>{profile.role || 'user'}</span></div>
@@ -1132,10 +1142,10 @@ const loadAdminOverview = async () => {
 
       <nav className="mobile-bottom-nav" aria-label="Mobile workspace navigation">
         {[
-          ['Dashboard', LayoutDashboard, 'Home'],
+          ['Dashboard', LayoutDashboard, 'Dashboard'],
           ['Research', Search, 'Research'],
           ['Content Studio', FileText, 'Content Studio'],
-          ['LinkedIn Posts', ExternalLink, 'Posts'],
+          ['Jobs', Briefcase, 'Jobs'],
         ].map(([key, Icon, label]) => (
           <button key={key as string} className={`mobile-nav-item ${tab === key ? 'active' : ''}`} onClick={() => go(key as Tab)}>
             <Icon size={18} />
@@ -1155,8 +1165,10 @@ const loadAdminOverview = async () => {
             <div className="mobile-sheet-handle" />
             <div className="mobile-sheet-title">More</div>
             <div className="mobile-more-grid">
+              <button onClick={() => go('LinkedIn Posts')}><ExternalLink size={18} /><span>LinkedIn Posts</span></button>
               <button onClick={() => go('Analytics')}><BarChart3 size={18} /><span>Analytics</span></button>
               <button onClick={() => go('Brand DNA')}><Settings size={18} /><span>Brand DNA</span></button>
+              {profile.role === 'admin' && <button onClick={() => go('Admin')}><ShieldAlert size={18} /><span>Admin</span></button>}
               <button onClick={() => { closeMore(); connectLinkedIn(); }}><Link2 size={18} /><span>{linkedin.connected ? 'LinkedIn' : 'Connect LinkedIn'}</span></button>
               <button onClick={installSuvacya} disabled={isStandalone}><Download size={18} /><span>{isStandalone ? 'Installed' : 'Install Suvacya'}</span></button>
             </div>
