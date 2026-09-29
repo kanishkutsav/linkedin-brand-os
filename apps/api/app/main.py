@@ -43,7 +43,8 @@ from app.services.auth_service import AppUser, AuthService
 from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback, sync_missing_profile_data
 from app.services.linkedin_analytics import LinkedInAnalyticsService
 from app.services.gemini_service import ModelRouterService
-from app.services.jobs import resolve_job_location, search_jobs
+from app.services.jobs import resolve_job_location
+from app.services.apify_jobs import search_jobs_apify
 from app.services.security import (
     CSRF_COOKIE, SESSION_COOKIE, clear_session_cookies, client_key, decrypt_linkedin_token, encrypt_linkedin_token,
     endpoint_limit, migrate_plaintext_linkedin_tokens, rate_limiter, request_token,
@@ -378,122 +379,47 @@ class FeedbackStatusRequest(BaseModel):
     priority: str | None = None
 
 
-@app.get("/api/jobs/search")
-async def jobs_search(
-    request: Request,
-    query: str | None = None,
-    session: AsyncSession = Depends(get_session),
-    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
-):
+class JobSearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: str = Field(default="recommended", pattern="^(recommended|manual)$")
+    job_title: str | None = Field(default=None, max_length=200)
+    location: str | None = Field(default=None, max_length=200)
+    experience: float | None = Field(default=None, ge=0, le=60)
+    page: int = Field(default=1, ge=1, le=50)
+    limit: int = Field(default=20, ge=1, le=20)
+
+
+async def _job_search_inputs(request: Request, req: JobSearchRequest, session: AsyncSession, current_user: AppUser):
     profile = await AuthService.get_or_create_profile(session, current_user)
-    linkedin_result = await session.execute(
-        select(LinkedInConnection).where(LinkedInConnection.user_id == int(current_user.id))
-    )
+    linkedin_result = await session.execute(select(LinkedInConnection).where(LinkedInConnection.user_id == int(current_user.id)))
     linkedin_connection = linkedin_result.scalar_one_or_none()
-    location = resolve_job_location(
-        request,
-        linkedin_connection.linkedin_locale if linkedin_connection else None,
-        default_country=settings.adzuna_country,
-    )
-    return await search_jobs(
-        session,
-        profile.professional_title or "",
-        profile.experience_years,
-        profile.industry or "",
-        query,
-        location=location,
-    )
+    ip_location = resolve_job_location(request, linkedin_connection.linkedin_locale if linkedin_connection else None, default_country=settings.adzuna_country)
+    if req.mode == "manual":
+        title, location = (req.job_title or "").strip(), (req.location or "").strip()
+        if not title: raise HTTPException(status_code=422, detail="Target job title is required.")
+        if not location: raise HTTPException(status_code=422, detail="Location is required.")
+        return title, req.experience, {**ip_location, "city": location, "source": "manual"}
+    title = (profile.professional_title or "").strip()
+    if not title: raise HTTPException(status_code=422, detail="Complete your Brand DNA with a target job title before searching jobs.")
+    return title, profile.experience_years, ip_location
 
 
-@app.post("/api/feedback")
-async def submit_feedback(req: FeedbackRequest, session: AsyncSession = Depends(get_session),
-                          current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
-    if req.feedback_type not in {"BUG", "FEATURE", "GENERAL", "OTHER"}:
-        raise HTTPException(status_code=400, detail="Unsupported feedback type.")
-    feedback = UserFeedback(user_id=int(current_user.id), feedback_type=req.feedback_type,
-                            subject=req.subject.strip(), description=req.description.strip(),
-                            context=(req.context or "").strip()[:1000] or None)
-    session.add(feedback)
-    session.add(AuditLog(event_type="FEEDBACK_SUBMITTED", actor=str(current_user.id),
-                         payload=json.dumps({"feedback_type": req.feedback_type, "subject": req.subject[:200]})))
-    await session.commit()
-    return {"id": feedback.id, "status": feedback.status}
+@app.post("/api/jobs/search")
+async def jobs_search(request: Request, req: JobSearchRequest, session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
+    title, experience, location = await _job_search_inputs(request, req, session, current_user)
+    return await search_jobs_apify(title=title, experience=experience, location=location, page=req.page, limit=req.limit)
 
 
-@app.get("/api/feedback")
-async def list_my_feedback(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
-    rows = (await session.execute(select(UserFeedback).where(UserFeedback.user_id == int(current_user.id)).order_by(UserFeedback.created_at.desc()).limit(50))).scalars().all()
-    return {"items": [{"id": x.id, "type": x.feedback_type, "subject": x.subject, "description": x.description,
-                       "status": x.status, "priority": x.priority, "created_at": x.created_at} for x in rows]}
+@app.get("/api/jobs/search")
+async def jobs_search_legacy(request: Request, query: str | None = None, session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
+    req = JobSearchRequest(mode="recommended" if not (query or "").strip() else "manual", job_title=query, page=1, limit=20)
+    title, experience, location = await _job_search_inputs(request, req, session, current_user)
+    return await search_jobs_apify(title=title, experience=experience, location=location, page=1, limit=20)
 
-
-@app.get("/api/admin/overview")
-async def admin_overview(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
-    total_users = len((await session.execute(select(AuthUser.id))).scalars().all())
-    active_users = len((await session.execute(select(AuthUser.id).where(AuthUser.is_active == True))).scalars().all())
-    total_events = len((await session.execute(select(ObservabilityEvent.id))).scalars().all())
-    failed = len((await session.execute(select(ObservabilityEvent.id).where(ObservabilityEvent.status == "FAILED"))).scalars().all())
-    successful = len((await session.execute(select(ObservabilityEvent.id).where(ObservabilityEvent.status == "SUCCESS"))).scalars().all())
-    total_feedback = len((await session.execute(select(UserFeedback.id))).scalars().all())
-    open_feedback = len((await session.execute(select(UserFeedback.id).where(UserFeedback.status.in_(["NEW", "REVIEWING", "PLANNED", "IN_PROGRESS"])))).scalars().all())
-    return {"users": {"total": total_users, "active": active_users},
-            "reliability": {"events": total_events, "successful_requests": successful, "failed_requests": failed, "error_rate": failed / total_events if total_events else 0},
-            "feedback": {"total": total_feedback, "open": open_feedback},
-            "ai_providers": {"groq": bool(settings.groq_api_key), "openrouter": bool(settings.openrouter_api_key), "gemini": bool(settings.gemini_api_key)},
-            "job_providers": {"Adzuna": bool(settings.adzuna_app_id and settings.adzuna_app_key), "Jooble": bool(settings.jooble_api_key), "The Muse": bool(settings.themuse_api_key), "Remotive": bool(settings.remotive_enabled)}}
-
-
-@app.get("/api/admin/users")
-async def admin_users(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
-    users = (await session.execute(select(AuthUser).order_by(AuthUser.created_at.desc()).limit(500))).scalars().all()
-    return {"items": [{"id": u.id, "email": u.email, "display_name": u.display_name, "role": u.role,
-                       "active": u.is_active, "whitelisted": u.is_whitelisted, "created_at": u.created_at} for u in users]}
-
-
-@app.get("/api/admin/failures")
-async def admin_failures(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
-    rows = (await session.execute(select(ObservabilityEvent).where(ObservabilityEvent.status == "FAILED").order_by(ObservabilityEvent.created_at.desc()).limit(100))).scalars().all()
-    return {"items": [{"id": x.id, "user_id": x.user_id, "correlation_id": x.correlation_id, "event_type": x.event_type,
-                       "activity_type": x.activity_type, "status": x.status, "failure_category": x.failure_category,
-                       "http_status": x.http_status, "latency_ms": x.latency_ms, "provider": x.provider,
-                       "fallback_used": x.fallback_used, "final_provider": x.final_provider, "created_at": x.created_at,
-                       "details": json.loads(x.details_json or "{}")} for x in rows]}
-
-
-@app.get("/api/admin/feedback")
-async def admin_feedback(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
-    rows = (await session.execute(select(UserFeedback).order_by(UserFeedback.created_at.desc()).limit(300))).scalars().all()
-    return {"items": [{"id": x.id, "user_id": x.user_id, "type": x.feedback_type, "subject": x.subject,
-                       "description": x.description, "context": x.context, "status": x.status, "priority": x.priority,
-                       "created_at": x.created_at, "updated_at": x.updated_at} for x in rows]}
-
-
-@app.patch("/api/admin/feedback/{feedback_id}")
-async def admin_update_feedback(feedback_id: int, req: FeedbackStatusRequest, session: AsyncSession = Depends(get_session),
-                                current_user: AppUser = Depends(require_roles("admin"))):
-    if req.status not in {"NEW", "REVIEWING", "PLANNED", "IN_PROGRESS", "RESOLVED", "DUPLICATE", "NOT_PLANNED"}:
-        raise HTTPException(status_code=400, detail="Invalid feedback status.")
-    if req.priority and req.priority not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
-        raise HTTPException(status_code=400, detail="Invalid feedback priority.")
-    item = (await session.execute(select(UserFeedback).where(UserFeedback.id == feedback_id))).scalar_one_or_none()
-    if item is None:
-        raise HTTPException(status_code=404, detail="Feedback not found.")
-    item.status = req.status
-    if req.priority:
-        item.priority = req.priority
-    session.add(AuditLog(event_type="FEEDBACK_UPDATED", actor=str(current_user.id),
-                         payload=json.dumps({"feedback_id": feedback_id, "status": req.status, "priority": req.priority})))
-    await session.commit()
-    return {"id": item.id, "status": item.status, "priority": item.priority}
-
-
-@app.get("/api/admin/ai-providers")
-async def admin_ai_providers(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
-    return {"configured": {"groq": bool(settings.groq_api_key), "openrouter": bool(settings.openrouter_api_key), "gemini": bool(settings.gemini_api_key)}}
 
 @app.get("/api/admin/job-providers")
 async def admin_job_providers(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
-    return {"configured": {"Adzuna": bool(settings.adzuna_app_id and settings.adzuna_app_key), "Jooble": bool(settings.jooble_api_key), "The Muse": bool(settings.themuse_api_key), "Remotive": bool(settings.remotive_enabled)}}
+    return {"configured": {"Indeed": bool(settings.apify_api_token), "Naukri": bool(settings.apify_api_token)}}
 
 @app.middleware("http")
 async def observability_controls(request: Request, call_next):
