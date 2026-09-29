@@ -159,6 +159,10 @@ export default function Home() {
   const [adminJobProviders, setAdminJobProviders] = useState<any>(null);
   const [adminSections, setAdminSections] = useState<Record<string, boolean>>({});
   const [adminSectionLoading, setAdminSectionLoading] = useState<Record<string, boolean>>({});
+  const [adminUserEmail, setAdminUserEmail] = useState('');
+  const [adminUserName, setAdminUserName] = useState('');
+  const [adminUserSaving, setAdminUserSaving] = useState(false);
+  const [adminUserActionId, setAdminUserActionId] = useState<number | null>(null);
 
   const headers = (authToken = token) => (authToken && authToken !== 'cookie') ? { Authorization: `Bearer ${authToken}` } : {};
 
@@ -617,6 +621,68 @@ useEffect(() => {
     } catch (e) { setError(e instanceof Error ? e.message : 'Admin section could not be loaded.'); }
     finally { setAdminSectionLoading((prev) => ({ ...prev, [section]: false })); }
   };
+  const createAdminUser = async () => {
+    const email = adminUserEmail.trim().toLowerCase();
+    if (!email) {
+      setError('Enter an email address to add a user.');
+      return;
+    }
+    setAdminUserSaving(true);
+    try {
+      const response = await apiFetch(API_BASE + '/api/admin/users', {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, display_name: adminUserName.trim() || null }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(getApiError(data, 'User could not be added.'));
+      setAdminUserEmail('');
+      setAdminUserName('');
+      await loadAdminSection('users', true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'User could not be added.');
+    } finally {
+      setAdminUserSaving(false);
+    }
+  };
+
+  const updateAdminUser = async (userId: number, changes: Record<string, unknown>, confirmation: string) => {
+    if (!window.confirm(confirmation)) return;
+    setAdminUserActionId(userId);
+    try {
+      const response = await apiFetch(API_BASE + `/api/admin/users/${userId}`, {
+        method: 'PATCH',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(getApiError(data, 'User could not be updated.'));
+      await loadAdminSection('users', true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'User could not be updated.');
+    } finally {
+      setAdminUserActionId(null);
+    }
+  };
+
+  const removeAdminUser = async (userId: number, label: string) => {
+    if (!window.confirm(`Remove ${label} from the account directory? This will deactivate the account and remove whitelist access.`)) return;
+    setAdminUserActionId(userId);
+    try {
+      const response = await apiFetch(API_BASE + `/api/admin/users/${userId}`, {
+        method: 'DELETE',
+        headers: headers(),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(getApiError(data, 'User could not be removed.'));
+      await loadAdminSection('users', true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'User could not be removed.');
+    } finally {
+      setAdminUserActionId(null);
+    }
+  };
+
   const toggleAdminSection = (section: string) => {
     const nextOpen = !adminSections[section];
     setAdminSections((prev) => ({ ...prev, [section]: nextOpen }));
@@ -1133,7 +1199,7 @@ useEffect(() => {
           {tab === 'Analytics' && <AnalyticsView loading={analyticsLoading} analytics={analytics} />}
           {tab === 'Jobs' && <ProductionJobsView jobs={jobs} location={jobLocation} query={jobQuery} experience={jobExperience} loading={jobsLoading} page={jobPage} hasMore={jobHasMore} onSearch={loadJobs} />}
           {tab === 'Feedback' && <FeedbackView type={feedbackType} setType={setFeedbackType} subject={feedbackSubject} setSubject={setFeedbackSubject} description={feedbackDescription} setDescription={setFeedbackDescription} context={feedbackContext} setContext={setFeedbackContext} sending={feedbackSending} onSubmit={async () => { if (!feedbackSubject.trim() || !feedbackDescription.trim() || !token) return; setFeedbackSending(true); try { const res = await apiFetch(API_BASE + '/api/feedback', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback_type: feedbackType, subject: feedbackSubject, description: feedbackDescription, context: feedbackContext }) }); const data = await res.json(); if (!res.ok) throw new Error(getApiError(data, 'Feedback could not be submitted.')); setFeedbackSubject(''); setFeedbackDescription(''); setFeedbackContext(''); setNotice('Thanks. Your feedback was submitted.'); } catch (e) { setError(e instanceof Error ? e.message : 'Feedback could not be submitted.'); } finally { setFeedbackSending(false); } }} />}
-          {tab === 'Admin' && profile.role === 'admin' && <AdminView overview={adminOverview} activity={adminActivity} feedback={adminFeedback} users={adminUsers} aiProviders={adminAiProviders} jobProviders={adminJobProviders} sections={adminSections} sectionLoading={adminSectionLoading} onToggle={toggleAdminSection} onRefresh={refreshAdmin} />}
+          {tab === 'Admin' && profile.role === 'admin' && <AdminView overview={adminOverview} activity={adminActivity} feedback={adminFeedback} users={adminUsers} aiProviders={adminAiProviders} jobProviders={adminJobProviders} sections={adminSections} sectionLoading={adminSectionLoading} onToggle={toggleAdminSection} onRefresh={refreshAdmin} onCreateUser={createAdminUser} onUpdateUser={updateAdminUser} onRemoveUser={removeAdminUser} adminUserEmail={adminUserEmail} setAdminUserEmail={setAdminUserEmail} adminUserName={adminUserName} setAdminUserName={setAdminUserName} adminUserSaving={adminUserSaving} adminUserActionId={adminUserActionId} />}
           {tab === 'Brand DNA' && (
             ((loading || brandLoading) && !brand.profile) ? <SettingsSkeleton /> : <SettingsView
               brand={brand}
@@ -2181,7 +2247,7 @@ function FeedbackView({ type, setType, subject, setSubject, description, setDesc
   </>;
 }
 
-function AdminView({ overview, activity, feedback, users, aiProviders, jobProviders, sections, sectionLoading, onToggle, onRefresh }: any) {
+function AdminView({ overview, activity, feedback, users, aiProviders, jobProviders, sections, sectionLoading, onToggle, onRefresh, onCreateUser, onUpdateUser, onRemoveUser, adminUserEmail, setAdminUserEmail, adminUserName, setAdminUserName, adminUserSaving, adminUserActionId }: any) {
   if (!overview) return <div className="admin-page">
     <div className="page-header"><div><SkeletonBlock width={130} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={310} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={520} height={10}/></div></div><SkeletonBlock width={82} height={34} radius={9}/></div>
     <div className="admin-metric-grid">{[1,2,3,4].map((item) => <div className="admin-metric-card" key={item}><SkeletonBlock width="48%" height={10}/><div style={{ marginTop: 15 }}><SkeletonBlock width="35%" height={25}/></div></div>)}</div>
@@ -2210,6 +2276,47 @@ function AdminView({ overview, activity, feedback, users, aiProviders, jobProvid
     <Section id="job-providers" title="Job providers" eyebrow="PROVIDER READINESS"><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{Object.entries(jobProviders?.configured || {}).map(([k,v]: any) => <span className="tag" key={k}>{k} · {v ? 'available' : 'not configured'}</span>)}</div></Section>
     <Section id="failures" title="Failed requests" eyebrow="OBSERVABILITY">{activity.length ? activity.slice(0, 30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}><b>{x.activity_type}</b> · {x.failure_category || 'UNKNOWN'} · {x.http_status || '—'} · {x.latency_ms ?? 0}ms<div style={{ marginTop: 4, color: '#6f7f93' }}>Correlation #{x.correlation_id}</div>{x.details && Object.keys(x.details).length > 0 && <div style={{ marginTop: 5, color: '#5f6f86' }}>{JSON.stringify(x.details)}</div>}</div>) : <div className="post-entry" style={{ color: '#6f7f93' }}>No failed requests recorded.</div>}</Section>
     <Section id="feedback" title="Feedback inbox" eyebrow="PRODUCT FEEDBACK">{feedback.length ? feedback.slice(0, 30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}><b>{x.type}</b> · {x.subject} · {x.status} · {x.priority}<div style={{ marginTop: 5, color:'#5f6f86' }}>{x.description}</div></div>) : <div className="post-entry" style={{ color: '#6f7f93' }}>No feedback submitted.</div>}</Section>
-    <Section id="users" title="Users" eyebrow="ACCOUNT DIRECTORY">{users.length ? users.slice(0, 30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}>{x.display_name || 'User'} · {x.email} · <b>{x.role}</b> · {x.active ? 'active' : 'inactive'}</div>) : <div className="post-entry" style={{ color: '#6f7f93' }}>No users found.</div>}</Section>
+    <Section id="users" title="Users" eyebrow="ACCOUNT DIRECTORY">
+      <div style={{ display: 'grid', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(180px, 1fr) auto', gap: 8, alignItems: 'end' }}>
+          <label className="field"><span>Name</span><input value={adminUserName} onChange={(e) => setAdminUserName(e.target.value)} placeholder="Optional display name" /></label>
+          <label className="field"><span>Email</span><input type="email" value={adminUserEmail} onChange={(e) => setAdminUserEmail(e.target.value)} placeholder="user@example.com" /></label>
+          <button className="button primary" onClick={() => void onCreateUser()} disabled={adminUserSaving}><Plus size={14}/>{adminUserSaving ? 'Adding…' : 'Add user'}</button>
+        </div>
+        <div style={{ color: '#6f7f93', fontSize: 12 }}>Adding a user makes the account active and whitelisted. If the email already exists, it is reactivated and re-whitelisted.</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <span className="tag">Total · {users.length}</span>
+          <span className="tag">Active · {users.filter((x:any) => x.active).length}</span>
+          <span className="tag">Inactive · {users.filter((x:any) => !x.active).length}</span>
+          <span className="tag">Whitelisted · {users.filter((x:any) => x.whitelisted).length}</span>
+          <span className="tag">Not whitelisted · {users.filter((x:any) => !x.whitelisted).length}</span>
+        </div>
+        {users.length ? users.map((x:any) => {
+          const busy = adminUserActionId === x.id;
+          const label = x.display_name || x.email;
+          return <div className="post-entry" key={x.id} style={{ marginTop: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center' }}>
+              <div>
+                <div style={{ fontWeight: 650 }}>{x.display_name || 'User'}</div>
+                <div style={{ marginTop: 4, color: '#5f6f86' }}>{x.email} · {x.role}</div>
+                <div style={{ marginTop: 7, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <span className="tag">Active · {x.active ? 'Yes' : 'No'}</span>
+                  <span className="tag">Whitelisted · {x.whitelisted ? 'Yes' : 'No'}</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                {x.active
+                  ? <button className="button" disabled={busy} onClick={() => void onUpdateUser(x.id, { active: false }, `Deactivate ${label}? They will no longer be able to sign in.`)}><ShieldAlert size={13}/>Deactivate</button>
+                  : <button className="button" disabled={busy} onClick={() => void onUpdateUser(x.id, { active: true }, `Reactivate ${label}?`)}><CircleCheck size={13}/>Activate</button>}
+                {x.whitelisted
+                  ? <button className="button" disabled={busy} onClick={() => void onUpdateUser(x.id, { whitelisted: false }, `Remove ${label} from the whitelist?`)}><X size={13}/>Remove whitelist</button>
+                  : <button className="button" disabled={busy} onClick={() => void onUpdateUser(x.id, { whitelisted: true }, `Add ${label} back to the whitelist?`)}><ShieldCheck size={13}/>Whitelist</button>}
+                <button className="button danger" disabled={busy} onClick={() => void onRemoveUser(x.id, label)}><X size={13}/>Remove user</button>
+              </div>
+            </div>
+          </div>;
+        }) : <div className="post-entry" style={{ color: '#6f7f93' }}>No users found.</div>}
+      </div>
+    </Section>
   </div>;
 }
