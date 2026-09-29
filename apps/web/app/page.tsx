@@ -72,7 +72,6 @@ const nav = [
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
-  const [pendingRequests, setPendingRequests] = useState(0);
   const [profile, setProfile] = useState<Profile>({ display_name: 'User', role: 'owner' });
   const [linkedinAvatarFailed, setLinkedinAvatarFailed] = useState(false);
   const [linkedin, setLinkedin] = useState<LinkedInStatus>({ connected: false });
@@ -153,9 +152,8 @@ export default function Home() {
       const csrf = readCookie('__Host-suvacya-csrf') || readCookie('suvacya-csrf');
       if (csrf) requestHeaders.set('X-CSRF-Token', csrf);
     }
-    setPendingRequests((count) => count + 1);
     return fetch(input, { ...init, headers: requestHeaders, credentials: 'include' })
-      .finally(() => setPendingRequests((count) => Math.max(0, count - 1)));
+      ;
   };
 
   useEffect(() => {
