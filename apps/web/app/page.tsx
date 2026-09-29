@@ -72,7 +72,6 @@ const nav = [
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
-  const [pendingRequests, setPendingRequests] = useState(0);
   const [profile, setProfile] = useState<Profile>({ display_name: 'User', role: 'owner' });
   const [linkedinAvatarFailed, setLinkedinAvatarFailed] = useState(false);
   const [linkedin, setLinkedin] = useState<LinkedInStatus>({ connected: false });
@@ -118,10 +117,17 @@ export default function Home() {
   const [researchStage, setResearchStage] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const researchLoadedRef = useRef(false);
+  const analyticsLoadedRef = useRef(false);
+  const learningLoadedRef = useRef(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [brandLoading, setBrandLoading] = useState(false);
+  const [researchLoading, setResearchLoading] = useState(false);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [learningLoading, setLearningLoading] = useState(false);
   const [learningStatus, setLearningStatus] = useState({ pending_events: 0, memory_count: 0 });
   const [personalThoughts, setPersonalThoughts] = useState<PersonalThought[]>([]);
   const [dashboardCounts, setDashboardCounts] = useState({
@@ -153,9 +159,7 @@ export default function Home() {
       const csrf = readCookie('__Host-suvacya-csrf') || readCookie('suvacya-csrf');
       if (csrf) requestHeaders.set('X-CSRF-Token', csrf);
     }
-    setPendingRequests((count) => count + 1);
-    return fetch(input, { ...init, headers: requestHeaders, credentials: 'include' })
-      .finally(() => setPendingRequests((count) => Math.max(0, count - 1)));
+    return fetch(input, { ...init, headers: requestHeaders, credentials: 'include' });
   };
 
   useEffect(() => {
@@ -313,17 +317,18 @@ useEffect(() => {
   const fetchData = async (authToken: string | null = token) => {
     if (!authToken) return;
     setLoading(true);
+    setBrandLoading(true);
     try {
-      // Load the core workspace first. Optional panels must never block the
-      // dashboard/Brand DNA from appearing.
-      const [profileRes, approvalsRes, linkedinRes, brandRes] = await Promise.all([
-        apiFetch(`${API_BASE}/api/auth/me`, { headers: headers(authToken) }),
-        apiFetch(`${API_BASE}/api/dashboard/approvals`, { headers: headers(authToken) }),
-        apiFetch(`${API_BASE}/api/linkedin/status`, { headers: headers(authToken) }),
-        apiFetch(`${API_BASE}/api/brand/status`, { headers: headers(authToken) }),
-      ]);
+      const profilePromise = apiFetch(`${API_BASE}/api/auth/me`, { headers: headers(authToken) });
+      const approvalsPromise = apiFetch(`${API_BASE}/api/dashboard/approvals`, { headers: headers(authToken) });
+      const linkedinPromise = apiFetch(`${API_BASE}/api/linkedin/status`, { headers: headers(authToken) });
+      const brandPromise = apiFetch(`${API_BASE}/api/brand/status`, { headers: headers(authToken) });
+
+      const [profileRes, approvalsRes] = await Promise.all([profilePromise, approvalsPromise]);
       if (profileRes.status === 401 || approvalsRes.status === 401) {
-        setToken(null); setQueue([]); setLinkedin({ connected: false });
+        setToken(null);
+        setQueue([]);
+        setLinkedin({ connected: false });
         throw new Error('Your session expired. Please sign in with LinkedIn again.');
       }
       if (!profileRes.ok || !approvalsRes.ok) throw new Error('Unable to load dashboard data.');
@@ -332,77 +337,6 @@ useEffect(() => {
       const approvalsJson = await approvalsRes.json();
       setProfile({ display_name: profileJson.display_name || 'User', role: profileJson.role || 'owner' });
       if (profileJson.role === 'admin' && new URLSearchParams(window.location.search).get('admin') === '1') setTab('Admin');
-      const linkedinJson = linkedinRes.ok ? await linkedinRes.json() : { connected: false };
-      setLinkedin(linkedinJson);
-
-      let brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
-
-      setBrand(brandJson);
-
-      // Existing LinkedIn connections may predate the profile metadata fields.
-      // Make at most one best-effort refresh per authenticated session, and
-      // only when at least one of the new fields is actually missing. The API
-      // fills missing values only and never overwrites values already stored.
-      if (
-        linkedinJson.connected &&
-        linkedinJson.profile_sync_needed &&
-        linkedinSyncAttemptedToken.current !== authToken
-      ) {
-        linkedinSyncAttemptedToken.current = authToken;
-        void apiFetch(API_BASE + '/api/linkedin/profile/sync-missing', {
-          method: 'POST',
-          headers: headers(authToken),
-        }).then(async (syncRes) => {
-          if (!syncRes.ok) return;
-          const syncJson = await syncRes.json();
-          if (!syncJson.updated || !syncJson.profile) return;
-          setBrand((current) => ({
-            ...current,
-            linkedin_profile: {
-              ...(current.linkedin_profile || {}),
-              ...syncJson.profile,
-              connected: true,
-            },
-          }));
-        }).catch(() => {
-          // Missing profile metadata is optional and must never block the workspace.
-        });
-      }
-
-      const p = brandJson.profile || {};
-      setBrandTitle(p.professional_title || '');
-      setBrandIndustry(p.industry || '');
-      setBrandExperienceYears(typeof p.experience_years === 'number' ? p.experience_years : '');
-      setBrandTone(p.tone || '');
-
-      // First-time LinkedIn users get a one-time, best-effort Brand DNA
-      // bootstrap. It uses only the official profile data we already received.
-      if (linkedinJson.connected && brandJson.brand_bootstrap_completed === false) {
-        void apiFetch(`${API_BASE}/api/brand/bootstrap`, { method: 'POST', headers: headers(authToken) })
-          .then(async (bootstrapRes) => {
-            if (!bootstrapRes.ok) return;
-            const bootstrapJson = await bootstrapRes.json();
-            const bootstrapProfile = bootstrapJson.profile || {};
-            if (bootstrapProfile.professional_title !== undefined) setBrandTitle(bootstrapProfile.professional_title || '');
-            if (bootstrapProfile.industry !== undefined) setBrandIndustry(bootstrapProfile.industry || '');
-            if (bootstrapProfile.experience_years !== undefined) setBrandExperienceYears(typeof bootstrapProfile.experience_years === 'number' ? bootstrapProfile.experience_years : '');
-            if (bootstrapProfile.tone !== undefined) setBrandTone(bootstrapProfile.tone || '');
-            if (bootstrapJson.brand_memory) {
-              setBrand({ ...bootstrapJson.brand_memory, ready: bootstrapJson.ready === true });
-            }
-            await fetchData(authToken);
-          })
-          .catch(() => {
-            // Bootstrap is optional. Never block the core workspace if it fails.
-          });
-      }
-
-      // Brand status now carries the frozen source-post snapshot, so Brand DNA
-      // does not depend on a second request just to display the user's posts.
-      const sourcePosts = (brandJson.source_posts || [])
-        .map((item: any) => item.body)
-        .filter((body: any) => typeof body === 'string' && body.trim());
-      setHistoricalPostEntries(sourcePosts.slice(0, 10));
 
       const nextQueue: ApprovalItem[] = (approvalsJson.pending_approvals || []).map((item: any) => ({
         id: item.id, status: item.status, action_type: item.action_type, reason: item.reason, content: item.content || '',
@@ -421,10 +355,6 @@ useEffect(() => {
         pending_filter: pendingFilterCount,
       });
 
-      // On the initial workspace load, take the user to actionable work first:
-      // Pending has priority; if it is empty, show Needs review; if both are
-      // empty, keep the normal Pending empty state. Do not re-run this fallback
-      // after actions because the user may have intentionally changed filters.
       if (!initialReviewFilterResolved.current) {
         setStatusFilter(pendingFilterCount > 0 ? 'PENDING' : needsReviewCount > 0 ? 'NEEDS_REVIEW' : 'PENDING');
         initialReviewFilterResolved.current = true;
@@ -433,31 +363,134 @@ useEffect(() => {
 
       setLoading(false);
 
-      // Optional workspace panels load independently. A slow research feed or
-      // analytics query must not blank/freeze the main workspace.
-      void Promise.all([
-        apiFetch(`${API_BASE}/api/research/opportunities`, { headers: headers(authToken) }),
-        apiFetch(`${API_BASE}/api/analytics/overview`, { headers: headers(authToken) }),
-        apiFetch(`${API_BASE}/api/learning/status`, { headers: headers(authToken) }),
-        apiFetch(`${API_BASE}/api/learning/thoughts`, { headers: headers(authToken) }),
-       ]).then(async ([opportunityRes, analyticsRes, learningRes, thoughtsRes]) => {
-        const opportunityJson = opportunityRes.ok ? await opportunityRes.json() : { opportunities: [] };
-        setOpportunities(opportunityJson.opportunities || []);
-        const analyticsJson = analyticsRes.ok ? await analyticsRes.json() : null;
-        setAnalytics(analyticsJson);
-        if (learningRes.ok) setLearningStatus(await learningRes.json());
-        if (thoughtsRes.ok) {
-          const thoughtsJson = await thoughtsRes.json();
-          setPersonalThoughts(thoughtsJson.thoughts || []);
+      void Promise.all([linkedinPromise, brandPromise]).then(async ([linkedinRes, brandRes]) => {
+        const linkedinJson = linkedinRes.ok ? await linkedinRes.json() : { connected: false };
+        setLinkedin(linkedinJson);
+        const brandJson = brandRes.ok ? await brandRes.json() : { ready: false, status: 'NOT_INITIALIZED', source_post_count: 0 };
+        setBrand(brandJson);
+
+        if (
+          linkedinJson.connected &&
+          linkedinJson.profile_sync_needed &&
+          linkedinSyncAttemptedToken.current !== authToken
+        ) {
+          linkedinSyncAttemptedToken.current = authToken;
+          void apiFetch(`${API_BASE}/api/linkedin/profile/sync-missing`, {
+            method: 'POST',
+            headers: headers(authToken),
+          }).then(async (syncRes) => {
+            if (!syncRes.ok) return;
+            const syncJson = await syncRes.json();
+            if (!syncJson.updated || !syncJson.profile) return;
+            setBrand((current) => ({
+              ...current,
+              linkedin_profile: {
+                ...(current.linkedin_profile || {}),
+                ...syncJson.profile,
+                connected: true,
+              },
+            }));
+          }).catch(() => undefined);
+        }
+
+        const p = brandJson.profile || {};
+        setBrandTitle(p.professional_title || '');
+        setBrandIndustry(p.industry || '');
+        setBrandExperienceYears(typeof p.experience_years === 'number' ? p.experience_years : '');
+        setBrandTone(p.tone || '');
+
+        const sourcePosts = (brandJson.source_posts || [])
+          .map((item: any) => item.body)
+          .filter((body: any) => typeof body === 'string' && body.trim());
+        setHistoricalPostEntries(sourcePosts.slice(0, 10));
+
+        if (linkedinJson.connected && brandJson.brand_bootstrap_completed === false) {
+          void apiFetch(`${API_BASE}/api/brand/bootstrap`, {
+            method: 'POST',
+            headers: headers(authToken),
+          }).then(async (bootstrapRes) => {
+            if (!bootstrapRes.ok) return;
+            const bootstrapJson = await bootstrapRes.json();
+            const bootstrapProfile = bootstrapJson.profile || {};
+            if (bootstrapProfile.professional_title !== undefined) setBrandTitle(bootstrapProfile.professional_title || '');
+            if (bootstrapProfile.industry !== undefined) setBrandIndustry(bootstrapProfile.industry || '');
+            if (bootstrapProfile.experience_years !== undefined) setBrandExperienceYears(typeof bootstrapProfile.experience_years === 'number' ? bootstrapProfile.experience_years : '');
+            if (bootstrapProfile.tone !== undefined) setBrandTone(bootstrapProfile.tone || '');
+            if (bootstrapJson.brand_memory) setBrand({ ...bootstrapJson.brand_memory, ready: bootstrapJson.ready === true });
+          }).catch(() => undefined);
         }
       }).catch(() => {
-        // Optional panels are allowed to fail without affecting the core workspace.
+        // Supplemental identity/Brand DNA data is non-blocking.
+      }).finally(() => {
+        setBrandLoading(false);
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load dashboard data');
       setLoading(false);
+      setBrandLoading(false);
     }
   };
+
+  const loadResearchData = async (force = false) => {
+    if (!token || (researchLoadedRef.current && !force)) return;
+    setResearchLoading(true);
+    try {
+      const response = await apiFetch(`${API_BASE}/api/research/opportunities`, { headers: headers() });
+      if (!response.ok) throw new Error('Failed to load. Please try again.');
+      const data = await response.json();
+      setOpportunities(data.opportunities || []);
+      researchLoadedRef.current = true;
+    } catch (e) {
+      setError('Failed to load. Please try again.');
+    } finally {
+      setResearchLoading(false);
+    }
+  };
+
+  const loadAnalyticsData = async (force = false) => {
+    if (!token || (analyticsLoadedRef.current && !force)) return;
+    setAnalyticsLoading(true);
+    try {
+      const response = await apiFetch(`${API_BASE}/api/analytics/overview`, { headers: headers() });
+      if (!response.ok) throw new Error('Analytics data could not be loaded.');
+      setAnalytics(await response.json());
+      analyticsLoadedRef.current = true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Analytics data could not be loaded.');
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  const loadLearningData = async (force = false) => {
+    if (!token || (learningLoadedRef.current && !force)) return;
+    setLearningLoading(true);
+    try {
+      const [learningRes, thoughtsRes] = await Promise.all([
+        apiFetch(`${API_BASE}/api/learning/status`, { headers: headers() }),
+        apiFetch(`${API_BASE}/api/learning/thoughts`, { headers: headers() }),
+      ]);
+      if (learningRes.ok) setLearningStatus(await learningRes.json());
+      if (thoughtsRes.ok) {
+        const thoughtsJson = await thoughtsRes.json();
+        setPersonalThoughts(thoughtsJson.thoughts || []);
+      }
+      if (!learningRes.ok && !thoughtsRes.ok) throw new Error('Learning data could not be loaded.');
+      learningLoadedRef.current = true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Learning data could not be loaded.');
+    } finally {
+      setLearningLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!token) return;
+    if (tab === 'Research') void loadResearchData();
+    if (tab === 'Analytics') void loadAnalyticsData();
+    if (tab === 'Content Studio' || tab === 'Brand DNA') void loadLearningData();
+  }, [tab, token]);
+
   useEffect(() => { fetchData(token); }, [token]);
   const loadJobs = async (requestedQuery?: string) => {
     if (!token) return;
@@ -914,32 +947,9 @@ const loadAdminOverview = async () => {
     finally { setIsBusy(false); }
   };
 
-  const globalLoading = pendingRequests > 0 || loading || jobsLoading || (tab === 'Admin' && !adminOverview) || isBusy || isGenerating || isResearching || isImproving || isBuildingBrand || savingThought || feedbackSending || authChecking;
-  const globalLoadingMessage = authChecking
-    ? 'Loading your workspace…'
-    : (tab === 'Admin' && !adminOverview)
-      ? 'Loading admin data…'
-      : jobsLoading
-        ? 'Searching jobs…'
-        : isResearching
-          ? 'Researching opportunities…'
-          : isGenerating
-            ? 'Generating content…'
-            : isImproving
-              ? 'Improving your content…'
-              : isBuildingBrand
-                ? 'Updating your Brand DNA…'
-                : feedbackSending
-                  ? 'Submitting feedback…'
-                  : savingThought
-                    ? 'Saving your learning…'
-                    : isBusy
-                      ? 'Processing your request…'
-                      : loading
-                        ? 'Loading your workspace…'
-                        : 'Loading…';
+  const authLoadingMessage = 'Loading your workspace…';
 
-  if (authChecking) return <div style={{ minHeight: '100vh', background: '#f5f8fc' }}><WorkspaceLoading message={globalLoadingMessage} /></div>;
+  if (authChecking) return <div style={{ minHeight: '100vh', background: '#f5f8fc' }}><WorkspaceLoading message={authLoadingMessage} /></div>;
   if (!token) return <LoginScreen error={error} onConnect={connectLinkedIn} />;
 
   return (
@@ -992,11 +1002,9 @@ const loadAdminOverview = async () => {
         <main className="page">
           {notice && <div className="notice success"><CircleCheck size={15} /><span>{notice}</span></div>}
           {error && <div className="notice error"><X size={15} /><span>{error}</span></div>}
-          {globalLoading && <WorkspaceLoading message={globalLoadingMessage} />}
-
           {tab === 'Dashboard' && (
-            <>
-              <section className="hero" onClick={!brand.ready ? () => go('Brand DNA') : undefined} style={!brand.ready ? { cursor: 'pointer' } : undefined}>
+            loading ? <DashboardSkeleton /> : <>
+              {brandLoading ? <DashboardHeroSkeleton /> : <section className="hero" onClick={!brand.ready ? () => go('Brand DNA') : undefined} style={!brand.ready ? { cursor: 'pointer' } : undefined}>
                 <div className="hero-grid">
                   <div>
                     <div className="page-kicker" style={{ color: '#b9d7f7' }}>
@@ -1030,7 +1038,7 @@ const loadAdminOverview = async () => {
                     <div style={{ color: '#8f9ab1', fontSize: 10, textAlign: 'right' }}>AI prepared · human approved<br />No autonomous publishing</div>
                   </div>
                 </div>
-              </section>
+              </section>}
 
               <div className="metrics">
                 <Metric icon={Clock3} label="Awaiting approval" value={summary.pending} meta="Needs your decision" />
@@ -1059,15 +1067,15 @@ const loadAdminOverview = async () => {
             </>
           )}
 
-          {tab === 'Research' && <ResearchView opportunities={opportunities} researchFocus={researchFocus} setResearchFocus={setResearchFocus} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
-          {tab === 'Content Studio' && <ContentStudio profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
-          {tab === 'LinkedIn Posts' && <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />}
-          {tab === 'Analytics' && <AnalyticsView analytics={analytics} />}
+          {tab === 'Research' && <ResearchView loading={researchLoading} opportunities={opportunities} researchFocus={researchFocus} setResearchFocus={setResearchFocus} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
+          {tab === 'Content Studio' && <ContentStudio learningLoading={learningLoading} profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
+          {tab === 'LinkedIn Posts' && (loading ? <LinkedInPostsSkeleton /> : <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />)}
+          {tab === 'Analytics' && <AnalyticsView loading={analyticsLoading} analytics={analytics} />}
           {tab === 'Jobs' && <JobsView jobs={jobs} location={jobLocation} query={jobQuery} setQuery={setJobQuery} loading={jobsLoading} expandedId={expandedJobId} setExpandedId={setExpandedJobId} onSearch={loadJobs} />}
           {tab === 'Feedback' && <FeedbackView type={feedbackType} setType={setFeedbackType} subject={feedbackSubject} setSubject={setFeedbackSubject} description={feedbackDescription} setDescription={setFeedbackDescription} context={feedbackContext} setContext={setFeedbackContext} sending={feedbackSending} onSubmit={async () => { if (!feedbackSubject.trim() || !feedbackDescription.trim() || !token) return; setFeedbackSending(true); try { const res = await apiFetch(API_BASE + '/api/feedback', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback_type: feedbackType, subject: feedbackSubject, description: feedbackDescription, context: feedbackContext }) }); const data = await res.json(); if (!res.ok) throw new Error(getApiError(data, 'Feedback could not be submitted.')); setFeedbackSubject(''); setFeedbackDescription(''); setFeedbackContext(''); setNotice('Thanks. Your feedback was submitted.'); } catch (e) { setError(e instanceof Error ? e.message : 'Feedback could not be submitted.'); } finally { setFeedbackSending(false); } }} />}
           {tab === 'Admin' && profile.role === 'admin' && <AdminView overview={adminOverview} activity={adminActivity} feedback={adminFeedback} users={adminUsers} aiProviders={adminAiProviders} jobProviders={adminJobProviders} sections={adminSections} sectionLoading={adminSectionLoading} onToggle={toggleAdminSection} onRefresh={refreshAdmin} />}
           {tab === 'Brand DNA' && (
-            <SettingsView
+            (loading || brandLoading) ? <SettingsSkeleton /> : <SettingsView
               brand={brand}
               profile={profile}
               brandTitle={brandTitle}
@@ -1089,6 +1097,7 @@ const loadAdminOverview = async () => {
               editing={brandEditing}
               setEditing={setBrandEditing}              onCancel={cancelBrandEdit}
               personalThoughts={personalThoughts}
+              learningLoading={learningLoading}
               onDeletePersonalThoughts={async (ids: number[]) => {
                 if (!ids.length) return;
                 if (!window.confirm(ids.length === 1
@@ -1388,7 +1397,105 @@ function LinkedInPostsView({ posts, totalPublished }: { posts: ApprovalItem[]; t
   );
 }
 
-function ResearchView({ opportunities, researchFocus, setResearchFocus, isResearching, researchProgress, researchStage, onResearch }: { opportunities: Opportunity[]; researchFocus: string; setResearchFocus: (value: string) => void; isResearching: boolean; researchProgress: number; researchStage: string; onResearch: () => void }) {
+// Surface-level skeletons keep the workspace interactive while each API-backed section hydrates.
+function SkeletonBlock({ width = '100%', height = 14, radius = 8 }: { width?: string | number; height?: number; radius?: number }) {
+  return <div className="skeleton" style={{ width, height, borderRadius: radius }} aria-hidden="true" />;
+}
+
+function DashboardHeroSkeleton() {
+  return <section className="hero">
+    <div className="hero-grid">
+      <div style={{ width: '100%' }}>
+        <SkeletonBlock width={170} height={10} />
+        <div style={{ marginTop: 14, display: 'grid', gap: 9 }}>
+          <SkeletonBlock width="82%" height={32} radius={10} />
+          <SkeletonBlock width="68%" height={32} radius={10} />
+        </div>
+        <div style={{ marginTop: 14, display: 'grid', gap: 7, maxWidth: 620 }}>
+          <SkeletonBlock width="100%" height={11} />
+          <SkeletonBlock width="92%" height={11} />
+        </div>
+        <div className="hero-actions" style={{ marginTop: 22 }}>
+          <SkeletonBlock width={138} height={38} radius={10} />
+          <SkeletonBlock width={170} height={38} radius={10} />
+        </div>
+      </div>
+      <div className="hero-status"><SkeletonBlock width={72} height={72} radius={24} /></div>
+    </div>
+  </section>;
+}
+
+function DashboardSkeleton() {
+  return <>
+    <section className="hero">
+      <div className="hero-grid">
+        <div style={{ width: '100%' }}>
+          <SkeletonBlock width={170} height={10} />
+          <div style={{ marginTop: 14, display: 'grid', gap: 9 }}>
+            <SkeletonBlock width="82%" height={32} radius={10} />
+            <SkeletonBlock width="68%" height={32} radius={10} />
+          </div>
+          <div style={{ marginTop: 14, display: 'grid', gap: 7, maxWidth: 620 }}>
+            <SkeletonBlock width="100%" height={11} />
+            <SkeletonBlock width="92%" height={11} />
+          </div>
+          <div className="hero-actions" style={{ marginTop: 22 }}>
+            <SkeletonBlock width={138} height={38} radius={10} />
+            <SkeletonBlock width={170} height={38} radius={10} />
+          </div>
+        </div>
+        <div className="hero-status"><SkeletonBlock width={72} height={72} radius={24} /></div>
+      </div>
+    </section>
+    <div className="metrics">
+      {[1,2,3,4,5].map((item) => <div className="metric-card" key={item}><SkeletonBlock width="52%" height={10}/><div style={{ marginTop: 15 }}><SkeletonBlock width="38%" height={26}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width="72%" height={9}/></div></div>)}
+    </div>
+    <section className="panel approval-panel">
+      <div className="panel-head"><div style={{ width: '48%' }}><SkeletonBlock width={150} height={15}/><div style={{ marginTop: 8 }}><SkeletonBlock width="90%" height={9}/></div></div><SkeletonBlock width={92} height={34} radius={9}/></div>
+      <div style={{ display: 'grid', gap: 9, padding: '0 18px 18px' }}>
+        {[1,2,3].map((item) => <div className="post-entry" key={item}><SkeletonBlock width="28%" height={9}/><div style={{ marginTop: 10 }}><SkeletonBlock width="72%" height={13}/></div><div style={{ marginTop: 8 }}><SkeletonBlock width="94%" height={9}/></div></div>)}
+      </div>
+    </section>
+  </>;
+}
+
+function LinkedInPostsSkeleton() {
+  return <>
+    <div className="page-header"><div><SkeletonBlock width={170} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={280} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={420} height={10}/></div></div></div>
+    <section className="panel settings-card">
+      {[1,2,3].map((item) => <div className="post-entry" key={item} style={{ marginTop: item === 1 ? 0 : 10 }}><SkeletonBlock width="24%" height={9}/><div style={{ marginTop: 10 }}><SkeletonBlock width="82%" height={13}/></div><div style={{ marginTop: 8 }}><SkeletonBlock width="96%" height={9}/><div style={{ marginTop: 6 }}><SkeletonBlock width="76%" height={9}/></div></div></div>)}
+    </section>
+  </>;
+}
+
+function SettingsSkeleton() {
+  return <>
+    <div className="page-header"><div><SkeletonBlock width={120} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={230} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={520} height={10}/></div></div></div>
+    <section className="panel settings-card">
+      <div className="profile-grid">{[1,2,3,4].map((item) => <div className="form-group" key={item}><SkeletonBlock width={90} height={9}/><div style={{ marginTop: 7 }}><SkeletonBlock width="100%" height={40} radius={9}/></div></div>)}</div>
+      <div style={{ marginTop: 18 }}><SkeletonBlock width={150} height={10}/><div style={{ marginTop: 9 }}><SkeletonBlock width="100%" height={70} radius={10}/></div></div>
+    </section>
+    <section className="panel settings-card" style={{ marginTop: 16 }}><SkeletonBlock width={150} height={14}/><div style={{ marginTop: 10 }}><SkeletonBlock width="72%" height={9}/></div><div style={{ marginTop: 16 }}><SkeletonBlock width="100%" height={90} radius={10}/></div></section>
+  </>;
+}
+
+function ResearchSkeleton() {
+  return <>
+    <div className="page-header"><div><SkeletonBlock width={130} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={310} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={520} height={10}/></div></div><SkeletonBlock width={118} height={36} radius={9}/></div>
+    <section className="panel research-focus-panel"><SkeletonBlock width={180} height={13}/><div style={{ marginTop: 8 }}><SkeletonBlock width="78%" height={9}/></div><div style={{ marginTop: 14 }}><SkeletonBlock width="100%" height={42} radius={9}/></div></section>
+    <div className="research-grid">{[1,2,3].map((item) => <article className="research-card" key={item}><SkeletonBlock width={130} height={9}/><div style={{ marginTop: 12 }}><SkeletonBlock width="82%" height={16}/></div><div style={{ marginTop: 8 }}><SkeletonBlock width="95%" height={9}/><div style={{ marginTop: 6 }}><SkeletonBlock width="72%" height={9}/></div></div><div className="research-relevance-grid" style={{ marginTop: 16 }}><SkeletonBlock width="100%" height={55} radius={9}/><SkeletonBlock width="100%" height={55} radius={9}/></div></article>)}</div>
+  </>;
+}
+
+function AnalyticsSkeleton() {
+  return <>
+    <div className="page-header"><div><SkeletonBlock width={150} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={320} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={550} height={10}/></div></div></div>
+    <div className="metrics">{[1,2,3,4].map((item) => <div className="metric-card" key={item}><SkeletonBlock width="50%" height={10}/><div style={{ marginTop: 15 }}><SkeletonBlock width="36%" height={25}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width="78%" height={9}/></div></div>)}</div>
+  </>;
+}
+
+function ResearchView({ loading, opportunities, researchFocus, setResearchFocus, isResearching, researchProgress, researchStage, onResearch }: { loading: boolean; opportunities: Opportunity[]; researchFocus: string; setResearchFocus: (value: string) => void; isResearching: boolean; researchProgress: number; researchStage: string; onResearch: () => void }) {
+  if (loading) return <ResearchSkeleton />;
   const hasResearch = opportunities.length > 0;
   return (
     <>
@@ -1480,7 +1587,7 @@ function ResearchCard({ item }: { item: Opportunity }) {
   );
 }
 
-function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBody, language, setLanguage, busy, improving, improvementProgress, improvementNotes, onImprove, onSubmit, savingThought, onSaveThought, learningStatus }: any) {
+function ContentStudio({ learningLoading, profile, title, setTitle, topic, setTopic, body, setBody, language, setLanguage, busy, improving, improvementProgress, improvementNotes, onImprove, onSubmit, savingThought, onSaveThought, learningStatus }: any) {
   return (
     <>
       <div className="page-header">
@@ -1488,7 +1595,9 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
           <div className="page-kicker"><WandSparkles size={13}/> Editorial studio</div>
           <h1 className="page-title">Write it your way. Let Suvacya polish it.</h1>
           <p className="page-description">Start with your own idea and wording in any language. Suvacya can improve structure and clarity using your Brand DNA, then you preview the exact version before it enters the approval queue.</p>
-          <div className="form-help" style={{ marginTop: 8 }}>Brand learning is active · {learningStatus?.memory_count ?? 0} learned signals · {learningStatus?.pending_events ?? 0} queued for processing</div>
+          <div className="form-help" style={{ marginTop: 8 }}>
+            {learningLoading ? <span style={{ display: 'inline-flex', width: 280 }}><SkeletonBlock width="100%" height={10} /></span> : <>Brand learning is active · {learningStatus?.memory_count ?? 0} learned signals · {learningStatus?.pending_events ?? 0} queued for processing</>}
+          </div>
         </div>
       </div>
       <section className="panel studio-grid">
@@ -1525,7 +1634,8 @@ function ContentStudio({ profile, title, setTitle, topic, setTopic, body, setBod
   );
 }
 
-function AnalyticsView({ analytics }: { analytics: any }) {
+function AnalyticsView({ loading, analytics }: { loading: boolean; analytics: any }) {
+  if (loading) return <AnalyticsSkeleton />;
   const p = analytics?.pipeline || {};
   const live = analytics?.linkedin_performance || {};
   const totals = live.totals || {};
@@ -1636,7 +1746,7 @@ function SettingsView(props: any) {
     brand, profile, brandTitle, setBrandTitle, brandIndustry, setBrandIndustry,
     brandExperienceYears, setBrandExperienceYears, brandTone, setBrandTone,
     posts, updatePost, addPost, removePost, building, onBuild, linkedin, onConnect,
-    editing, setEditing, onCancel, personalThoughts = [], onDeletePersonalThoughts,
+    editing, setEditing, onCancel, learningLoading = false, personalThoughts = [], onDeletePersonalThoughts,
     expandedThoughtId, setExpandedThoughtId, selectedThoughtIds = [], setSelectedThoughtIds,
     thoughtSelectionMode = false, setThoughtSelectionMode
   } = props;
@@ -1860,7 +1970,11 @@ function SettingsView(props: any) {
             )}
           </div>
         </div>
-        {personalThoughts.length ? (
+        {learningLoading ? (
+          <div className="post-stack" style={{ marginTop: 14 }}>
+            {[1,2].map((item) => <article className="post-entry" key={item}><SkeletonBlock width={120} height={9}/><div style={{ marginTop: 10 }}><SkeletonBlock width="62%" height={13}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width="96%" height={9}/><div style={{ marginTop: 6 }}><SkeletonBlock width="78%" height={9}/></div></div></article>)}
+          </div>
+        ) : personalThoughts.length ? (
           <div className="post-stack" style={{ marginTop: 14 }}>
             {personalThoughts.map((thought: PersonalThought) => {
               const expanded = expandedThoughtId === thought.id;
@@ -1970,6 +2084,12 @@ function LinkedInMark({ size = 18, color }: { size?: number; color?: string }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill={color || 'currentColor'} aria-hidden="true"><path d="M6.5 8.2H3.2V20h3.3V8.2ZM4.85 3A1.95 1.95 0 1 0 4.85 6.9 1.95 1.95 0 0 0 4.85 3ZM20.8 13.25c0-3.52-1.88-5.16-4.4-5.16-2.02 0-2.92 1.11-3.43 1.89V8.2H9.67V20h3.3v-5.84c0-1.54.29-3.03 2.2-3.03 1.88 0 1.91 1.76 1.91 3.13V20h3.3l.02-6.75Z"/></svg>;
 }
 function JobsView({ jobs, location, query, setQuery, loading, expandedId, setExpandedId, onSearch }: any) {
+  if (loading && !jobs.length) return <>
+    <div className="page-header"><div><SkeletonBlock width={140} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={260} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={510} height={10}/></div></div></div>
+    <section className="panel" style={{ padding: 18 }}><SkeletonBlock width="100%" height={42} radius={9}/><div style={{ marginTop: 10 }}><SkeletonBlock width={340} height={9}/></div><div style={{ marginTop: 8 }}><SkeletonBlock width={230} height={9}/></div></section>
+    <section className="panel" style={{ marginTop: 16, padding: 18 }}><SkeletonBlock width={110} height={15}/><div style={{ marginTop: 10 }}><SkeletonBlock width={180} height={9}/></div><div style={{ marginTop: 14, display: 'grid', gap: 10 }}>{[1,2,3].map((item) => <div className="post-entry" key={item}><SkeletonBlock width="45%" height={13}/><div style={{ marginTop: 8 }}><SkeletonBlock width="70%" height={9}/></div><div style={{ marginTop: 12 }}><SkeletonBlock width={170} height={30} radius={8}/></div></div>)}</div></section>
+  </>;
+
   const locationLabel = location?.city && location?.country
     ? location.city + ', ' + location.country
     : (location?.country || 'your detected location');
@@ -1994,6 +2114,12 @@ function FeedbackView({ type, setType, subject, setSubject, description, setDesc
 }
 
 function AdminView({ overview, activity, feedback, users, aiProviders, jobProviders, sections, sectionLoading, onToggle, onRefresh }: any) {
+  if (!overview) return <>
+    <div className="page-header"><div><SkeletonBlock width={130} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={310} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={520} height={10}/></div></div><SkeletonBlock width={82} height={34} radius={9}/></div>
+    <div className="metric-grid">{[1,2,3,4].map((item) => <div className="metric-card" key={item}><SkeletonBlock width="48%" height={10}/><div style={{ marginTop: 15 }}><SkeletonBlock width="35%" height={25}/></div></div>)}</div>
+    {[1,2,3,4,5].map((item) => <section className="panel settings-card" key={item} style={{ marginTop: 16, padding: 0 }}><div style={{ padding: '18px 20px' }}><SkeletonBlock width={180} height={14}/></div></section>)}
+  </>;
+
   const Section = ({ id, title, eyebrow, children }: any) => {
     const open = !!sections[id];
     return <section className="panel settings-card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
@@ -2001,7 +2127,7 @@ function AdminView({ overview, activity, feedback, users, aiProviders, jobProvid
         <span>{eyebrow && <span className="page-kicker" style={{ display: 'block', marginBottom: 4 }}>{eyebrow}</span>}<span>{title}</span></span>
         <ChevronDown size={17} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 160ms ease', flexShrink: 0 }} />
       </button>
-      {open && <div style={{ borderTop: '1px solid var(--border, #e6ebf2)', padding: '16px 20px 20px' }}>{sectionLoading[id] ? <div className="post-entry" style={{ color: '#6f7f93' }}>Loading…</div> : children}</div>}
+      {open && <div style={{ borderTop: '1px solid var(--border, #e6ebf2)', padding: '16px 20px 20px' }}>{sectionLoading[id] ? <div className="post-entry"><SkeletonBlock width="72%" height={12}/><div style={{ marginTop: 10 }}><SkeletonBlock width="94%" height={9}/><div style={{ marginTop: 8 }}><SkeletonBlock width="68%" height={9}/></div></div></div> : children}</div>}
     </section>;
   };
   return <>
