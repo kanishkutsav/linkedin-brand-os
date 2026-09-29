@@ -102,7 +102,13 @@ export default function Home() {
   const [busyAction, setBusyAction] = useState<'approve' | 'edit' | 'reject' | 'regenerate' | 'execute' | null>(null);
   const [operationProgress, setOperationProgress] = useState(0);
   const [operationStage, setOperationStage] = useState('');
-  const [tab, setTab] = useState<Tab>('Dashboard');
+  const initialTab = (() => {
+    if (typeof window === 'undefined') return 'Dashboard' as Tab;
+    const candidate = new URLSearchParams(window.location.search).get('tab') as Tab | null;
+    const validTabs: Tab[] = ['Dashboard', 'Research', 'Content Studio', 'LinkedIn Posts', 'Analytics', 'Brand DNA', 'Jobs', 'Feedback', 'Admin'];
+    return candidate && validTabs.includes(candidate) ? candidate : 'Dashboard';
+  })();
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftTopic, setDraftTopic] = useState('');
   const [draftBody, setDraftBody] = useState('');
@@ -119,6 +125,7 @@ export default function Home() {
   const researchLoadedRef = useRef(false);
   const analyticsLoadedRef = useRef(false);
   const learningLoadedRef = useRef(false);
+  const dashboardDataLoadedRef = useRef(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
@@ -336,12 +343,19 @@ useEffect(() => {
       const approvalsJson = await approvalsRes.json();
       setProfile({ display_name: profileJson.display_name || 'User', role: profileJson.role || 'owner' });
       if (profileJson.role === 'admin' && new URLSearchParams(window.location.search).get('admin') === '1') setTab('Admin');
+      if (profileJson.role !== 'admin' && tab === 'Admin') {
+        setTab('Dashboard');
+        const url = new URL(window.location.href);
+        url.searchParams.delete('tab');
+        window.history.replaceState({}, document.title, url.toString());
+      }
 
       const nextQueue: ApprovalItem[] = (approvalsJson.pending_approvals || []).map((item: any) => ({
         id: item.id, status: item.status, action_type: item.action_type, reason: item.reason, content: item.content || '',
         title: item.title || '', topic: item.topic || '', approved_at: item.approved_at || null, created_at: item.created_at,
       }));
       setQueue(nextQueue);
+      dashboardDataLoadedRef.current = true;
       const pendingFilterCount = Number(approvalsJson.counts?.pending_filter ?? 0);
       const needsReviewCount = Number(approvalsJson.counts?.needs_review ?? 0);
       setDashboardCounts({
@@ -488,14 +502,27 @@ useEffect(() => {
     if (tab === 'Research') void loadResearchData();
     if (tab === 'Analytics') void loadAnalyticsData();
     if (tab === 'Content Studio' || tab === 'Brand DNA') void loadLearningData();
+
+    const prefetchTimer = window.setTimeout(() => {
+      if (tab !== 'Research') void loadResearchData();
+      if (tab !== 'Analytics') void loadAnalyticsData();
+      if (tab !== 'Content Studio' && tab !== 'Brand DNA') void loadLearningData();
+    }, 1200);
+    return () => window.clearTimeout(prefetchTimer);
   }, [tab, token]);
+
+  const persistTab = (next: Tab) => {
+    const url = new URL(window.location.href);
+    if (next === 'Dashboard') url.searchParams.delete('tab');
+    else url.searchParams.set('tab', next);
+    window.history.replaceState({}, document.title, url.toString());
+  };
 
   useEffect(() => { fetchData(token); }, [token]);
   const loadJobs = async (requestedQuery?: string) => {
     if (!token) return;
     const query = (requestedQuery ?? jobQuery).trim();
     setJobsLoading(true);
-    setJobs([]);
     try {
       const q = query ? '?query=' + encodeURIComponent(query) : '';
       const res = await apiFetch(API_BASE + '/api/jobs/search' + q, { headers: headers() });
@@ -652,11 +679,13 @@ const loadAdminOverview = async () => {
     setMoreOpen(false);
     if (!brand.ready && next !== 'Brand DNA') {
       setTab('Brand DNA');
+      persistTab('Brand DNA');
       setNotice('Before using the workspace, complete your Brand DNA setup once.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
     setTab(next);
+    persistTab(next);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -978,7 +1007,7 @@ const loadAdminOverview = async () => {
           {notice && <div className="notice success"><CircleCheck size={15} /><span>{notice}</span></div>}
           {error && <div className="notice error"><X size={15} /><span>{error}</span></div>}
           {tab === 'Dashboard' && (
-            loading ? <DashboardSkeleton /> : <>
+            loading && !dashboardDataLoadedRef.current ? <DashboardSkeleton /> : <>
               {brandLoading ? <DashboardHeroSkeleton /> : <section className="hero" onClick={!brand.ready ? () => go('Brand DNA') : undefined} style={!brand.ready ? { cursor: 'pointer' } : undefined}>
                 <div className="hero-grid">
                   <div>
@@ -1044,13 +1073,13 @@ const loadAdminOverview = async () => {
 
           {tab === 'Research' && <ResearchView loading={researchLoading} opportunities={opportunities} researchFocus={researchFocus} setResearchFocus={setResearchFocus} isResearching={isResearching} researchProgress={researchProgress} researchStage={researchStage} onResearch={discoverResearch} />}
           {tab === 'Content Studio' && <ContentStudio learningLoading={learningLoading} profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
-          {tab === 'LinkedIn Posts' && (loading ? <LinkedInPostsSkeleton /> : <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />)}
+          {tab === 'LinkedIn Posts' && (loading && !queue.length ? <LinkedInPostsSkeleton /> : <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />)}
           {tab === 'Analytics' && <AnalyticsView loading={analyticsLoading} analytics={analytics} />}
           {tab === 'Jobs' && <JobsView jobs={jobs} location={jobLocation} query={jobQuery} setQuery={setJobQuery} loading={jobsLoading} expandedId={expandedJobId} setExpandedId={setExpandedJobId} onSearch={loadJobs} />}
           {tab === 'Feedback' && <FeedbackView type={feedbackType} setType={setFeedbackType} subject={feedbackSubject} setSubject={setFeedbackSubject} description={feedbackDescription} setDescription={setFeedbackDescription} context={feedbackContext} setContext={setFeedbackContext} sending={feedbackSending} onSubmit={async () => { if (!feedbackSubject.trim() || !feedbackDescription.trim() || !token) return; setFeedbackSending(true); try { const res = await apiFetch(API_BASE + '/api/feedback', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback_type: feedbackType, subject: feedbackSubject, description: feedbackDescription, context: feedbackContext }) }); const data = await res.json(); if (!res.ok) throw new Error(getApiError(data, 'Feedback could not be submitted.')); setFeedbackSubject(''); setFeedbackDescription(''); setFeedbackContext(''); setNotice('Thanks. Your feedback was submitted.'); } catch (e) { setError(e instanceof Error ? e.message : 'Feedback could not be submitted.'); } finally { setFeedbackSending(false); } }} />}
           {tab === 'Admin' && profile.role === 'admin' && <AdminView overview={adminOverview} activity={adminActivity} feedback={adminFeedback} users={adminUsers} aiProviders={adminAiProviders} jobProviders={adminJobProviders} sections={adminSections} sectionLoading={adminSectionLoading} onToggle={toggleAdminSection} onRefresh={refreshAdmin} />}
           {tab === 'Brand DNA' && (
-            (loading || brandLoading) ? <SettingsSkeleton /> : <SettingsView
+            ((loading || brandLoading) && !brand.profile) ? <SettingsSkeleton /> : <SettingsView
               brand={brand}
               profile={profile}
               brandTitle={brandTitle}
@@ -1470,7 +1499,7 @@ function AnalyticsSkeleton() {
 }
 
 function ResearchView({ loading, opportunities, researchFocus, setResearchFocus, isResearching, researchProgress, researchStage, onResearch }: { loading: boolean; opportunities: Opportunity[]; researchFocus: string; setResearchFocus: (value: string) => void; isResearching: boolean; researchProgress: number; researchStage: string; onResearch: () => void }) {
-  if (loading) return <ResearchSkeleton />;
+  if (loading && !opportunities.length) return <ResearchSkeleton />;
   const hasResearch = opportunities.length > 0;
   return (
     <>
@@ -1610,7 +1639,7 @@ function ContentStudio({ learningLoading, profile, title, setTitle, topic, setTo
 }
 
 function AnalyticsView({ loading, analytics }: { loading: boolean; analytics: any }) {
-  if (loading) return <AnalyticsSkeleton />;
+  if (loading && !analytics) return <AnalyticsSkeleton />;
   const p = analytics?.pipeline || {};
   const live = analytics?.linkedin_performance || {};
   const totals = live.totals || {};
@@ -2067,7 +2096,7 @@ function JobsView({ jobs, location, query, setQuery, loading, expandedId, setExp
 
   return <>
     <div className="page-header"><div><div className="page-kicker"><Briefcase size={13}/> Career opportunities</div><h1 className="page-title">Job opportunities</h1><p className="page-description">Search openings using your professional title, experience and domain. Suvacya does not apply for jobs on your behalf.</p></div></div>
-    <section className="panel" style={{ padding: 18 }}><div style={{ display: 'flex', gap: 10, alignItems: 'center' }}><input className="input" style={{ flex: 1 }} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void onSearch(query); }} placeholder="Search a position, e.g. Product Manager" /><button className="button primary" onClick={() => void onSearch(query)} disabled={loading}><Search size={14}/>{loading ? 'Searching…' : 'Search jobs'}</button></div><div style={{ marginTop: 10, color: '#7a899d', fontSize: 11 }}>Profile context is used when the search box is empty. Matching is deterministic and does not use AI.</div><div className="jobs-search-context">Profile context is used when the search box is empty. Matching is deterministic and does not use AI.</div></section>
+    <section className="panel" style={{ padding: 18 }}><div style={{ display: 'flex', gap: 10, alignItems: 'center' }}><input className="input" style={{ flex: 1 }} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void onSearch(query); }} placeholder="Search a position, e.g. Product Manager" /><button className="button primary" onClick={() => void onSearch(query)} disabled={loading}><Search size={14}/>{loading ? 'Searching…' : 'Search jobs'}</button></div><div className="jobs-search-context">Profile context is used when the search box is empty. Matching is deterministic and does not use AI.</div></section>
     <section className="panel" style={{ marginTop: 16, padding: 18 }}><div className="panel-head"><div><h2 className="settings-title">Openings</h2><p className="settings-copy">{jobs.length ? jobs.length + ' openings found' : 'No openings returned yet.'}</p></div></div>
       {jobs.length ? jobs.map((job: any) => { const id = job.provider + ':' + job.provider_job_id; const open = expandedId === id; return <article key={id} className="post-entry" style={{ marginTop: 10 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}><div><div style={{ fontWeight: 800, color: '#10233f' }}>{job.title}</div><div style={{ marginTop: 4, fontSize: 12, color: '#5f6f86' }}>{job.company} · {job.location}{job.experience_level ? ' · ' + job.experience_level : ''}</div></div></div><div style={{ marginTop: 9, display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="button" onClick={() => setExpandedId(open ? null : id)}>{open ? 'Hide description' : 'View description'}</button>{job.application_url ? <a className="button primary" href={job.application_url} target="_blank" rel="noopener noreferrer">Apply externally <ExternalLink size={13}/></a> : null}</div>{open ? <div style={{ marginTop: 12, color: '#334b66', fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{job.description || 'No description supplied by the source.'}</div> : null}</article>; }) : <EmptyState icon={Briefcase} title="No jobs to show yet" text="Try a broader search or check again later." />}
     </section>

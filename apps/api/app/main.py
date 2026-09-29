@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import delete, select, inspect, text
+from sqlalchemy import delete, select, inspect, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.research import ResearchService
@@ -909,7 +909,6 @@ async def brand_status(
 ):
     service = BrandIntelligenceService(session)
     profile = await AuthService.get_or_create_profile(session, current_user)
-    await session.commit()
     memory = await service.get_memory(profile.id)
     posts = await service.get_posts(profile.id, limit=100)
     profile_complete = bool(
@@ -1210,22 +1209,32 @@ async def dashboard_approvals(
     approvals = await approval_service.list_dashboard(int(current_user.id))
     counts = await approval_service.dashboard_counts(int(current_user.id))
     records = []
-    for item in approvals:
-        version = await session.get(ContentVersion, item.content_version_id)
-        content_item = await session.get(ContentItem, version.content_id) if version else None
-        records.append(
-            {
-                "id": item.id,
-                "status": item.status,
-                "action_type": item.action_type,
-                "reason": item.reason,
-                "content": version.body if version else "",
-                "title": content_item.title if content_item else "",
-                "topic": content_item.topic if content_item else "",
-                "approved_at": item.approved_at,
-                "created_at": item.created_at,
-            }
+    if approvals:
+        version_ids = [item.content_version_id for item in approvals]
+        content_result = await session.execute(
+            select(ContentVersion, ContentItem)
+            .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+            .where(ContentVersion.id.in_(version_ids))
         )
+        content_by_version = {
+            int(version.id): (version, content_item)
+            for version, content_item in content_result.all()
+        }
+        for item in approvals:
+            version, content_item = content_by_version.get(item.content_version_id, (None, None))
+            records.append(
+                {
+                    "id": item.id,
+                    "status": item.status,
+                    "action_type": item.action_type,
+                    "reason": item.reason,
+                    "content": version.body if version else "",
+                    "title": content_item.title if content_item else "",
+                    "topic": content_item.topic if content_item else "",
+                    "approved_at": item.approved_at,
+                    "created_at": item.created_at,
+                }
+            )
     return {"pending_approvals": records, "counts": counts}
 
 
@@ -1637,16 +1646,38 @@ async def analytics_overview(
     session: AsyncSession = Depends(get_session),
     current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
 ):
-    async def count(query):
-        return len((await session.execute(query)).scalars().all())
-
+    profile_id = int(current_user.id)
+    historical_result = await session.execute(
+        select(func.count(HistoricalPost.id)).where(HistoricalPost.profile_id == profile_id)
+    )
+    content_result = await session.execute(
+        select(func.count(ContentItem.id)).where(ContentItem.profile_id == profile_id)
+    )
+    approval_counts_result = await session.execute(
+        select(ApprovalRequest.status, func.count(ApprovalRequest.id))
+        .join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id)
+        .join(ContentItem, ContentItem.id == ContentVersion.content_id)
+        .where(ContentItem.profile_id == profile_id)
+        .group_by(ApprovalRequest.status)
+    )
+    approval_counts = {str(status): int(count) for status, count in approval_counts_result.all()}
     pipeline = {
-        "historical_posts": await count(select(HistoricalPost.id).where(HistoricalPost.profile_id == int(current_user.id))),
-        "content_items": await count(select(ContentItem.id).where(ContentItem.profile_id == int(current_user.id))),
-        "pending_approval": await count(select(ApprovalRequest.id).join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id).join(ContentItem, ContentItem.id == ContentVersion.content_id).where(ContentItem.profile_id == int(current_user.id), ApprovalRequest.status.in_(["PENDING", "EDITED", "REGENERATED"]))),
-        "approved": await count(select(ApprovalRequest.id).join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id).join(ContentItem, ContentItem.id == ContentVersion.content_id).where(ContentItem.profile_id == int(current_user.id), ApprovalRequest.status == "APPROVED")),
-        "published_via_brand_os": await count(select(ApprovalRequest.id).join(ContentVersion, ContentVersion.id == ApprovalRequest.content_version_id).join(ContentItem, ContentItem.id == ContentVersion.content_id).where(ContentItem.profile_id == int(current_user.id), ApprovalRequest.status == "EXECUTED")),
+        "historical_posts": int(historical_result.scalar_one() or 0),
+        "content_items": int(content_result.scalar_one() or 0),
+        "pending_approval": sum(approval_counts.get(status, 0) for status in ("PENDING", "EDITED", "REGENERATED")),
+        "approved": approval_counts.get("APPROVED", 0),
+        "published_via_brand_os": approval_counts.get("EXECUTED", 0),
     }
+
+    if not settings.linkedin_analytics_oauth_enabled:
+        return {
+            "pipeline": pipeline,
+            "linkedin_performance": {
+                "available": False,
+                "authorization_required": False,
+                "message": "LinkedIn performance analytics will appear when the required LinkedIn analytics access is enabled.",
+            },
+        }
 
     user = current_user
 
