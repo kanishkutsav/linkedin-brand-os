@@ -17,6 +17,13 @@ def _serverless_database_config() -> tuple[str, dict]:
     # some environments include :5432, some omit the port, and some already
     # provide :6543. A partial check here can make auth intermittently fail
     # with DuplicatePreparedStatementError during cold starts.
+    is_postgres = parsed.scheme.startswith("postgresql") or parsed.scheme.startswith("postgres")
+    if is_postgres:
+        # Vercel + Supabase can inject either a direct PostgreSQL URL or a
+        # pooler URL. Disable asyncpg prepared statements for every PostgreSQL
+        # serverless connection so neither shape can leak PgBouncer failures.
+        connect_args["statement_cache_size"] = 0
+
     if "pooler.supabase.com" in (parsed.hostname or ""):
         pooler_port = parsed.port or 5432
         if pooler_port == 5432:
