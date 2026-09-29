@@ -21,7 +21,7 @@ from app.services.brand_learning import BrandLearningService
 
 
 _RESEARCH_TARGET = 10
-_RESEARCH_SOURCE_POOL = 48
+_RESEARCH_SOURCE_POOL = 24
 _STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in",
     "into", "is", "it", "of", "on", "or", "that", "the", "their", "this",
@@ -118,7 +118,7 @@ class ResearchService:
             queries.append(profile.professional_title)
         if profile.experience_years is not None:
             queries.append(f"{profile.industry or 'professional'} {profile.experience_years:g} years experience")
-        for learned in (learned_queries or [])[:4]:
+        for learned in (learned_queries or [])[:2]:
             if learned and learned not in queries:
                 queries.append(learned)
         if not queries:
@@ -140,8 +140,8 @@ class ResearchService:
                     items.append({"title": title, "url": link, "published_at": pub, "source": source_name, "query": query})
             return items
 
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True, headers={"User-Agent": "BrandOS/1.0"}) as client:
-            batches = await asyncio.gather(*(fetch_query(client, query) for query in queries[:4]), return_exceptions=True)
+        async with httpx.AsyncClient(timeout=3.5, follow_redirects=True, headers={"User-Agent": "BrandOS/1.0"}) as client:
+            batches = await asyncio.gather(*(fetch_query(client, query) for query in queries[:2]), return_exceptions=True)
 
         seen: set[str] = set()
         items: list[dict] = []
@@ -191,8 +191,8 @@ class ResearchService:
                 if str(article.get("url") or "").startswith(("https://", "http://")) and str(article.get("title") or "").strip()
             ]
 
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, headers={"User-Agent": "BrandOS/1.0"}) as client:
-            batches = await asyncio.gather(*(fetch_query(client, query) for query in queries[:4]), return_exceptions=True)
+        async with httpx.AsyncClient(timeout=4.5, follow_redirects=True, headers={"User-Agent": "BrandOS/1.0"}) as client:
+            batches = await asyncio.gather(*(fetch_query(client, query) for query in queries[:2]), return_exceptions=True)
 
         seen: set[str] = set()
         items: list[dict] = []
@@ -258,11 +258,11 @@ class ResearchService:
         if not sources:
             return sources
         async with httpx.AsyncClient(
-            timeout=2.5,
+            timeout=1.5,
             follow_redirects=True,
             headers={"User-Agent": "BrandOS/1.0"},
         ) as client:
-            enrichable = sources[:4]
+            enrichable = sources[:2]
             results = await asyncio.gather(
                 *(self._source_context(client, source) for source in enrichable),
                 return_exceptions=True,
@@ -396,8 +396,8 @@ Generate 12-16 genuinely different opportunities so the application can independ
 
         try:
             data = await asyncio.wait_for(
-                ModelRouterService().generate_json(system, prompt, max_output_tokens=3600, task="research"),
-                timeout=12.0,
+                ModelRouterService().generate_json(system, prompt, max_output_tokens=2400),
+                timeout=9.0,
             )
             opportunities = data.get("opportunities") or []
         except Exception:
