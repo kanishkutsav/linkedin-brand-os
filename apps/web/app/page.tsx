@@ -1063,7 +1063,7 @@ const loadAdminOverview = async () => {
                   isBusy={isBusy} busyAction={busyAction} operationProgress={operationProgress} operationStage={operationStage}
                   onAction={runApprovalAction}
                 />
-              </section>}
+              </section>
             </>
           )}
 
