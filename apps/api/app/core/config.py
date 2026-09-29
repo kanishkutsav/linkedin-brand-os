@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     agent_in_process_schedule_enabled: bool = True
     scheduled_job_key: str | None = None
 
+    apify_api_token: str | None = None
+    apify_indeed_actor: str = "misceres/indeed-scraper"
+    apify_naukri_actor: str = "crawloop/naukri-jobs-scraper"
+    apify_timeout_seconds: int = 45
+    job_search_page_size: int = 20
+
     adzuna_app_id: str | None = None
     adzuna_app_key: str | None = None
     adzuna_country: str = "in"

@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import ProductionJobsView from '../components/jobs-view';
 import {
   Activity, ArrowUpRight, BarChart3, BrainCircuit, Briefcase, Check, ChevronRight, CircleCheck,
   Clock3, Command, Download, ExternalLink, FileText, Gauge, Globe2, LayoutDashboard, Link2,
@@ -147,7 +148,7 @@ export default function Home() {
   const [expandedThoughtId, setExpandedThoughtId] = useState<number | null>(null);
   const [selectedThoughtIds, setSelectedThoughtIds] = useState<number[]>([]);
   const [thoughtSelectionMode, setThoughtSelectionMode] = useState(false);
-  const [jobs, setJobs] = useState<any[]>([]); const [jobProviders, setJobProviders] = useState<any[]>([]); const [jobLocation, setJobLocation] = useState<any>(null); const [jobQuery, setJobQuery] = useState(''); const [jobsLoading, setJobsLoading] = useState(false); const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<any[]>([]); const [jobProviders, setJobProviders] = useState<any[]>([]); const [jobLocation, setJobLocation] = useState<any>(null); const [jobQuery, setJobQuery] = useState(''); const [jobExperience, setJobExperience] = useState<number | ''>(''); const [jobPage, setJobPage] = useState(1); const [jobHasMore, setJobHasMore] = useState(false); const [jobsLoading, setJobsLoading] = useState(false); const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [feedbackType, setFeedbackType] = useState('FEATURE'); const [feedbackSubject, setFeedbackSubject] = useState(''); const [feedbackDescription, setFeedbackDescription] = useState(''); const [feedbackContext, setFeedbackContext] = useState(''); const [feedbackSending, setFeedbackSending] = useState(false);
   const [adminOverview, setAdminOverview] = useState<any>(null);
   const [adminActivity, setAdminActivity] = useState<any[]>([]);
@@ -562,25 +563,31 @@ useEffect(() => {
   };
 
   useEffect(() => { fetchData(token); }, [token]);
-  const loadJobs = async (requestedQuery?: string) => {
+  const loadJobs = async (params?: { jobTitle?: string; location?: string; experience?: number | ''; page?: number; append?: boolean }) => {
     if (!token) return;
-    const query = (requestedQuery ?? jobQuery).trim();
+    const append = Boolean(params?.append);
+    const page = params?.page || 1;
     setJobsLoading(true);
     try {
-      const q = query ? '?query=' + encodeURIComponent(query) : '';
-      const res = await apiFetch(API_BASE + '/api/jobs/search' + q, { headers: headers() });
+      const body = params?.jobTitle?.trim()
+        ? { mode: 'manual', job_title: params.jobTitle.trim(), location: (params.location || '').trim(), experience: params.experience === '' || params.experience == null ? null : Number(params.experience), page, limit: 20 }
+        : { mode: 'recommended', page, limit: 20 };
+      const res = await apiFetch(API_BASE + '/api/jobs/search', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json();
       if (!res.ok) throw new Error(getApiError(data, 'Job search is temporarily unavailable.'));
-      setJobs(data.jobs || []);
+      setJobs((current) => append ? [...current, ...(data.jobs || [])] : (data.jobs || []));
       setJobProviders(data.providers || []);
       setJobLocation(data.location || null);
+      setJobQuery(data.query || params?.jobTitle || '');
+      setJobExperience(data.experience ?? params?.experience ?? '');
+      setJobPage(data.page || page);
+      setJobHasMore(Boolean(data.has_more));
+      setExpandedJobId(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Job search is temporarily unavailable.');
-    } finally {
-      setJobsLoading(false);
-    }
+    } finally { setJobsLoading(false); }
   };
-const loadAdminOverview = async () => {
+  const loadAdminOverview = async () => {
     if (!token || profile.role !== 'admin') return;
     try {
       const response = await apiFetch(API_BASE + '/api/admin/overview', { headers: headers() });
@@ -1120,7 +1127,7 @@ const loadAdminOverview = async () => {
           {tab === 'Content Studio' && <ContentStudio learningLoading={learningLoading} profile={profile} title={draftTitle} setTitle={setDraftTitle} topic={draftTopic} setTopic={setDraftTopic} body={draftBody} setBody={setDraftBody} language={draftLanguage} setLanguage={setDraftLanguage} busy={isBusy} improving={isImproving} improvementProgress={improvementProgress} improvementNotes={improvementNotes} onImprove={improveDraft} onSubmit={createDraft} savingThought={savingThought} onSaveThought={saveThought} learningStatus={learningStatus} />}
           {tab === 'LinkedIn Posts' && (loading && !queue.length ? <LinkedInPostsSkeleton /> : <LinkedInPostsView posts={queue.filter((item) => item.status === 'EXECUTED').slice(0, 10)} totalPublished={dashboardCounts.published} />)}
           {tab === 'Analytics' && <AnalyticsView loading={analyticsLoading} analytics={analytics} />}
-          {tab === 'Jobs' && <JobsView jobs={jobs} location={jobLocation} query={jobQuery} setQuery={setJobQuery} loading={jobsLoading} expandedId={expandedJobId} setExpandedId={setExpandedJobId} onSearch={loadJobs} />}
+          {tab === 'Jobs' && <ProductionJobsView jobs={jobs} location={jobLocation} query={jobQuery} experience={jobExperience} loading={jobsLoading} page={jobPage} hasMore={jobHasMore} onSearch={loadJobs} />}
           {tab === 'Feedback' && <FeedbackView type={feedbackType} setType={setFeedbackType} subject={feedbackSubject} setSubject={setFeedbackSubject} description={feedbackDescription} setDescription={setFeedbackDescription} context={feedbackContext} setContext={setFeedbackContext} sending={feedbackSending} onSubmit={async () => { if (!feedbackSubject.trim() || !feedbackDescription.trim() || !token) return; setFeedbackSending(true); try { const res = await apiFetch(API_BASE + '/api/feedback', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback_type: feedbackType, subject: feedbackSubject, description: feedbackDescription, context: feedbackContext }) }); const data = await res.json(); if (!res.ok) throw new Error(getApiError(data, 'Feedback could not be submitted.')); setFeedbackSubject(''); setFeedbackDescription(''); setFeedbackContext(''); setNotice('Thanks. Your feedback was submitted.'); } catch (e) { setError(e instanceof Error ? e.message : 'Feedback could not be submitted.'); } finally { setFeedbackSending(false); } }} />}
           {tab === 'Admin' && profile.role === 'admin' && <AdminView overview={adminOverview} activity={adminActivity} feedback={adminFeedback} users={adminUsers} aiProviders={adminAiProviders} jobProviders={adminJobProviders} sections={adminSections} sectionLoading={adminSectionLoading} onToggle={toggleAdminSection} onRefresh={refreshAdmin} />}
           {tab === 'Brand DNA' && (
