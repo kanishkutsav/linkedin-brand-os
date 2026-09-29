@@ -1427,7 +1427,7 @@ async def research_discover(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Live research failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Live research failed. The public source feed or configured LLM provider was unavailable. Please try again.") from exc
+        raise HTTPException(status_code=502, detail="Failed to load. Please try again.") from exc
 
 
 @app.get("/api/research/opportunities")
@@ -1478,6 +1478,7 @@ async def learning_thoughts(
             LearningEvent.profile_id == profile.id,
             LearningEvent.event_type == "USER_THOUGHT",
             LearningEvent.source_type == "manual_thought",
+            LearningEvent.status != "DELETED",
         )
         .order_by(LearningEvent.created_at.desc())
         .limit(50)
