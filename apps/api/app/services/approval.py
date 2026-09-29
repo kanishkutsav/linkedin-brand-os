@@ -304,12 +304,13 @@ class ApprovalService:
         if profile_id is None:
             raise ValueError("Profile ownership is required")
         approval = await self._get_owned_approval(approval_id, profile_id)
-        if not approval or approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
+        if not approval or approval.status not in {"PENDING", "EDITED", "REGENERATED", "EXPIRED"}:
             raise ValueError("Approval is not regenerable in its current state")
+        # Approval expiry is a review-session lease, not a permanent lock on the
+        # draft. A reviewer must be able to regenerate an older draft and send
+        # the new version through a fresh approval window.
         if approval.expires_at and approval.expires_at <= datetime.now(timezone.utc):
-            approval.status = "EXPIRED"
-            await self.session.commit()
-            raise ValueError("Approval has expired")
+            approval.expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.approval_ttl_minutes)
         version = await self.session.get(ContentVersion, approval.content_version_id)
         if not version:
             raise ValueError("Content version not found")
