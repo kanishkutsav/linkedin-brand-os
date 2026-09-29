@@ -33,9 +33,13 @@ def _indeed_input(title:str,location:dict[str,str],page:int)->dict[str,Any]:
     if page==1:return {"position":exact,"maxItemsPerSearch":_SOURCE_LIMIT,"country":country,"location":city,"parseCompanyDetails":False,"saveOnlyUniqueItems":True}
     return {"maxItemsPerSearch":_SOURCE_LIMIT,"country":country,"parseCompanyDetails":False,"saveOnlyUniqueItems":True,"startUrls":[{"url":f"https://{_COUNTRY_DOMAINS[country]}/jobs?q={quote_plus(title.strip())}&l={quote_plus(city)}&start={(page-1)*_SOURCE_LIMIT}"}]}
 def _naukri_input(title:str,experience:float|None,location:dict[str,str],page:int)->dict[str,Any]:
-    city=location.get("city","").strip() or location.get("country","").strip() or "India"; payload={"position":title.strip(),"location":city,"maxItems":min(page*_SOURCE_LIMIT,60),"maxPages":page,"sort":"relevance","proxyConfiguration":{"useApifyProxy":True,"apifyProxyGroups":["RESIDENTIAL"],"apifyProxyCountry":"IN"}}
+    city=location.get("city","").strip() or location.get("country","").strip() or "India"; payload={"position":title.strip(),"location":city,"maxItems":min(page*_SOURCE_LIMIT,60),"maxPages":page,"sort":"relevance","proxyConfiguration":{"useApifyProxy":True,"apifyProxyGroups":["RESIDENTIAL"],"apifyProxyCountry":"IN"}
+    }
     if experience is not None:payload["experience"]=str(int(experience) if float(experience).is_integer() else experience)
     return payload
+def _naukri_fallback_input(title:str,location:dict[str,str],page:int)->dict[str,Any]:
+    city=location.get("city","").strip() or location.get("country","").strip() or "India"
+    return {"position":title.strip(),"location":city,"maxItems":min(page*_SOURCE_LIMIT,60),"maxPages":page,"sort":"relevance"}
 async def _call_actor(actor:str,payload:dict[str,Any])->list[dict[str,Any]]:
     if not settings.apify_api_token:raise RuntimeError("Apify integration is not configured.")
     timeout=max(15,min(int(settings.apify_timeout_seconds),300)); url=f"https://api.apify.com/v2/actors/{actor.replace('/','~')}/run-sync-get-dataset-items"
@@ -64,9 +68,26 @@ async def search_jobs_apify(*,title:str,experience:float|None,location:dict[str,
     async def call(actor,payload):
         try:return await _call_actor(actor,payload)
         except Exception:return []
-    indeed_result,naukri_result=await asyncio.gather(call(settings.apify_indeed_actor,_indeed_input(title,location,requested_page)),call(settings.apify_naukri_actor,_naukri_input(title,experience,location,requested_page)))
+    async def call_naukri():
+        try:
+            return await _call_actor(settings.apify_naukri_actor,_naukri_input(title,experience,location,requested_page))
+        except httpx.HTTPStatusError as exc:
+            # Some Naukri actor configurations reject optional proxy/experience
+            # fields with HTTP 400. Retry once with the actor's minimal stable
+            # input; experience is still filtered deterministically below.
+            if exc.response.status_code in {400, 422}:
+                try:return await _call_actor(settings.apify_naukri_actor,_naukri_fallback_input(title,location,requested_page))
+                except Exception:return []
+            return []
+        except Exception:return []
+    indeed_result,naukri_result=await asyncio.gather(
+        call(settings.apify_indeed_actor,_indeed_input(title,location,requested_page)),
+        call_naukri(),
+    )
     indeed=_filter_and_dedupe([_normalize_indeed(x) for x in indeed_result],title,experience);naukri=_filter_and_dedupe([_normalize_naukri(x) for x in naukri_result],title,experience)
     if requested_page>1:naukri=naukri[(requested_page-1)*requested_limit:requested_page*requested_limit]
     combined=_filter_and_dedupe(indeed+naukri,title,experience);start=(requested_page-1)*requested_limit;jobs=combined[start:start+requested_limit]
-    if not jobs and not indeed and not naukri:raise RuntimeError("Both job providers failed to return usable results.")
+    # Provider outages or overly strict deterministic matching must never turn
+    # a Jobs navigation/search into a 500. An empty result set is a valid
+    # user-facing state; provider details remain server-side only.
     return {"query":title,"experience":experience,"location":location,"page":requested_page,"limit":requested_limit,"jobs":jobs,"has_more":len(jobs)==requested_limit}
