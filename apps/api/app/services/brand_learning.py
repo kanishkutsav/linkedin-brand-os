@@ -384,12 +384,10 @@ Return:
 
             if len(embedding) == self.EMBEDDING_DIMENSIONS:
                 literal = _vector_literal(embedding)
+                # Event and memory similarity are independent optional enrichments.
+                # A failure in one RPC must never poison the session or suppress the
+                # other semantic source. The primary learning context remains usable.
                 try:
-                    # Keep the optional vector lookup isolated. Some Supabase
-                    # databases have the pgvector extension in the extensions
-                    # schema while the helper function resolves operators using
-                    # a public-only search_path. That must never break research,
-                    # content, or learning reads.
                     async with self.session.begin_nested():
                         event_rows = await self.session.execute(
                             text("""
@@ -412,7 +410,12 @@ Return:
                             _json_safe(dict(row._mapping))
                             for row in event_rows.all()
                         ]
+                except Exception as exc:
+                    logger.warning("Semantic event lookup unavailable; continuing without event matches: %s", exc)
+                    semantic_events = []
 
+                try:
+                    async with self.session.begin_nested():
                         memory_rows = await self.session.execute(
                             text("""
                                 select id, memory_key, memory_type, content, confidence, importance, source_count, metadata_json, updated_at, similarity
@@ -435,8 +438,7 @@ Return:
                             for row in memory_rows.all()
                         ]
                 except Exception as exc:
-                    logger.warning("Semantic learning lookup unavailable, continuing without semantic matches: %s", exc)
-                    semantic_events = []
+                    logger.warning("Semantic memory lookup unavailable; continuing without memory matches: %s", exc)
                     semantic_memories = []
 
         return {
