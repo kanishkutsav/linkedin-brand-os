@@ -1038,7 +1038,7 @@ const loadAdminOverview = async () => {
                     <div style={{ color: '#8f9ab1', fontSize: 10, textAlign: 'right' }}>AI prepared · human approved<br />No autonomous publishing</div>
                   </div>
                 </div>
-              </section>
+              </section>}
 
               <div className="metrics">
                 <Metric icon={Clock3} label="Awaiting approval" value={summary.pending} meta="Needs your decision" />
