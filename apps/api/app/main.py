@@ -1513,45 +1513,67 @@ async def _require_scheduled_job_key(x_brand_os_job_key: str | None = Header(def
         raise HTTPException(status_code=401, detail="Invalid scheduled job credentials.")
 
 
-async def _run_scheduled_job_background(job_name: str) -> None:
+async def _run_scheduled_job(job_name: str, profile_id: int | None = None) -> dict:
     jobs = ScheduledJobs(SessionLocal)
     if job_name in {"discovery", "calendar"}:
-        try:
-            result = await jobs.run(job_name)
-            logger.info("Scheduled %s job completed: %s", job_name, result)
-        except Exception:
-            logger.exception("Scheduled %s job failed.", job_name)
-        return
+        result = await jobs.run(job_name, profile_id=profile_id)
+        logger.info("Scheduled %s job completed: %s", job_name, result)
+        return result
 
     async with SessionLocal() as session:
         try:
             result = await jobs.process_retention(session)
             await session.commit()
             logger.info("Scheduled retention job completed: %s", result)
+            return result
         except Exception:
             await session.rollback()
             logger.exception("Scheduled retention job failed.")
-
-
-
-
-_scheduled_background_tasks: set[asyncio.Task] = set()
-
-
-def _dispatch_scheduled_job(job_name: str) -> None:
-    task = asyncio.create_task(_run_scheduled_job_background(job_name))
-    _scheduled_background_tasks.add(task)
-    task.add_done_callback(_scheduled_background_tasks.discard)
+            raise
 
 
 @app.post("/api/internal/scheduled-jobs/{job_name}")
 async def run_scheduled_job(
     job_name: str,
+    profile_id: int | None = None,
     _: None = Depends(_require_scheduled_job_key),
 ):
     jobs = ScheduledJobs(SessionLocal)
     if job_name not in {"discovery", "calendar", "retention", "learning"}:
         raise HTTPException(status_code=404, detail="Unknown scheduled job.")
+
+    # Discovery and calendar work is intentionally executed inside the request.
+    # The previous asyncio.create_task() fallback returned 200 before the work
+    # completed, which is unsafe on ephemeral Vercel functions.
+    #
+    # Supabase pg_cron fans these calls out one profile at a time, keeping each
+    # invocation bounded while preserving the no-Render deployment model.
+    if job_name in {"discovery", "calendar"}:
+        if profile_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="A profile_id is required for scheduled content jobs.",
+            )
+        try:
+            result = await jobs.run(job_name, profile_id=profile_id)
+            return {
+                "ok": True,
+                "job": job_name,
+                "accepted": True,
+                "queued": False,
+                "profile_id": profile_id,
+                "result": result,
+            }
+        except Exception as exc:
+            logger.exception(
+                "Scheduled %s job failed for profile_id=%s.",
+                job_name,
+                profile_id,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Scheduled job processing failed.",
+            ) from exc
 
     if job_name == "learning":
         if settings.durable_learning_worker_enabled:
@@ -1577,34 +1599,38 @@ async def run_scheduled_job(
                 processed = await jobs.process_learning(session, limit=50)
                 await session.commit()
                 logger.info("Scheduled learning job completed: processed=%s", processed)
-            except Exception:
+                return {
+                    "ok": True,
+                    "job": job_name,
+                    "accepted": True,
+                    "queued": False,
+                    "processed": processed,
+                }
+            except Exception as exc:
                 await session.rollback()
                 logger.exception("Scheduled learning job failed.")
-        return
+                raise HTTPException(
+                    status_code=500,
+                    detail="Scheduled learning processing failed.",
+                ) from exc
 
-    if settings.durable_scheduled_worker_enabled:
-        local_date = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
-        async with SessionLocal() as session:
-            job = await enqueue_job(
-                session,
-                job_type=f"scheduled_{job_name}",
-                payload={"mode": job_name, "scheduled_date": local_date},
-                idempotency_key=f"scheduled:{job_name}:{local_date}",
-            )
-            await session.commit()
+    # Retention is small and deterministic, so it also completes before the
+    # request returns rather than relying on serverless background execution.
+    try:
+        result = await _run_scheduled_job(job_name)
         return {
             "ok": True,
             "job": job_name,
             "accepted": True,
-            "queued": True,
-            "job_id": job.id if job else None,
+            "queued": False,
+            "result": result,
         }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Scheduled retention processing failed.",
+        ) from exc
 
-    # Safe fallback while the durable worker is disabled. Supabase pg_net gets
-    # a fast response while the existing AgentRun/idempotency guards protect
-    # the actual scheduled work.
-    _dispatch_scheduled_job(job_name)
-    return {"ok": True, "job": job_name, "accepted": True, "queued": False}
 
 @app.post("/api/agent/events")
 async def trigger_agent_event(
