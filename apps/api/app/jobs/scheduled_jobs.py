@@ -23,7 +23,7 @@ class ScheduledJobs:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
         self.session_factory = session_factory
 
-    async def run(self, mode: str) -> dict:
+    async def run(self, mode: str, profile_id: int | None = None) -> dict:
         if mode not in {"discovery", "calendar"}:
             raise ValueError(f"Unsupported scheduled job: {mode}")
 
@@ -38,17 +38,26 @@ class ScheduledJobs:
             # The transaction-scoped advisory lock serializes each scheduled mode.
             bind = session.bind
             if bind is not None and bind.dialect.name == "postgresql":
+                lock_scope = str(profile_id) if profile_id is not None else "all"
                 await session.execute(
                     text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
-                    {"lock_key": f"brand-os-scheduled:{mode}"},
+                    {"lock_key": f"brand-os-scheduled:{mode}:{lock_scope}"},
                 )
 
-            result = await session.execute(
+            profile_query = (
                 select(UserProfile.id)
                 .join(BrandMemory, BrandMemory.profile_id == UserProfile.id)
                 .where(BrandMemory.status == "READY")
             )
+            if profile_id is not None:
+                profile_query = profile_query.where(UserProfile.id == profile_id)
+
+            result = await session.execute(profile_query)
             profile_ids = [int(row[0]) for row in result.all()]
+            if profile_id is not None and not profile_ids:
+                summary["skipped"] = 1
+                return summary
+
 
             for profile_id in profile_ids:
                 summary["profiles"] += 1
