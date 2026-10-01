@@ -24,7 +24,9 @@ class ScheduledJobs:
         self.session_factory = session_factory
 
     async def run(self, mode: str, profile_id: int | None = None) -> dict:
-        if mode not in {"discovery", "calendar"}:
+        mode_aliases = {"discovery": "daily_post", "calendar": "research"}
+        mode = mode_aliases.get(mode, mode)
+        if mode not in {"daily_post", "research"}:
             raise ValueError(f"Unsupported scheduled job: {mode}")
 
         tz = ZoneInfo("Asia/Kolkata")
@@ -85,10 +87,10 @@ class ScheduledJobs:
                 await session.flush()
                 try:
                     orchestrator = AgentOrchestrator(session, profile_id)
-                    if mode == "calendar":
-                        run_result = await orchestrator.run_calendar()
+                    if mode == "daily_post":
+                        run_result = await orchestrator.run_daily_post()
                     else:
-                        run_result = await orchestrator.run_discovery()
+                        run_result = await orchestrator.run_research_refresh()
                     run.status = "SUCCEEDED"
                     run.created_count = run_result["created_count"]
                     run.details = str(run_result)

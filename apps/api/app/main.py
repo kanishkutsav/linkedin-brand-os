@@ -1515,7 +1515,7 @@ async def _require_scheduled_job_key(x_brand_os_job_key: str | None = Header(def
 
 async def _run_scheduled_job(job_name: str, profile_id: int | None = None) -> dict:
     jobs = ScheduledJobs(SessionLocal)
-    if job_name in {"discovery", "calendar"}:
+    if job_name in {"daily_post", "research", "discovery", "calendar"}:
         result = await jobs.run(job_name, profile_id=profile_id)
         logger.info("Scheduled %s job completed: %s", job_name, result)
         return result
@@ -1539,16 +1539,16 @@ async def run_scheduled_job(
     _: None = Depends(_require_scheduled_job_key),
 ):
     jobs = ScheduledJobs(SessionLocal)
-    if job_name not in {"discovery", "calendar", "retention", "learning"}:
+    if job_name not in {"daily_post", "research", "discovery", "calendar", "retention", "learning"}:
         raise HTTPException(status_code=404, detail="Unknown scheduled job.")
 
-    # Discovery and calendar work is intentionally executed inside the request.
+    # Daily post generation and research refresh are intentionally executed inside the request.
     # The previous asyncio.create_task() fallback returned 200 before the work
     # completed, which is unsafe on ephemeral Vercel functions.
     #
     # Supabase pg_cron fans these calls out one profile at a time, keeping each
     # invocation bounded while preserving the no-Render deployment model.
-    if job_name in {"discovery", "calendar"}:
+    if job_name in {"daily_post", "research", "discovery", "calendar"}:
         if profile_id is None:
             raise HTTPException(
                 status_code=400,

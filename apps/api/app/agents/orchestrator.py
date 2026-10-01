@@ -293,13 +293,22 @@ class AgentOrchestrator:
         await self.session.commit()
         return item.id
 
-    async def run_discovery(self, trigger: str = "scheduled_daily") -> dict:
+    async def run_daily_post(self, trigger: str = "scheduled_daily_post") -> dict:
+        """Generate at most one approval-first post candidate for the profile.
+
+        Research is the input signal, but this path has a hard one-candidate
+        invariant. Duplicate topics are skipped until the first usable
+        opportunity is found, so a successful run never creates more than one.
+        """
         profile = await self._profile()
-        opportunities = await ResearchService(self.session).research_and_rank(profile_id=profile.id, candidate_limit=10)
+        opportunities = await ResearchService(self.session).research_and_rank(
+            profile_id=profile.id,
+            candidate_limit=10,
+        )
 
         created: list[int] = []
-        selected = opportunities[:3]
-        for opportunity in selected:
+        selected = None
+        for opportunity in opportunities:
             evidence = [{
                 "claim": opportunity.get("evidence", {}).get("summary", ""),
                 "why_now": opportunity.get("evidence", {}).get("why_now", ""),
@@ -314,46 +323,45 @@ class AgentOrchestrator:
                 evidence=evidence,
             )
             if item_id is not None:
+                selected = opportunity
                 created.append(item_id)
+                break
 
         return {
-            "mode": "discovery",
+            "mode": "daily_post",
             "trigger": trigger,
             "opportunities_found": len(opportunities),
-            "selected_opportunities": selected,
+            "selected_opportunity": selected,
             "created_content_ids": created,
             "created_count": len(created),
         }
+
+    async def run_research_refresh(self, trigger: str = "scheduled_research_refresh") -> dict:
+        """Refresh only the persisted Research section for this profile.
+
+        This path never calls _create_candidate or creates ContentItem rows.
+        ResearchService persists ResearchSource and ContentOpportunity records
+        consumed by the Research UI.
+        """
+        profile = await self._profile()
+        opportunities = await ResearchService(self.session).research_and_rank(
+            profile_id=profile.id,
+            candidate_limit=10,
+        )
+        return {
+            "mode": "research",
+            "trigger": trigger,
+            "opportunities_found": len(opportunities),
+            "created_content_ids": [],
+            "created_count": 0,
+            "research_updated": True,
+        }
+
+    async def run_discovery(self, trigger: str = "scheduled_daily") -> dict:
+        return await self.run_daily_post(trigger=trigger)
 
     async def run_calendar(self, trigger: str = "scheduled_calendar") -> dict:
-        profile = await self._profile()
-        opportunities = await ResearchService(self.session).research_and_rank(profile_id=profile.id, candidate_limit=10)
-
-        created: list[int] = []
-        for opportunity in opportunities[:2]:
-            evidence = [{
-                "claim": opportunity.get("evidence", {}).get("summary", ""),
-                "why_now": opportunity.get("evidence", {}).get("why_now", ""),
-                "sources": opportunity.get("sources", []),
-            }]
-            item_id = await self._create_candidate(
-                title=opportunity["title"],
-                topic=opportunity["topic"],
-                pillar=opportunity["pillar"],
-                objective=opportunity["objective"],
-                trigger=trigger,
-                evidence=evidence,
-            )
-            if item_id is not None:
-                created.append(item_id)
-
-        return {
-            "mode": "calendar",
-            "trigger": trigger,
-            "opportunities_found": len(opportunities),
-            "created_content_ids": created,
-            "created_count": len(created),
-        }
+        return await self.run_research_refresh(trigger=trigger)
 
     async def run_manual_content_generation(self, trigger: str = "manual_generate_content") -> dict:
         """Generate a fresh draft without making live research a prerequisite.
