@@ -61,7 +61,7 @@ class ApprovalService:
             "published": by_status.get("EXECUTED", 0),
             "needs_review": sum(by_status.get(status, 0) for status in ("EDITED", "REGENERATED")),
             "rejected": by_status.get("REJECTED", 0),
-            "pending_filter": sum(by_status.get(status, 0) for status in ("PENDING", "APPROVED", "PUBLISHING")),
+            "pending_filter": sum(by_status.get(status, 0) for status in ("PENDING", "EDITED", "REGENERATED", "APPROVED", "PUBLISHING")),
         }
     async def list_pending(self, profile_id: int):
         result = await self.session.execute(
