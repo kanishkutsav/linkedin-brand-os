@@ -852,7 +852,7 @@ useEffect(() => {
       setOperationProgress(action === 'approve' || action === 'execute' ? 82 : 88);
       setOperationStage(action === 'regenerate' ? 'Refreshing the approval queue…' : 'Refreshing the workspace…');
       await fetchData();
-      if (action === 'execute' && data.published === true) {
+      if (action === 'execute') {
         // Reflect the confirmed server result immediately, even if a concurrent
         // dashboard refresh briefly returns a stale queue snapshot.
         setQueue((current) => current.map((item) =>
