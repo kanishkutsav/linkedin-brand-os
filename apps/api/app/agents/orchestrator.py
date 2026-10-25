@@ -128,7 +128,7 @@ class AgentOrchestrator:
         if brand_context is None:
             brand_context = await BrandIntelligenceService(self.session).generation_context(profile.id, query=f"{topic} {objective}".strip())
         try:
-            return await service.create_post(
+            generated = await service.create_post(
                 profile={
                     "name": profile.display_name,
                     "title": profile.professional_title,
@@ -145,6 +145,13 @@ class AgentOrchestrator:
                 feedback=feedback,
                 current_draft=current_draft,
             )
+            # Normalize every generated draft before it reaches review. Provider
+            # or fallback output must never expose literal escape sequences.
+            if generated.get("body"):
+                generated["body"] = normalize_human_style(
+                    str(generated["body"]).replace("\\r\\n", "\\n").replace("\\n", "\n")
+                )
+            return generated
         except Exception:
             # The product must remain usable when a free-tier model provider is
             # rate-limited or temporarily unavailable. This fallback is deliberately
@@ -153,13 +160,13 @@ class AgentOrchestrator:
                 "title": title,
                 "angle": f"A practical lens on {topic}.",
                 "body": (
-                    f"{title}\\n\\n"
+                    f"{title}\n\n"
                     f"A practical way to think about {topic.lower()} is to focus on the decisions "
-                    f"that matter most, rather than trying to optimize everything at once.\\n\\n"
-                    f"Three questions help:\\n"
-                    f"1. What problem are we actually trying to solve?\\n"
-                    f"2. What evidence should shape the decision?\\n"
-                    f"3. What still needs human judgment?\\n\\n"
+                    f"that matter most, rather than trying to optimize everything at once.\n\n"
+                    f"Three questions help:\n"
+                    f"1. What problem are we actually trying to solve?\n"
+                    f"2. What evidence should shape the decision?\n"
+                    f"3. What still needs human judgment?\n\n"
                     f"The useful outcome is not more activity. It is a clearer way to decide what "
                     f"deserves attention, what can be simplified, and what should stay under review."
                 ),
