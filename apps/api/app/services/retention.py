@@ -182,7 +182,6 @@ class RetentionService:
         deleted = 0
         policies = (
             (ObservabilityEvent, now - timedelta(days=30), None),
-            (AgentRun, now - timedelta(days=90), None),
             (DurableJob, now - timedelta(days=30), ("SUCCEEDED", "FAILED", "DEAD")),
             (ResearchSource, now - timedelta(days=90), None),
             (ContentOpportunity, now - timedelta(days=90), None),
@@ -193,4 +192,9 @@ class RetentionService:
                 statement = statement.where(model.status.in_(terminal_statuses))
             result = await session.execute(statement)
             deleted += int(result.rowcount or 0)
+
+        old_runs = await session.execute(
+            delete(AgentRun).where(AgentRun.started_at < now - timedelta(days=90))
+        )
+        deleted += int(old_runs.rowcount or 0)
         return deleted
