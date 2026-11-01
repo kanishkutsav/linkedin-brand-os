@@ -2225,7 +2225,7 @@ function SettingsView(props: any) {
                   <div className="post-entry-head">
                     {thoughtSelectionMode && (
                       <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#5f6f86', fontSize: 10 }}>
-                        <input
+                        <input aria-label="Select personal insight"
                           type="checkbox"
                           checked={selectedThoughtIds.includes(thought.id)}
                           onChange={(e) => setSelectedThoughtIds?.((current: number[]) => e.target.checked
@@ -2380,8 +2380,8 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
     <Section id="users" title="Users" eyebrow="ACCOUNT DIRECTORY">
       <div style={{ display: 'grid', gap: 12 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(180px, 1fr) auto', gap: 8, alignItems: 'end' }}>
-          <label className="field"><span>Name</span><input value={adminUserName} onChange={(e) => setAdminUserName(e.target.value)} placeholder="Optional display name" /></label>
-          <label className="field"><span>Email</span><input type="email" value={adminUserEmail} onChange={(e) => setAdminUserEmail(e.target.value)} placeholder="user@example.com" /></label>
+          <label className="field"><span>Name</span><input aria-label="New user display name" value={adminUserName} onChange={(e) => setAdminUserName(e.target.value)} placeholder="Optional display name" /></label>
+          <label className="field"><span>Email</span><input aria-label="New user email address" type="email" value={adminUserEmail} onChange={(e) => setAdminUserEmail(e.target.value)} placeholder="user@example.com" /></label>
           <button className="button primary" onClick={() => void onCreateUser()} disabled={adminUserSaving}><Plus size={14}/>{adminUserSaving ? 'Adding…' : 'Add user'}</button>
         </div>
         <div style={{ color: '#6f7f93', fontSize: 12 }}>Adding a user makes the account active and whitelisted. Existing emails are reactivated and re-whitelisted.</div>
