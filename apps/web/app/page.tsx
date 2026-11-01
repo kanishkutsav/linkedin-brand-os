@@ -149,7 +149,7 @@ export default function Home() {
   const [expandedThoughtId, setExpandedThoughtId] = useState<number | null>(null);
   const [selectedThoughtIds, setSelectedThoughtIds] = useState<number[]>([]);
   const [thoughtSelectionMode, setThoughtSelectionMode] = useState(false);
-  const [jobs, setJobs] = useState<any[]>([]); const [jobSearchStatus, setJobSearchStatus] = useState('idle'); const [jobProviders, setJobProviders] = useState<any[]>([]); const [jobLocation, setJobLocation] = useState<any>(null); const [jobQuery, setJobQuery] = useState(''); const [jobExperience, setJobExperience] = useState<number | ''>(''); const [jobPage, setJobPage] = useState(1); const [jobHasMore, setJobHasMore] = useState(false); const [jobsLoading, setJobsLoading] = useState(false); const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<any[]>([]); const [jobSearchStatus, setJobSearchStatus] = useState('idle'); const [jobLocation, setJobLocation] = useState<any>(null); const [jobQuery, setJobQuery] = useState(''); const [jobExperience, setJobExperience] = useState<number | ''>(''); const [jobPage, setJobPage] = useState(1); const [jobHasMore, setJobHasMore] = useState(false); const [jobsLoading, setJobsLoading] = useState(false); const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [feedbackType, setFeedbackType] = useState('FEATURE'); const [feedbackSubject, setFeedbackSubject] = useState(''); const [feedbackDescription, setFeedbackDescription] = useState(''); const [feedbackContext, setFeedbackContext] = useState(''); const [feedbackSending, setFeedbackSending] = useState(false);
   const [adminOverview, setAdminOverview] = useState<any>(null);
   const [adminWindow, setAdminWindow] = useState('24h');
@@ -592,7 +592,7 @@ useEffect(() => {
       const data = await res.json();
       if (!res.ok) throw new Error(getApiError(data, 'Job search is temporarily unavailable.'));
       setJobs((current) => append ? [...current, ...(data.jobs || [])] : (data.jobs || []));
-      setJobProviders(data.provider_status || []); setJobSearchStatus(data.search_status || 'ok');
+      setJobSearchStatus(data.search_status || 'ok');
       setJobLocation(data.location || null);
       setJobQuery(data.query || params?.jobTitle || '');
       setJobExperience(data.experience ?? params?.experience ?? '');
