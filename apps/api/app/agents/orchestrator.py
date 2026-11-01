@@ -221,6 +221,7 @@ class AgentOrchestrator:
                 f"control over decisions that carry meaningful risk."
             )
 
+        body = normalize_human_style(body)
         if not body:
             raise ValueError("Gemini did not produce a usable draft.")
 
