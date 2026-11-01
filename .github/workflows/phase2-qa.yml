@@ -211,6 +211,7 @@ jobs:
           grep -q "healthCheckPath: /health/ready" render.yaml
           test -s api/index.py
           test -s requirements.txt
+          cmp -s requirements.txt apps/api/requirements.txt
           test -s vercel.json
           grep -q '"root": "apps/web/"' vercel.json
           grep -q '"root": "apps/api/"' vercel.json
