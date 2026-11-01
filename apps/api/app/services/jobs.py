@@ -333,6 +333,9 @@ async def search_jobs(
         payload = json.loads(cached.payload_json)
         payload["cached"] = True
         payload.setdefault("search_status", _search_status(payload.get("provider_status") or []))
+        # Provider exceptions can contain credential-bearing request URLs.
+        # Keep raw diagnostics in server-side observability only.
+        payload.pop("provider_status", None)
         return payload
 
     providers = [
@@ -402,7 +405,6 @@ async def search_jobs(
         "query": search_query,
         "location": target,
         "jobs": _dedupe(jobs)[:settings.job_search_max_results],
-        "provider_status": provider_status,
         "search_status": _search_status(provider_status),
         "cached": False,
     }
