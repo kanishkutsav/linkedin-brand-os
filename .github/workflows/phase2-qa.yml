@@ -69,6 +69,9 @@ jobs:
           grep -q "observability_events" supabase/migrations/20261101_security_rls_additional_tables.sql
           grep -q "user_feedback" supabase/migrations/20261101_security_rls_additional_tables.sql
           grep -q "job_search_cache" supabase/migrations/20261101_security_rls_additional_tables.sql
+          test -s supabase/migrations/20261101070000_scheduled_run_idempotency.sql
+          grep -q "scheduled_key" supabase/migrations/20261101070000_scheduled_run_idempotency.sql
+          grep -q "CREATE UNIQUE INDEX" supabase/migrations/20261101070000_scheduled_run_idempotency.sql
 
   runtime-3-14:
     runs-on: ubuntu-latest

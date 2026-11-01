@@ -40,16 +40,15 @@ class ScheduledJobs:
             if bind is not None and bind.dialect.name == "postgresql":
                 lock_key = f"brand-os-scheduled:{mode}"
                 await lock_session.execute(
-                    text("SELECT pg_advisory_lock(hashtext(:lock_key))"),
+                    text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
                     {"lock_key": lock_key},
                 )
                 try:
                     return await self._run_locked(mode, profile_id)
                 finally:
-                    await lock_session.execute(
-                        text("SELECT pg_advisory_unlock(hashtext(:lock_key))"),
-                        {"lock_key": lock_key},
-                    )
+                    # The transaction-scoped lock is released when this
+                    # dedicated session closes, including on connection loss.
+                    pass
 
         # SQLite/unit-test fallback. The unique scheduled_key remains the
         # durable invariant in production; PostgreSQL provides cross-instance

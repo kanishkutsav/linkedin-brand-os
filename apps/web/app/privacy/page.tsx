@@ -4,7 +4,7 @@ export default function PrivacyPage() {
       <div className="legal-shell">
         <div className="page-kicker">Suvacya · Privacy</div>
         <h1>Suvacya Privacy Policy</h1>
-        <p className="legal-meta">Effective date: 29 September 2026 · Last updated: 29 September 2026</p>
+        <p className="legal-meta">Effective date: 29 September 2026 · Last updated: 1 November 2026</p>
 
         <h2>1. Who we are</h2>
         <p>Suvacya ("Suvacya", "we", "us" or "our") is operated by <strong>Kanishka Utsav</strong> as a sole proprietorship in Maharashtra, India. Suvacya is not currently incorporated as a separate company.</p>

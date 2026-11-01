@@ -107,7 +107,7 @@ async def lifespan(app: FastAPI):
     # Vercel uses the already-migrated Supabase schema. Avoid per-invocation
     # DDL and local SQLite file work in ephemeral functions.
     vercel_runtime = os.getenv("VERCEL", "").lower() == "1"
-    if not vercel_runtime:
+    if not vercel_runtime and not settings.is_production:
         absolute_path = _resolve_sqlite_path()
         if _database_needs_reset() and absolute_path and os.path.exists(absolute_path):
             os.remove(absolute_path)
@@ -746,7 +746,14 @@ async def admin_ai_providers(session: AsyncSession = Depends(get_session), curre
 
 @app.get("/api/admin/job-providers")
 async def admin_job_providers(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
-    return {"configured": {"Indeed": bool(settings.apify_api_token), "Naukri": bool(settings.apify_api_token)}}
+    return {
+        "configured": {
+            "Adzuna": bool(settings.adzuna_app_id and settings.adzuna_app_key),
+            "Jooble": bool(settings.jooble_api_key),
+            "The Muse": bool(settings.themuse_api_key),
+            "Remotive": bool(settings.remotive_enabled),
+        }
+    }
 
 @app.middleware("http")
 async def observability_controls(request: Request, call_next):
