@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import hashlib
 import secrets
+import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -30,7 +31,30 @@ class AuthService:
     def normalize_email(value: str | None) -> str | None:
         if not value:
             return None
-        return value.strip().lower()
+        normalized = value.strip().lower()
+        if len(normalized) > 254 or normalized.count("@") != 1:
+            return None
+        local, domain = normalized.rsplit("@", 1)
+        if (
+            not local
+            or len(local) > 64
+            or local.startswith(".")
+            or local.endswith(".")
+            or ".." in local
+            or not re.fullmatch(r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+", local)
+        ):
+            return None
+        labels = domain.split(".")
+        if len(labels) < 2 or any(
+            not label
+            or len(label) > 63
+            or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
+            for label in labels
+        ):
+            return None
+        if len(labels[-1]) < 2:
+            return None
+        return normalized
 
     @staticmethod
     def normalize_linkedin_url(value: str | None) -> str | None:

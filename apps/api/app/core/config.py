@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -5,6 +6,7 @@ class Settings(BaseSettings):
     app_name: str = "LinkedIn Personal Brand OS"
     environment: str = "development"
     app_env: str = "development"
+    vercel_env: str | None = None
     database_url: str = "sqlite+aiosqlite:///./brand_os.db"
     emergency_stop: bool = False
     cors_origins: str = "http://localhost:3000"
@@ -91,6 +93,15 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    @model_validator(mode="after")
+    def validate_production_secrets(self):
+        if self.is_production:
+            if self.secret_key == "dev-secret-change-me" or len(self.secret_key.strip()) < 32:
+                raise ValueError("Production SECRET_KEY must be a unique value of at least 32 characters.")
+            if self.jwt_secret and len(self.jwt_secret.strip()) < 32:
+                raise ValueError("Production JWT_SECRET must be at least 32 characters when configured.")
+        return self
+
     @property
     def cors_origin_list(self) -> list[str]:
         origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
@@ -101,7 +112,11 @@ class Settings(BaseSettings):
 
     @property
     def is_production(self) -> bool:
-        return self.environment.lower() == "production" or self.app_env.lower() == "production"
+        return (
+            self.environment.lower() == "production"
+            or self.app_env.lower() == "production"
+            or (self.vercel_env or "").lower() == "production"
+        )
 
 
 settings = Settings()

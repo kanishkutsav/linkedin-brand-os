@@ -1069,6 +1069,10 @@ async def delete_account(
     # Security/audit records may be retained only when needed for
     # incident/compliance purposes. Remove
     # records whose actor is directly identifiable as this account.
+    # Remove user-authored feedback and per-user telemetry as well; the
+    # latter has ON DELETE SET NULL and would otherwise retain event payloads.
+    await session.execute(delete(UserFeedback).where(UserFeedback.user_id == user_id))
+    await session.execute(delete(ObservabilityEvent).where(ObservabilityEvent.user_id == user_id))
     await session.execute(
         delete(AuditLog).where(
             (AuditLog.actor == str(user_id))
@@ -2095,7 +2099,7 @@ async def execute_approval(
         if image is not None:
             image_mime = (image.content_type or "").lower()
             if image_mime not in {"image/jpeg", "image/png", "image/gif"}:
-                raise ValueError("Only JPEG or PNG images are supported.")
+                raise ValueError("Only JPEG, PNG or GIF images are supported.")
             image_bytes = await image.read()
             if not image_bytes:
                 raise ValueError("The selected image is empty.")
