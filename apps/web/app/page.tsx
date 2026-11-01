@@ -133,7 +133,7 @@ export default function Home() {
   const dashboardDataLoadedRef = useRef(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
-  const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
   const [loading, setLoading] = useState(false);
   const [brandLoading, setBrandLoading] = useState(false);
   const [researchLoading, setResearchLoading] = useState(false);
@@ -198,8 +198,14 @@ export default function Home() {
   }, [profileMenuOpen]);
 
   useEffect(() => {
-    const standalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
-    setIsStandalone(standalone);
+    const syncDisplayMode = () => {
+      const standalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+      setIsStandalone(standalone);
+    };
+    syncDisplayMode();
+    const displayMode = window.matchMedia('(display-mode: standalone)');
+    displayMode.addEventListener?.('change', syncDisplayMode);
+    document.addEventListener('visibilitychange', syncDisplayMode);
 
     const handleBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
@@ -221,6 +227,8 @@ export default function Home() {
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
+      displayMode.removeEventListener?.('change', syncDisplayMode);
+      document.removeEventListener('visibilitychange', syncDisplayMode);
     };
   }, []);
 
@@ -728,7 +736,15 @@ useEffect(() => {
   const closeMore = () => setMoreOpen(false);
   const isIosDevice = () => /iphone|ipad|ipod/i.test(window.navigator.userAgent) || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
   const installSuvacya = async () => {
-    if (isStandalone) return;
+    // Re-check at click time: an uninstall/relaunch can leave React's initial
+    // display-mode snapshot stale until the page becomes visible again.
+    const currentlyStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+    setIsStandalone(currentlyStandalone);
+    if (currentlyStandalone) {
+      setMoreOpen(false);
+      setShowInstallGuide(true);
+      return;
+    }
     if (installPrompt) {
       const prompt = installPrompt;
       setInstallPrompt(null);
@@ -737,12 +753,10 @@ useEffect(() => {
       if (choice.outcome === 'accepted') setNotice('Installing Suvacya…');
       return;
     }
-    if (isIosDevice()) {
-      setMoreOpen(false);
-      setShowIosInstallGuide(true);
-      return;
-    }
-    setNotice('Use your browser menu to install Suvacya or add it to your home screen.');
+    setMoreOpen(false);
+    // beforeinstallprompt is not guaranteed (for example, after a dismissal
+    // or in browsers that do not expose it). Always provide a usable fallback.
+    setShowInstallGuide(true);
   };
   const connectLinkedIn = () => {
     // OAuth attempts are independent. If a user cancels or abandons LinkedIn,
@@ -1286,7 +1300,7 @@ useEffect(() => {
               <button onClick={() => go('Brand DNA')}><Settings size={18} /><span>Brand DNA</span></button>
               {profile.role === 'admin' && <button onClick={() => go('Admin')}><ShieldAlert size={18} /><span>Admin</span></button>}
               <button onClick={() => { closeMore(); connectLinkedIn(); }}><Link2 size={18} /><span>{linkedin.connected ? 'LinkedIn' : 'Connect LinkedIn'}</span></button>
-              <button onClick={installSuvacya} disabled={isStandalone}><Download size={18} /><span>{isStandalone ? 'Installed' : 'Install Suvacya'}</span></button>
+              <button onClick={installSuvacya}><Download size={18} /><span>{isStandalone ? 'Reinstall Suvacya' : 'Install Suvacya'}</span></button>
             </div>
             <button className="mobile-more-signout" onClick={logout}><LogOut size={17} /> Sign out</button>
             <div className="mobile-more-footer">Suvacya · by Kanishka</div>
@@ -1294,18 +1308,34 @@ useEffect(() => {
         </>
       )}
 
-      {showIosInstallGuide && (
-        <div className="install-guide-backdrop" onClick={() => setShowIosInstallGuide(false)}>
+      {showInstallGuide && (
+        <div className="install-guide-backdrop" onClick={() => setShowInstallGuide(false)}>
           <section className="install-guide" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Install Suvacya">
             <div className="install-guide-icon"><Download size={20} /></div>
-            <h2>Add Suvacya to your iPhone</h2>
-            <p>Safari can install Suvacya as an app on your Home Screen.</p>
-            <ol>
-              <li>Tap the <strong>Share</strong> button in Safari.</li>
-              <li>Choose <strong>Add to Home Screen</strong>.</li>
-              <li>Turn on <strong>Open as Web App</strong>, then tap <strong>Add</strong>.</li>
-            </ol>
-            <button className="button primary" onClick={() => setShowIosInstallGuide(false)}>Got it</button>
+            {isIosDevice() ? (
+              <>
+                <h2>Add Suvacya to your iPhone</h2>
+                <p>Safari can install Suvacya as an app on your Home Screen.</p>
+                <ol>
+                  <li>Tap the <strong>Share</strong> button in Safari.</li>
+                  <li>Choose <strong>Add to Home Screen</strong>.</li>
+                  <li>Turn on <strong>Open as Web App</strong>, then tap <strong>Add</strong>.</li>
+                </ol>
+              </>
+            ) : (
+              <>
+                <h2>{isStandalone ? 'Reinstall Suvacya' : 'Install Suvacya'}</h2>
+                <p>{isStandalone
+                  ? 'This page is still open in the app window. To reinstall after uninstalling, close this window and open Suvacya in Chrome.'
+                  : 'If the install prompt is unavailable, you can install Suvacya from your browser menu.'}</p>
+                <ol>
+                  <li>Open <strong>Suvacya in Google Chrome</strong> (not from the app icon).</li>
+                  <li>Tap the <strong>⋮</strong> menu in Chrome.</li>
+                  <li>Choose <strong>Install app</strong> or <strong>Add to Home screen</strong>, then confirm.</li>
+                </ol>
+              </>
+            )}
+            <button className="button primary" onClick={() => setShowInstallGuide(false)}>Got it</button>
           </section>
         </div>
       )}
