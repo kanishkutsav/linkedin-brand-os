@@ -8,7 +8,7 @@ import logging
 
 from google import genai
 from google.genai import types
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -495,15 +495,15 @@ Return:
 
     async def summary(self, profile_id: int) -> dict:
         pending = await self.session.execute(
-            select(LearningEvent.id).where(
+            select(func.count(LearningEvent.id)).where(
                 LearningEvent.profile_id == profile_id,
                 LearningEvent.status == "PENDING",
             )
         )
         memories = await self.session.execute(
-            select(LearningMemory.id).where(LearningMemory.profile_id == profile_id)
+            select(func.count(LearningMemory.id)).where(LearningMemory.profile_id == profile_id)
         )
         return {
-            "pending_events": len(pending.scalars().all()),
-            "memory_count": len(memories.scalars().all()),
+            "pending_events": int(pending.scalar_one() or 0),
+            "memory_count": int(memories.scalar_one() or 0),
         }
