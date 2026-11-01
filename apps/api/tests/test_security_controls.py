@@ -1,4 +1,5 @@
 import unittest
+from fastapi import HTTPException
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
@@ -84,12 +85,15 @@ class TestSecurityControls(unittest.TestCase):
                 "used": False,
                 "user_id": 1,
             })()
-            result = AsyncMock()
+            result = MagicMock()
             result.scalar_one_or_none.return_value = exchange
             session = MagicMock()
             session.execute = AsyncMock(side_effect=[result])
-            with self.assertRaises(Exception):
+            with self.assertRaises(HTTPException) as raised:
                 await exchange_code(session, "code", "wrong")
+            self.assertEqual(raised.exception.status_code, 400)
+            self.assertEqual(raised.exception.detail, "LinkedIn browser verification failed.")
+            session.execute.assert_awaited_once()
 
         import asyncio
         asyncio.run(run())
