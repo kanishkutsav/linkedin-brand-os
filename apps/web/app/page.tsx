@@ -820,6 +820,47 @@ useEffect(() => {
     return false;
   };
 
+  const runPublicationResolution = async (outcome: 'published' | 'not_published') => {
+    if (!selectedApproval || !token) return;
+    const isPublished = outcome === 'published';
+    const prompt = isPublished
+      ? 'Confirm that you can see this post on your LinkedIn profile. Suvacya will mark it as published.'
+      : 'Confirm that you checked your LinkedIn profile and this post is not present. This will allow you to retry publishing.';
+    if (!window.confirm(prompt)) return;
+
+    let externalId: string | undefined;
+    if (isPublished) {
+      externalId = window.prompt('Optional: paste the LinkedIn post URL or post ID for the audit record.')?.trim() || undefined;
+      if (externalId && externalId.length > 255) {
+        setError('The LinkedIn post reference must be 255 characters or fewer.');
+        return;
+      }
+    }
+
+    setIsBusy(true);
+    setBusyAction('resolve-publication');
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await apiFetch(`${API_BASE}/api/approvals/${selectedApproval.id}/resolve-publication`, {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ outcome, confirmed: true, external_id: externalId }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(getApiError(data, 'Publication could not be reconciled.'));
+      await fetchData();
+      setSelectedId(selectedApproval.id);
+      setStatusFilter(isPublished ? 'EXECUTED' : 'PENDING');
+      setNotice(data.message || (isPublished ? 'Publication reconciled.' : 'Retry is now available.'));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Publication could not be reconciled.');
+    } finally {
+      setIsBusy(false);
+      setBusyAction(null);
+    }
+  };
+
   const runApprovalAction = async (action: 'approve' | 'edit' | 'reject' | 'regenerate' | 'execute', payload?: Record<string, string> | File | null) => {
     if (!selectedApproval || !token) return;
     if (action === 'regenerate' && !requireBrand('regenerating content')) return;
@@ -851,6 +892,12 @@ useEffect(() => {
       const res = await apiFetch(`${API_BASE}/api/approvals/${selectedApproval.id}/${action}`, requestInit);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getApiError(data, `Action failed: ${action}`));
+      if (action === 'execute' && data.status === 'PUBLISHING') {
+        setStatusFilter('PENDING');
+        await fetchData();
+        setError(data.message || 'LinkedIn publication outcome is uncertain. Verify your LinkedIn profile before retrying.');
+        return;
+      }
       if (action === 'execute' && data.published === false) {
         throw new Error(data.message || 'Execution was not completed.');
       }
@@ -1200,6 +1247,7 @@ useEffect(() => {
                   reviewNote={reviewNote} setReviewNote={setReviewNote}
                   isBusy={isBusy} busyAction={busyAction} operationProgress={operationProgress} operationStage={operationStage}
                   onAction={runApprovalAction}
+                  onResolvePublication={runPublicationResolution}
                 />
               </section>
             </>
@@ -1383,7 +1431,7 @@ function MiniStat({ icon: Icon, label, value }: any) {
 
 // Production copy sync marker: ensure latest UI copy is included in deployment.
 function ApprovalWorkspace(props: any) {
-  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, dashboardCounts, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction } = props;
+  const { queue, selected, selectedId, setSelectedId, searchTerm, setSearchTerm, statusFilter, setStatusFilter, dashboardCounts, editedBody, setEditedBody, reviewNote, setReviewNote, isBusy, busyAction, operationProgress, operationStage, onAction, onResolvePublication } = props;
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [mobileReviewOpen, setMobileReviewOpen] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -1481,6 +1529,19 @@ function ApprovalWorkspace(props: any) {
                   <button className="button danger" disabled={isBusy} onClick={() => onAction('reject', { reason: reviewNote || 'Rejected by reviewer.' })}><X size={14}/> Reject</button>
                 </div>
                 <div className="form-help" style={{ marginTop: 8 }}>{reviewNote.trim() ? 'Regenerate will use this feedback and keep the new version behind the approval gate.' : 'Add feedback above to enable Regenerate.'}</div>
+              </div>
+            ) : selected.status === 'PUBLISHING' ? (
+              <div className="review-editor">
+                <div className="notice error" style={{ marginTop: 0 }}>
+                  <ShieldCheck size={15}/><span>LinkedIn's response was inconclusive. Check your LinkedIn profile before taking another action. Suvacya will not automatically retry because that could create a duplicate post.</span>
+                </div>
+                <div className="editor-toolbar" style={{ marginTop: 12 }}><span>Content from the uncertain publish attempt</span><span>{selected.content.length} chars</span></div>
+                <div className="readonly-field" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65, minHeight: 150 }}>{selected.content}</div>
+                <div className="review-actions" style={{ marginTop: 14 }}>
+                  <button className="button success" disabled={isBusy} onClick={() => onResolvePublication('published')}>I found this post on LinkedIn</button>
+                  <button className="button danger" disabled={isBusy} onClick={() => onResolvePublication('not_published')}>I verified it was not published</button>
+                </div>
+                <div className="form-help" style={{ marginTop: 8 }}>Only choose one of these after checking LinkedIn. Your confirmation is recorded in the audit log.</div>
               </div>
             ) : selected.status === 'APPROVED' ? (
               <div className="review-editor">

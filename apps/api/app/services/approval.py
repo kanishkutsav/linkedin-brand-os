@@ -403,6 +403,89 @@ class ApprovalService:
         await self.session.commit()
         return approval
 
+
+    async def resolve_publication(
+        self,
+        approval_id: int,
+        profile_id: int,
+        *,
+        outcome: str,
+        confirmed: bool,
+        external_id: str | None = None,
+    ):
+        """Resolve an ambiguous LinkedIn publish only after explicit user verification."""
+        if not confirmed:
+            raise ValueError("Explicit confirmation is required to resolve an uncertain publication.")
+        if outcome not in {"published", "not_published"}:
+            raise ValueError("Publication outcome must be published or not_published.")
+
+        approval = await self._get_owned_approval(approval_id, profile_id)
+        if approval.status != "PUBLISHING":
+            raise ValueError("Only a publication with an uncertain outcome can be reconciled.")
+
+        now = datetime.now(timezone.utc)
+        version = await self.session.get(ContentVersion, approval.content_version_id)
+        if version is None:
+            raise ValueError("The approved content version could not be found.")
+
+        if outcome == "published":
+            approval.status = "EXECUTED"
+            approval.reason = None
+            approval.publish_started_at = None
+            approval.published_at = now
+            if external_id:
+                approval.published_external_id = external_id.strip()[:255]
+
+            item = await self.session.get(ContentItem, version.content_id)
+            if item:
+                item.status = "PUBLISHED"
+
+            await BrandLearningService(self.session).record_event(
+                profile_id=profile_id,
+                event_type="CONTENT_PUBLISHED",
+                source_type="linkedin_publish_reconciled",
+                source_id=approval.id,
+                content=version.body,
+                metadata={"external_id": approval.published_external_id, "content_version_id": version.id},
+            )
+            digest = hashlib.sha256(version.body.encode("utf-8")).hexdigest()
+            existing = await self.session.execute(
+                select(HistoricalPost).where(
+                    HistoricalPost.profile_id == profile_id,
+                    HistoricalPost.content_hash == digest,
+                )
+            )
+            if existing.scalar_one_or_none() is None:
+                self.session.add(
+                    HistoricalPost(
+                        profile_id=profile_id,
+                        external_id=approval.published_external_id,
+                        body=version.body,
+                        content_hash=digest,
+                        published_at=now,
+                        source="brand_os_publish",
+                        metadata_json=f'{{"approval_id": {approval.id}, "content_version_id": {version.id}, "reconciled": true}}',
+                    )
+                )
+            audit_type = "PUBLICATION_RECONCILED_PUBLISHED"
+            message = "Publication marked as published after your LinkedIn verification."
+        else:
+            approval.status = "APPROVED"
+            approval.publish_started_at = None
+            approval.reason = "User verified that the post was not published; manual retry is enabled."
+            audit_type = "PUBLICATION_RECONCILED_NOT_PUBLISHED"
+            message = "Publication marked as not published after your verification. You may retry execution."
+
+        self.session.add(
+            AuditLog(
+                event_type=audit_type,
+                actor="user",
+                payload=f"approval={approval.id};external_id={(external_id or '')[:255]}",
+            )
+        )
+        await self.session.commit()
+        return {"approval": approval, "message": message}
+
     async def execute(self, approval_id: int, adapter, profile_id: int | None = None, image_bytes: bytes | None = None, image_mime: str | None = None):
         if profile_id is None:
             raise ValueError("Profile ownership is required")

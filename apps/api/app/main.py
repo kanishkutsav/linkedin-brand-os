@@ -169,15 +169,15 @@ async def lifespan(app: FastAPI):
                 except Exception:
                     logger.warning("Could not drop retired brand_memory.audience_json")
 
-    async with engine.begin() as conn:
-        await conn.run_sync(lambda sync_conn: Base.metadata.create_all(
-            sync_conn,
-            tables=[ObservabilityEvent.__table__, UserFeedback.__table__, JobSearchCache.__table__],
-            checkfirst=True,
-        ))
-        # Roles are application data and must remain under explicit account
-        # administration. Never rewrite auth_users.role during application
-        # startup: doing so can silently undo an intentional role change.
+    if not vercel_runtime and not settings.is_production:
+        async with engine.begin() as conn:
+            await conn.run_sync(lambda sync_conn: Base.metadata.create_all(
+                sync_conn,
+                tables=[ObservabilityEvent.__table__, UserFeedback.__table__, JobSearchCache.__table__],
+                checkfirst=True,
+            ))
+    # Production schema is managed by versioned migrations. Never rewrite
+    # auth_users.role during application startup.
 
     try:
         async with SessionLocal() as security_session:
@@ -410,6 +410,13 @@ class JobSearchRequest(BaseModel):
     experience: float | None = Field(default=None, ge=0, le=60)
     page: int = Field(default=1, ge=1, le=50)
     limit: int = Field(default=20, ge=1, le=20)
+
+
+class PublicationResolutionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    outcome: str = Field(pattern="^(published|not_published)$")
+    confirmed: bool = False
+    external_id: str | None = Field(default=None, max_length=255)
 
 
 async def _job_search_inputs(request: Request, req: JobSearchRequest, session: AsyncSession, current_user: AppUser):
@@ -2114,11 +2121,13 @@ async def execute_approval(
             select(ApprovalRequest).where(ApprovalRequest.id == approval_id)
         )
         saved_approval = result.scalar_one_or_none()
+        saved_status = saved_approval.status if saved_approval else ("EXECUTED" if publish_result.success else "APPROVED")
         return {
             "id": approval_id,
-            "status": "EXECUTED" if publish_result.success else "APPROVED",
-            "published": publish_result.success,
-            "external_id": publish_result.external_id,
+            "status": saved_status,
+            "published": saved_status == "EXECUTED",
+            "ambiguous": saved_status == "PUBLISHING",
+            "external_id": saved_approval.published_external_id if saved_approval else publish_result.external_id,
             "image_urn": getattr(publish_result, "image_urn", None),
             "published_at": saved_approval.published_at if saved_approval else None,
             "message": publish_result.message,
@@ -2160,6 +2169,34 @@ async def publication_confirmation(
             else "This post has not been published to LinkedIn."
         ),
     }
+
+
+@app.post("/api/approvals/{approval_id}/resolve-publication")
+async def resolve_approval_publication(
+    approval_id: int,
+    req: PublicationResolutionRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: AppUser = Depends(require_roles("admin", "reviewer", "owner", "user")),
+):
+    try:
+        result = await ApprovalService(session).resolve_publication(
+            approval_id,
+            int(current_user.id),
+            outcome=req.outcome,
+            confirmed=req.confirmed,
+            external_id=req.external_id,
+        )
+        approval = result["approval"]
+        return {
+            "id": approval.id,
+            "status": approval.status,
+            "published": approval.status == "EXECUTED",
+            "published_at": approval.published_at,
+            "external_id": approval.published_external_id,
+            "message": result["message"],
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/approvals/{approval_id}/edit")
