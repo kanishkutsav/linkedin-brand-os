@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -84,7 +85,7 @@ class ModelRouterService:
                     elif "http 5" in low: category = "PROVIDER_UNAVAILABLE"
                     else: category = "MODEL_ERROR"
                 session.add(ObservabilityEvent(
-                    correlation_id="ai-" + str(int(time.time() * 1000)),
+                    correlation_id="ai-" + uuid.uuid4().hex,
                     event_type="ProviderSucceeded" if status == "SUCCESS" else "ProviderFailed",
                     activity_type="GENERATE", status=status, user_visible_failure=False,
                     provider=provider, model=model, failure_category=category,
