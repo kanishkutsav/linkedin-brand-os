@@ -72,6 +72,8 @@ jobs:
           test -s supabase/migrations/20261101070000_scheduled_run_idempotency.sql
           grep -q "scheduled_key" supabase/migrations/20261101070000_scheduled_run_idempotency.sql
           grep -q "CREATE UNIQUE INDEX" supabase/migrations/20261101070000_scheduled_run_idempotency.sql
+          test -s supabase/migrations/20261101070100_approval_published_at.sql
+          grep -q "published_at" supabase/migrations/20261101070100_approval_published_at.sql
 
   runtime-3-14:
     runs-on: ubuntu-latest

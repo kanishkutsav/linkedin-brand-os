@@ -15,7 +15,7 @@ from app.services.retention import RetentionService
 class ScheduledJobs:
     """Business operations invoked by a scheduler.
 
-    PostgreSQL session-level advisory locks are held on a dedicated connection
+    PostgreSQL transaction-scoped advisory locks are held on a dedicated connection
     for the full invocation. Work sessions may commit per profile without
     releasing the scheduler lock.
     """
