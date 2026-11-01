@@ -1044,8 +1044,8 @@ async def delete_account(
     ]:
         await session.execute(delete(model).where(column == profile_id))
 
-    # Security/audit records are not part of the user's content export and may
-    # be retained only when needed for incident/compliance purposes. Remove
+    # Security/audit records may be retained only when needed for
+    # incident/compliance purposes. Remove
     # records whose actor is directly identifiable as this account.
     await session.execute(
         delete(AuditLog).where(
