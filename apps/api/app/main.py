@@ -951,7 +951,7 @@ async def linkedin_oauth_callback(
             url=f"{(settings.frontend_url or 'http://localhost:3000').rstrip('/')}/?linkedin_error=authorization_denied",
             status_code=302,
         )
-        response.delete_cookie("brand_os_oauth_state", path="/api")
+        response.delete_cookie("brand_os_oauth_state", path="/")
         return response
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing LinkedIn OAuth code or state.")
@@ -1123,7 +1123,18 @@ async def delete_account(
     )).all()] if content_ids else []
 
     if version_ids:
+        approval_ids = [
+            row[0] for row in (
+                await session.execute(
+                    select(ApprovalRequest.id).where(ApprovalRequest.content_version_id.in_(version_ids))
+                )
+            ).all()
+        ]
+        # Feedback can reference an approval directly even if its content_version_id
+        # is absent. Remove both relationship forms before deleting approvals.
         await session.execute(delete(FeedbackEntry).where(FeedbackEntry.content_version_id.in_(version_ids)))
+        if approval_ids:
+            await session.execute(delete(FeedbackEntry).where(FeedbackEntry.approval_id.in_(approval_ids)))
         await session.execute(delete(ApprovalRequest).where(ApprovalRequest.content_version_id.in_(version_ids)))
         await session.execute(delete(ContentVersion).where(ContentVersion.id.in_(version_ids)))
     if content_ids:
