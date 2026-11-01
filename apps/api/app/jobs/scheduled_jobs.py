@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.orchestrator import AgentOrchestrator
@@ -34,6 +34,8 @@ class ScheduledJobs:
         day_start = datetime.combine(today, time.min, tzinfo=tz)
         day_end = day_start + timedelta(days=1)
         summary = {"mode": mode, "profiles": 0, "skipped": 0, "succeeded": 0, "failed": 0}
+        # A crashed invocation must not suppress this user's next daily run forever.
+        stale_run_cutoff = datetime.now(ZoneInfo("UTC")) - timedelta(minutes=45)
 
         async with self.session_factory() as session:
             # pg_cron retries are safe even if an earlier invocation is still running.
@@ -70,7 +72,10 @@ class ScheduledJobs:
                         AgentRun.trigger == f"scheduled:{mode}",
                         AgentRun.started_at >= day_start,
                         AgentRun.started_at < day_end,
-                        AgentRun.status.in_(["RUNNING", "SUCCEEDED"]),
+                        or_(
+                            AgentRun.status == "SUCCEEDED",
+                            (AgentRun.status == "RUNNING") & (AgentRun.started_at >= stale_run_cutoff),
+                        ),
                     ).order_by(AgentRun.started_at.desc()).limit(1)
                 )
                 if existing.scalar_one_or_none() is not None:

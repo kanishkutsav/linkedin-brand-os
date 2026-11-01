@@ -20,10 +20,10 @@ self.addEventListener('fetch', (event) => {
       .then((response) => {
         if (response.ok && request.mode === 'navigate') {
           const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put('/', copy));
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
         }
         return response;
       })
-      .catch(() => caches.match('/').then((cached) => cached || Response.error()))
+      .catch(() => caches.match(request).then((cached) => cached || caches.match('/')).then((cached) => cached || Response.error()))
   );
 });
