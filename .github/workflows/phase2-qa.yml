@@ -75,6 +75,61 @@ jobs:
           test -s supabase/migrations/20261101070100_approval_published_at.sql
           grep -q "published_at" supabase/migrations/20261101070100_approval_published_at.sql
 
+
+  migration-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: brandos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d brandos"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PostgreSQL driver
+        run: pip install "psycopg[binary]>=3.2,<4"
+      - name: Apply additive migrations to PostgreSQL
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import psycopg
+
+          scheduled = Path("supabase/migrations/20261101070000_scheduled_run_idempotency.sql")
+          approval = Path("supabase/migrations/20261101070100_approval_published_at.sql")
+          assert scheduled.read_text() == Path("apps/api/app/db/migrations/20261101070000_scheduled_run_idempotency.sql").read_text()
+          assert approval.read_text() == Path("apps/api/app/db/migrations/20261101070100_approval_published_at.sql").read_text()
+
+          with psycopg.connect("postgresql://postgres:postgres@localhost:5432/brandos") as conn:
+              conn.execute("CREATE TABLE public.agent_runs (id bigint PRIMARY KEY)")
+              conn.execute("CREATE TABLE public.approval_requests (id bigint PRIMARY KEY)")
+              conn.execute(scheduled.read_text())
+              conn.execute(approval.read_text())
+              columns = conn.execute(
+                  "SELECT table_name, column_name FROM information_schema.columns "
+                  "WHERE table_schema='public' AND "
+                  "((table_name='agent_runs' AND column_name='scheduled_key') OR "
+                  "(table_name='approval_requests' AND column_name='published_at'))"
+              ).fetchall()
+              assert ("agent_runs", "scheduled_key") in columns
+              assert ("approval_requests", "published_at") in columns
+              index = conn.execute(
+                  "SELECT indexdef FROM pg_indexes WHERE schemaname='public' "
+                  "AND tablename='agent_runs' AND indexname='ix_agent_runs_scheduled_key'"
+              ).fetchone()
+              assert index and "UNIQUE" in index[0] and "scheduled_key" in index[0]
+          PY
+
   runtime-3-14:
     runs-on: ubuntu-latest
     steps:
