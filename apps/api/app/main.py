@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from fastapi import Depends, FastAPI, HTTPException, Request, File, UploadFile, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -255,6 +256,9 @@ async def api_http_exception_handler(request: Request, exc: HTTPException):
         detail=exc.detail,
         headers=exc.headers,
     )
+
+
+app.add_exception_handler(StarletteHTTPException, api_http_exception_handler)
 
 
 @app.exception_handler(RequestValidationError)
