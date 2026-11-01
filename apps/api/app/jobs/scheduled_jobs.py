@@ -87,6 +87,31 @@ class ScheduledJobs:
                 )
                 run = existing_result.scalar_one_or_none()
 
+                # A successful legacy run always wins over a retryable row.
+                # This also protects the rollout day when old and new workers
+                # may have left more than one same-day record.
+                successful_result = await session.execute(
+                    select(AgentRun)
+                    .where(
+                        AgentRun.user_id == current_profile_id,
+                        AgentRun.mode == mode,
+                        AgentRun.trigger == f"scheduled:{mode}",
+                        AgentRun.started_at >= day_start,
+                        AgentRun.started_at < day_end,
+                        AgentRun.status == "SUCCEEDED",
+                    )
+                    .order_by(AgentRun.started_at.desc())
+                    .limit(1)
+                )
+                successful_run = successful_result.scalar_one_or_none()
+                if successful_run is not None and successful_run.id != (run.id if run else None):
+                    if run is not None:
+                        run.scheduled_key = None
+                    successful_run.scheduled_key = scheduled_key
+                    await session.flush()
+                    summary["skipped"] += 1
+                    continue
+
                 # Adopt a same-day run created by the previous application
                 # version so deployment does not create a second run today.
                 if run is None:

@@ -66,10 +66,6 @@ class TestScheduledJobBoundary(unittest.IsolatedAsyncioTestCase):
         orchestrator._create_candidate.assert_not_awaited()
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
     def test_scheduled_run_key_is_stable_and_unique_in_the_model(self):
         from datetime import date
         from app.models.models import AgentRun
@@ -79,3 +75,7 @@ if __name__ == "__main__":
         column = AgentRun.__table__.c.scheduled_key
         self.assertTrue(column.unique)
         self.assertTrue(column.nullable)
+
+
+if __name__ == "__main__":
+    unittest.main()
