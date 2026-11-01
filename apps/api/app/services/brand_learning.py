@@ -275,12 +275,21 @@ Return:
                 await self.session.commit()
                 processed += len(profile_events)
             except Exception as exc:
+                # Rollback expires ORM instances. Update by scalar IDs and only
+                # touch events that are still pending; stop retrying after 3 attempts.
+                failed_event_ids = [int(event.id) for event in profile_events]
                 await self.session.rollback()
-                for event in profile_events:
-                    event.attempts = int(event.attempts or 0) + 1
-                    event.last_error = str(exc)[:1000]
-                    if event.attempts >= 3:
-                        event.status = "FAILED"
+                from sqlalchemy import case, update
+                for event_id in failed_event_ids:
+                    await self.session.execute(
+                        update(LearningEvent)
+                        .where(LearningEvent.id == event_id, LearningEvent.status == "PENDING")
+                        .values(
+                            attempts=LearningEvent.attempts + 1,
+                            last_error=str(exc)[:1000],
+                            status=case((LearningEvent.attempts + 1 >= 3, "FAILED"), else_="PENDING"),
+                        )
+                    )
                 await self.session.commit()
 
         return processed

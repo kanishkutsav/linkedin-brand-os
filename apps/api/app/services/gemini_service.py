@@ -24,6 +24,10 @@ class ModelRouterService:
     No provider is allowed to perform external LinkedIn actions.
     """
 
+    # Process-local cooldown prevents hammering a rate-limited provider.
+    _provider_cooldowns: dict[str, float] = {}
+    _rate_limit_cooldown_seconds = 60.0
+
     def __init__(self) -> None:
         self.allowed_providers = {
             item.strip().lower()
@@ -81,13 +85,20 @@ class ModelRouterService:
         for provider, api_key, model, fn in providers:
             if not api_key or provider not in self.allowed_providers:
                 continue
+            if self._provider_cooldowns.get(provider, 0.0) > time.monotonic():
+                errors.append(provider + ": temporarily skipped after a recent rate limit")
+                continue
             attempts += 1
             started = time.perf_counter()
             try:
                 result = await fn(safe_system, safe_prompt, max_output_tokens=max_output_tokens)
+                self._provider_cooldowns.pop(provider, None)
                 await self._record_provider_event(provider, model, "SUCCESS", int((time.perf_counter() - started) * 1000), attempts, attempts > 1)
                 return result
             except Exception as exc:
+                error_text = str(exc).lower()
+                if "429" in error_text or "rate limit" in error_text or "resource_exhausted" in error_text:
+                    self._provider_cooldowns[provider] = time.monotonic() + self._rate_limit_cooldown_seconds
                 await self._record_provider_event(provider, model, "FAILED", int((time.perf_counter() - started) * 1000), attempts, False, str(exc))
                 errors.append(provider + ": " + str(exc))
 
