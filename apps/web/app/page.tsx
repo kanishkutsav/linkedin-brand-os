@@ -584,6 +584,7 @@ useEffect(() => {
     const append = Boolean(params?.append);
     const page = params?.page || 1;
     setJobsLoading(true);
+    if (!append) setJobSearchStatus('loading');
     try {
       const body = params?.jobTitle?.trim()
         ? { mode: 'manual', job_title: params.jobTitle.trim(), location: (params.location || '').trim(), experience: params.experience === '' || params.experience == null ? null : Number(params.experience), page, limit: 20 }
