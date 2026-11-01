@@ -14,10 +14,10 @@ class TestAccessibilityContracts(unittest.TestCase):
 
     def test_all_static_image_elements_have_alt_text(self):
         source = (REPOSITORY_ROOT / "apps/web/app/page.tsx").read_text(encoding="utf-8")
-        image_elements = re.findall(r"<img\\b[\\s\\S]*?>", source)
+        image_elements = re.findall(r"<img\b[\s\S]*?>", source)
         self.assertTrue(image_elements, "Expected the application to contain image elements.")
         for image in image_elements:
-            self.assertRegex(image, r"\\balt\\s*=")
+            self.assertRegex(image, r"\balt\s*=")
 
 
 if __name__ == "__main__":
