@@ -13,14 +13,12 @@ class TestAccessibilityContracts(unittest.TestCase):
         self.assertIn(":focus-visible", stylesheet)
         self.assertIn("@media (prefers-reduced-motion: reduce)", stylesheet)
 
-
-
     def test_form_controls_have_programmatic_accessible_names(self):
         source = (REPOSITORY_ROOT / "apps/web/app/page.tsx").read_text(encoding="utf-8")
-        controls = re.findall(r"<(?:input|textarea|select)\\b[\\s\\S]*?>", source)
+        controls = re.findall(r"<(?:input|textarea|select)\b[\s\S]*?>", source)
         self.assertTrue(controls, "Expected form controls in the application.")
         for control in controls:
-            self.assertRegex(control, r"\\baria-label\\s*=")
+            self.assertRegex(control, r"\baria-label\s*=")
 
     def test_frontend_lockfile_matches_exact_package_manifest(self):
         package = json.loads((REPOSITORY_ROOT / "apps/web/package.json").read_text(encoding="utf-8"))
