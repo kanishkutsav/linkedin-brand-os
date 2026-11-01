@@ -143,6 +143,12 @@ class BrandLearningService:
         if not events:
             return 0
 
+        # Keep scalar identifiers outside ORM state so exception handling remains
+        # safe even after rollback expires every loaded instance.
+        event_ids_by_profile: dict[int, list[int]] = {}
+        for event in events:
+            event_ids_by_profile.setdefault(int(event.profile_id), []).append(int(event.id))
+
         processed = 0
         by_profile: dict[int, list[LearningEvent]] = {}
         for event in events:
@@ -200,7 +206,6 @@ Return:
                     system,
                     extraction_prompt,
                     max_output_tokens=1800,
-                    task="learning",
                 )
                 memories = extracted.get("memories") or []
                 memory_texts: list[str] = []
@@ -277,7 +282,7 @@ Return:
             except Exception as exc:
                 # Rollback expires ORM instances. Update by scalar IDs and only
                 # touch events that are still pending; stop retrying after 3 attempts.
-                failed_event_ids = [int(event.id) for event in profile_events]
+                failed_event_ids = event_ids_by_profile.get(profile_id, [])
                 await self.session.rollback()
                 from sqlalchemy import case, update
                 for event_id in failed_event_ids:
