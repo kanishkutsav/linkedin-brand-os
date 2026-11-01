@@ -241,14 +241,20 @@ Return:
                 except Exception as exc:
                     memory_embeddings = []
                     logger.warning("Learning memory embeddings unavailable, keeping structured memories: %s", exc)
-                for index, row in enumerate(memory_rows):
-                    existing = await self.session.execute(
-                        select(LearningMemory).where(
-                            LearningMemory.profile_id == profile_id,
-                            LearningMemory.memory_key == row["key"],
-                        ).limit(1)
+                memory_keys = sorted({row["key"] for row in memory_rows})
+                existing_result = await self.session.execute(
+                    select(LearningMemory).where(
+                        LearningMemory.profile_id == profile_id,
+                        LearningMemory.memory_key.in_(memory_keys),
                     )
-                    memory = existing.scalar_one_or_none()
+                ) if memory_keys else None
+                existing_by_key = {
+                    memory.memory_key: memory
+                    for memory in (existing_result.scalars().all() if existing_result is not None else [])
+                }
+
+                for index, row in enumerate(memory_rows):
+                    memory = existing_by_key.get(row["key"])
                     if memory is None:
                         memory = LearningMemory(
                             profile_id=profile_id,
@@ -261,6 +267,10 @@ Return:
                             metadata_json=json.dumps({"evidence_event_ids": row["evidence"]}, ensure_ascii=False),
                         )
                         self.session.add(memory)
+                        # Keep newly-created keys in the in-memory map so duplicate
+                        # keys in one model response update the pending row instead
+                        # of attempting a second INSERT.
+                        existing_by_key[row["key"]] = memory
                     else:
                         memory.content = row["content"]
                         memory.memory_type = row["type"]
