@@ -1,3 +1,4 @@
+import json
 import re
 import unittest
 from pathlib import Path
@@ -11,6 +12,13 @@ class TestAccessibilityContracts(unittest.TestCase):
         stylesheet = (REPOSITORY_ROOT / "apps/web/app/globals.css").read_text(encoding="utf-8")
         self.assertIn(":focus-visible", stylesheet)
         self.assertIn("@media (prefers-reduced-motion: reduce)", stylesheet)
+
+
+    def test_frontend_lockfile_matches_exact_package_manifest(self):
+        package = json.loads((REPOSITORY_ROOT / "apps/web/package.json").read_text(encoding="utf-8"))
+        lock = json.loads((REPOSITORY_ROOT / "apps/web/package-lock.json").read_text(encoding="utf-8"))
+        self.assertEqual(lock["packages"][""]["dependencies"], package["dependencies"])
+        self.assertEqual(lock["packages"][""]["devDependencies"], package["devDependencies"])
 
     def test_all_static_image_elements_have_alt_text(self):
         source = (REPOSITORY_ROOT / "apps/web/app/page.tsx").read_text(encoding="utf-8")
