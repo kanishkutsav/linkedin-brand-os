@@ -50,7 +50,7 @@ class TestSecurityControls(unittest.TestCase):
         for invalid in ("not-an-email", "a@b", "a..b@example.com", "x@@example.com"):
             self.assertIsNone(AuthService.normalize_email(invalid))
 
-    def test_linkedin_email_must_be_explicitly_verified(self):
+    def test_linkedin_email_verification_claim_is_interpreted_strictly(self):
         self.assertTrue(_is_verified_email(True))
         self.assertTrue(_is_verified_email("true"))
         self.assertFalse(_is_verified_email(False))
