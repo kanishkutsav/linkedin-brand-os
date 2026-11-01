@@ -22,6 +22,25 @@ class _Result:
 
 
 class TestLearningBatchQueries(unittest.IsolatedAsyncioTestCase):
+
+    async def test_learning_summary_uses_database_counts_not_full_id_lists(self):
+        class _CountResult:
+            def __init__(self, value):
+                self.value = value
+
+            def scalar_one(self):
+                return self.value
+
+        session = MagicMock()
+        session.execute = AsyncMock(side_effect=[_CountResult(4), _CountResult(8)])
+
+        summary = await BrandLearningService(session).summary(12)
+
+        self.assertEqual(summary, {"pending_events": 4, "memory_count": 8})
+        self.assertEqual(session.execute.await_count, 2)
+        for call in session.execute.await_args_list:
+            self.assertIn("count(", str(call.args[0]).lower())
+
     async def test_memory_upserts_use_one_lookup_and_coalesce_duplicate_keys(self):
         event = SimpleNamespace(
             id=7,
