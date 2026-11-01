@@ -6,7 +6,7 @@ import os
 import sqlite3
 import secrets
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Request, File, UploadFile, Header
@@ -445,34 +445,57 @@ async def jobs_search_legacy(request: Request, query: str | None = None, session
 
 
 @app.get("/api/admin/overview")
-async def admin_overview(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
-    total_users = len((await session.execute(select(AuthUser.id))).scalars().all())
-    active_users = len((await session.execute(select(AuthUser.id).where(AuthUser.is_active == True))).scalars().all())
-    total_events = len((await session.execute(select(ObservabilityEvent.id))).scalars().all())
-    failed = len((await session.execute(select(ObservabilityEvent.id).where(ObservabilityEvent.status == "FAILED"))).scalars().all())
-    successful = len((await session.execute(select(ObservabilityEvent.id).where(ObservabilityEvent.status == "SUCCESS"))).scalars().all())
-    total_feedback = len((await session.execute(select(UserFeedback.id))).scalars().all())
-    open_feedback = len((await session.execute(select(UserFeedback.id).where(UserFeedback.status.in_(["NEW", "REVIEWING", "PLANNED", "IN_PROGRESS"])))).scalars().all())
+async def admin_overview(window: str = "24h", session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    """Windowed metrics. Database status is a live probe, not historical uptime."""
+    windows = {"1h": timedelta(hours=1), "24h": timedelta(hours=24), "7d": timedelta(days=7)}
+    if window not in windows: raise HTTPException(status_code=400, detail="Window must be 1h, 24h or 7d.")
+    since = datetime.now(timezone.utc) - windows[window]
+    async def count(model, *conditions):
+        query = select(func.count()).select_from(model)
+        if conditions: query = query.where(*conditions)
+        return int((await session.execute(query)).scalar_one())
+    total_users = await count(AuthUser)
+    active_users = await count(AuthUser, AuthUser.is_active.is_(True))
+    event_filter = (ObservabilityEvent.created_at >= since, ObservabilityEvent.event_type.like("Request%"))
+    total_events = await count(ObservabilityEvent, *event_filter)
+    successful = await count(ObservabilityEvent, *event_filter, ObservabilityEvent.status == "SUCCESS")
+    failed = await count(ObservabilityEvent, *event_filter, ObservabilityEvent.status == "FAILED")
+    rejected = await count(ObservabilityEvent, *event_filter, ObservabilityEvent.status == "REJECTED")
+    provider_success = await count(ObservabilityEvent, ObservabilityEvent.created_at >= since, ObservabilityEvent.provider.is_not(None), ObservabilityEvent.status == "SUCCESS")
+    provider_failed = await count(ObservabilityEvent, ObservabilityEvent.created_at >= since, ObservabilityEvent.provider.is_not(None), ObservabilityEvent.status == "FAILED")
+    agent_total = await count(AgentRun, AgentRun.started_at >= since)
+    agent_success = await count(AgentRun, AgentRun.started_at >= since, AgentRun.status.in_(["SUCCESS", "SUCCEEDED", "COMPLETED"]))
+    agent_failed = await count(AgentRun, AgentRun.started_at >= since, AgentRun.status.in_(["FAILED", "ERROR"]))
+    learning_pending = await count(LearningEvent, LearningEvent.status == "PENDING")
+    learning_failed = await count(LearningEvent, LearningEvent.status == "FAILED")
+    durable_queued = await count(DurableJob, DurableJob.status == "QUEUED")
+    durable_running = await count(DurableJob, DurableJob.status == "RUNNING")
+    durable_failed = await count(DurableJob, DurableJob.status == "FAILED")
+    feedback_total = await count(UserFeedback)
+    feedback_open = await count(UserFeedback, UserFeedback.status.in_(["NEW", "REVIEWING", "PLANNED", "IN_PROGRESS"]))
+    provider_rows = (await session.execute(select(ObservabilityEvent.provider, ObservabilityEvent.status, func.count()).where(ObservabilityEvent.created_at >= since, ObservabilityEvent.provider.is_not(None)).group_by(ObservabilityEvent.provider, ObservabilityEvent.status))).all()
+    provider_metrics = {}
+    for provider, status, total in provider_rows:
+        item = provider_metrics.setdefault(provider, {"success": 0, "failed": 0})
+        if status == "SUCCESS": item["success"] += int(total)
+        elif status == "FAILED": item["failed"] += int(total)
+    db_started = datetime.now(timezone.utc)
+    db_status = "healthy"
+    try: await session.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "unavailable"
+        logger.exception("Admin database health probe failed")
+    db_latency_ms = int((datetime.now(timezone.utc) - db_started).total_seconds() * 1000)
     return {
+        "window": window,
         "users": {"total": total_users, "active": active_users},
-        "reliability": {
-            "events": total_events,
-            "successful_requests": successful,
-            "failed_requests": failed,
-            "error_rate": failed / total_events if total_events else 0,
-        },
-        "feedback": {"total": total_feedback, "open": open_feedback},
-        "ai_providers": {
-            "groq": bool(settings.groq_api_key),
-            "openrouter": bool(settings.openrouter_api_key),
-            "gemini": bool(settings.gemini_api_key),
-        },
-        "job_providers": {
-            "Indeed": bool(settings.apify_api_token),
-            "Naukri": bool(settings.apify_api_token),
-        },
+        "reliability": {"events": total_events, "successful_requests": successful, "failed_requests": failed, "rejected_requests": rejected, "error_rate": failed / (successful + failed) if successful + failed else 0, "success_rate": successful / (successful + failed) if successful + failed else None},
+        "database": {"status": db_status, "probe_latency_ms": db_latency_ms, "uptime_percentage": None, "uptime_note": "Live SELECT 1 probe only; historical uptime is not measured."},
+        "ai": {"configured_providers": [p for p, key in (("groq", settings.groq_api_key), ("openrouter", settings.openrouter_api_key), ("gemini", settings.gemini_api_key)) if key], "provider_events": provider_metrics, "successful_calls": provider_success, "failed_calls": provider_failed, "success_rate": provider_success / (provider_success + provider_failed) if provider_success + provider_failed else None},
+        "agents": {"total_runs": agent_total, "successful_runs": agent_success, "failed_runs": agent_failed, "success_rate": agent_success / (agent_success + agent_failed) if agent_success + agent_failed else None, "status": "disabled" if not settings.agent_enabled else ("degraded" if agent_failed else "enabled")},
+        "queues": {"learning_pending": learning_pending, "learning_failed": learning_failed, "durable_queued": durable_queued, "durable_running": durable_running, "durable_failed": durable_failed},
+        "feedback": {"total": feedback_total, "open": feedback_open},
     }
-
 
 @app.get("/api/admin/users")
 async def admin_users(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
@@ -719,47 +742,39 @@ async def admin_job_providers(session: AsyncSession = Depends(get_session), curr
 @app.middleware("http")
 async def observability_controls(request: Request, call_next):
     path = request.scope.get("path", "")
-    if not path.startswith("/api/") or path.startswith("/api/health"):
-        return await call_next(request)
+    if not path.startswith("/api/") or path.startswith("/api/health"): return await call_next(request)
     started = datetime.now(timezone.utc)
-    correlation_id = request.headers.get("x-correlation-id") or secrets.token_hex(12)
+    supplied_id = request.headers.get("x-correlation-id", "").strip()
+    correlation_id = supplied_id if supplied_id and len(supplied_id) <= 80 else secrets.token_hex(16)
     status_code = 500
+    response = None
     try:
         response = await call_next(request)
         status_code = response.status_code
         return response
     finally:
         try:
-            token = request_token(request)
+            elapsed = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+            method = request.method.upper()
+            activity = "OTHER"
+            if "/content/" in path: activity = "GENERATE"
+            elif "/research/" in path: activity = "RESEARCH"
+            elif "/approvals/" in path: activity = "PUBLISH"
+            elif "/learning/" in path: activity = "LEARNING"
+            elif "/linkedin/" in path: activity = "LINKEDIN_CONNECT"
+            elif "/auth/" in path: activity = "AUTHENTICATION"
+            elif "/jobs" in path: activity = "JOB_SEARCH"
+            if status_code >= 500: status, event_type, category, visible = "FAILED", "RequestFailed", "SERVER_ERROR", True
+            elif status_code >= 400:
+                status, event_type, visible = "REJECTED", "RequestRejected", False
+                category = "RATE_LIMIT" if status_code == 429 else ("AUTHENTICATION_ERROR" if status_code == 401 else ("AUTHORIZATION_ERROR" if status_code == 403 else "CLIENT_ERROR"))
+            else: status, event_type, category, visible = "SUCCESS", "RequestSucceeded", None, False
             async with SessionLocal() as telemetry_session:
-                user_id = None
-                if token:
-                    user = await AuthService.get_user_from_token(telemetry_session, token)
-                    if user and str(user.id).isdigit():
-                        user_id = int(user.id)
-                elapsed = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
-                method = request.method.upper()
-                activity = "OTHER"
-                if "/content/" in path: activity = "GENERATE"
-                elif "/research/" in path: activity = "RESEARCH"
-                elif "/approvals/" in path: activity = "PUBLISH"
-                elif "/learning/" in path: activity = "LEARNING"
-                elif "/linkedin/" in path: activity = "LINKEDIN_CONNECT"
-                elif "/auth/" in path: activity = "AUTHENTICATION"
-                elif "/jobs" in path: activity = "JOB_SEARCH"
-                status = "SUCCESS" if status_code < 400 else "FAILED"
-                category = "RATE_LIMIT" if status_code == 429 else ("AUTHENTICATION_ERROR" if status_code == 401 else ("AUTHORIZATION_ERROR" if status_code == 403 else ("UNKNOWN" if status_code >= 500 else None)))
-                telemetry_session.add(ObservabilityEvent(
-                    user_id=user_id, correlation_id=correlation_id,
-                    event_type="RequestSucceeded" if status == "SUCCESS" else "RequestFailed",
-                    activity_type=activity, status=status, user_visible_failure=status == "FAILED",
-                    failure_category=category, http_status=status_code, latency_ms=elapsed,
-                    details_json=json.dumps({"method": method, "path": path[:180]}, ensure_ascii=False),
-                ))
+                telemetry_session.add(ObservabilityEvent(user_id=None, correlation_id=correlation_id, event_type=event_type, activity_type=activity, status=status, user_visible_failure=visible, failure_category=category, http_status=status_code, latency_ms=elapsed, details_json=json.dumps({"method": method, "path": path[:180]}, ensure_ascii=False)))
                 await telemetry_session.commit()
-        except Exception:
-            logger.exception("Observability event recording failed")
-
+        except Exception: logger.exception("Observability event recording failed")
+        finally:
+            if response is not None: response.headers["X-Correlation-ID"] = correlation_id
 @app.get("/health")
 async def health() -> dict[str, object]:
     return {
@@ -1541,6 +1556,11 @@ async def run_scheduled_job(
     jobs = ScheduledJobs(SessionLocal)
     if job_name not in {"daily_post", "research", "discovery", "calendar", "retention", "learning"}:
         raise HTTPException(status_code=404, detail="Unknown scheduled job.")
+
+    # The durable scheduler owns this route only after dedicated scheduled handlers are available.
+    # Keep the synchronous pg_cron path active while that worker flag is disabled.
+    if job_name in {"daily_post", "research", "discovery", "calendar"} and settings.durable_scheduled_worker_enabled:
+        raise HTTPException(status_code=503, detail="Durable scheduled handlers are not enabled for these job types yet.")
 
     # Daily post generation and research refresh are intentionally executed inside the request.
     # The previous asyncio.create_task() fallback returned 200 before the work

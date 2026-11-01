@@ -152,6 +152,7 @@ export default function Home() {
   const [jobs, setJobs] = useState<any[]>([]); const [jobProviders, setJobProviders] = useState<any[]>([]); const [jobLocation, setJobLocation] = useState<any>(null); const [jobQuery, setJobQuery] = useState(''); const [jobExperience, setJobExperience] = useState<number | ''>(''); const [jobPage, setJobPage] = useState(1); const [jobHasMore, setJobHasMore] = useState(false); const [jobsLoading, setJobsLoading] = useState(false); const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [feedbackType, setFeedbackType] = useState('FEATURE'); const [feedbackSubject, setFeedbackSubject] = useState(''); const [feedbackDescription, setFeedbackDescription] = useState(''); const [feedbackContext, setFeedbackContext] = useState(''); const [feedbackSending, setFeedbackSending] = useState(false);
   const [adminOverview, setAdminOverview] = useState<any>(null);
+  const [adminWindow, setAdminWindow] = useState('24h');
   const [adminActivity, setAdminActivity] = useState<any[]>([]);
   const [adminFeedback, setAdminFeedback] = useState<any[]>([]);
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
@@ -597,7 +598,7 @@ useEffect(() => {
   const loadAdminOverview = async () => {
     if (!token || profile.role !== 'admin') return;
     try {
-      const response = await apiFetch(API_BASE + '/api/admin/overview', { headers: headers() });
+      const response = await apiFetch(API_BASE + '/api/admin/overview?window=' + adminWindow, { headers: headers() });
       if (response.ok) setAdminOverview(await response.json());
       else throw new Error('Admin overview could not be loaded.');
     } catch (e) { setError(e instanceof Error ? e.message : 'Admin overview could not be loaded.'); }
@@ -680,7 +681,7 @@ useEffect(() => {
     await loadAdminOverview();
     await Promise.all(Object.entries(adminSections).filter(([, open]) => open).map(([section]) => loadAdminSection(section, true)));
   };
-  useEffect(() => { if (tab === 'Jobs' && token && !jobs.length) void loadJobs(); if (tab === 'Admin' && token && profile.role === 'admin') void loadAdminOverview(); }, [tab, token, profile.role]);
+  useEffect(() => { if (tab === 'Jobs' && token && !jobs.length) void loadJobs(); if (tab === 'Admin' && token && profile.role === 'admin') void loadAdminOverview(); }, [tab, token, profile.role, adminWindow]);
   useEffect(() => {
     const selected = queue.find((item) => item.id === selectedId);
     if (!selected) return;
@@ -1196,7 +1197,7 @@ useEffect(() => {
           {tab === 'Analytics' && <AnalyticsView loading={analyticsLoading} analytics={analytics} />}
           {tab === 'Jobs' && <ProductionJobsView jobs={jobs} location={jobLocation} query={jobQuery} experience={jobExperience} loading={jobsLoading} page={jobPage} hasMore={jobHasMore} onSearch={loadJobs} />}
           {tab === 'Feedback' && <FeedbackView type={feedbackType} setType={setFeedbackType} subject={feedbackSubject} setSubject={setFeedbackSubject} description={feedbackDescription} setDescription={setFeedbackDescription} context={feedbackContext} setContext={setFeedbackContext} sending={feedbackSending} onSubmit={async () => { if (!feedbackSubject.trim() || !feedbackDescription.trim() || !token) return; setFeedbackSending(true); try { const res = await apiFetch(API_BASE + '/api/feedback', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback_type: feedbackType, subject: feedbackSubject, description: feedbackDescription, context: feedbackContext }) }); const data = await res.json(); if (!res.ok) throw new Error(getApiError(data, 'Feedback could not be submitted.')); setFeedbackSubject(''); setFeedbackDescription(''); setFeedbackContext(''); setNotice('Thanks. Your feedback was submitted.'); } catch (e) { setError(e instanceof Error ? e.message : 'Feedback could not be submitted.'); } finally { setFeedbackSending(false); } }} />}
-          {tab === 'Admin' && profile.role === 'admin' && <AdminView overview={adminOverview} activity={adminActivity} feedback={adminFeedback} users={adminUsers} aiProviders={adminAiProviders} jobProviders={adminJobProviders} sections={adminSections} sectionLoading={adminSectionLoading} onToggle={toggleAdminSection} onRefresh={refreshAdmin} onCreateUser={createAdminUser} onUpdateUser={updateAdminUser} onRemoveUser={removeAdminUser} adminUserEmail={adminUserEmail} setAdminUserEmail={setAdminUserEmail} adminUserName={adminUserName} setAdminUserName={setAdminUserName} adminUserSaving={adminUserSaving} adminUserActionId={adminUserActionId} />}
+          {tab === 'Admin' && profile.role === 'admin' && <AdminView overview={adminOverview} window={adminWindow} onWindowChange={setAdminWindow} activity={adminActivity} feedback={adminFeedback} users={adminUsers} aiProviders={adminAiProviders} jobProviders={adminJobProviders} sections={adminSections} sectionLoading={adminSectionLoading} onToggle={toggleAdminSection} onRefresh={refreshAdmin} onCreateUser={createAdminUser} onUpdateUser={updateAdminUser} onRemoveUser={removeAdminUser} adminUserEmail={adminUserEmail} setAdminUserEmail={setAdminUserEmail} adminUserName={adminUserName} setAdminUserName={setAdminUserName} adminUserSaving={adminUserSaving} adminUserActionId={adminUserActionId} />}
           {tab === 'Brand DNA' && (
             ((loading || brandLoading) && !brand.profile) ? <SettingsSkeleton /> : <SettingsView
               brand={brand}
@@ -2244,7 +2245,7 @@ function FeedbackView({ type, setType, subject, setSubject, description, setDesc
   </>;
 }
 
-function AdminView({ overview, activity, feedback, users, aiProviders, jobProviders, sections, sectionLoading, onToggle, onRefresh, onCreateUser, onUpdateUser, onRemoveUser, adminUserEmail, setAdminUserEmail, adminUserName, setAdminUserName, adminUserSaving, adminUserActionId }: any) {
+function AdminView({ overview, window, onWindowChange, activity, feedback, users, aiProviders, jobProviders, sections, sectionLoading, onToggle, onRefresh, onCreateUser, onUpdateUser, onRemoveUser, adminUserEmail, setAdminUserEmail, adminUserName, setAdminUserName, adminUserSaving, adminUserActionId }: any) {
   if (!overview) return <div className="admin-page">
     <div className="page-header"><div><SkeletonBlock width={130} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={310} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={520} height={10}/></div></div><SkeletonBlock width={82} height={34} radius={9}/></div>
     <div className="admin-metric-grid">{[1,2,3,4].map((item) => <div className="admin-metric-card" key={item}><SkeletonBlock width="48%" height={10}/><div style={{ marginTop: 15 }}><SkeletonBlock width="35%" height={25}/></div></div>)}</div>
@@ -2262,11 +2263,15 @@ function AdminView({ overview, activity, feedback, users, aiProviders, jobProvid
     </section>;
   };
   return <div className="admin-page">
-    <div className="page-header admin-page-header"><div><div className="page-kicker"><ShieldAlert size={13}/> Admin operations</div><h1 className="page-title">Operations & reliability</h1><p className="page-description">Open a section only when you need its data; each section loads on demand.</p></div><button className="button admin-refresh-button" onClick={() => void onRefresh()}><RefreshCw size={13}/> Refresh</button></div>
+    <div className="page-header admin-page-header"><div><div className="page-kicker"><ShieldAlert size={13}/> Admin operations</div><h1 className="page-title">Operations & reliability</h1><p className="page-description">Operational health and historical request/agent metrics. Database uptime is not inferred from a single probe.</p></div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><select className="input" value={window} onChange={(e) => onWindowChange(e.target.value)} aria-label="Metrics time window"><option value="1h">Last hour</option><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option></select><button className="button admin-refresh-button" onClick={() => void onRefresh()}><RefreshCw size={13}/> Refresh</button></div></div>
     <div className="admin-metric-grid">
-      <div className="admin-metric-card"><div className="admin-metric-top"><span>Successful activity</span><span className="admin-metric-icon"><Activity size={15}/></span></div><strong>{overview?.reliability?.successful_requests ?? 0} / {overview?.reliability?.events ?? 0}</strong><small>successful / total API activity</small></div>
-      <div className="admin-metric-card"><div className="admin-metric-top"><span>Failed requests</span><span className="admin-metric-icon"><ShieldAlert size={15}/></span></div><strong>{overview?.reliability?.failed_requests ?? 0}</strong><small>Requests requiring attention</small></div>
-      <div className="admin-metric-card"><div className="admin-metric-top"><span>Users</span><span className="admin-metric-icon"><UserRound size={15}/></span></div><strong>{overview?.users?.total ?? 0}</strong><small>Accounts in the workspace</small></div>
+      <div className="admin-metric-card"><div className="admin-metric-top"><span>API success rate</span><span className="admin-metric-icon"><Activity size={15}/></span></div><strong>{overview?.reliability?.success_rate == null ? "—" : Math.round(overview.reliability.success_rate * 100) + "%"}</strong><small>{overview?.reliability?.successful_requests ?? 0} successful · {overview?.reliability?.failed_requests ?? 0} server failures · {overview?.reliability?.rejected_requests ?? 0} client rejections</small></div>
+      <div className="admin-metric-card"><div className="admin-metric-top"><span>Database</span><span className="admin-metric-icon"><Gauge size={15}/></span></div><strong>{overview?.database?.status || "unknown"}</strong><small>Live SELECT 1 · {overview?.database?.probe_latency_ms ?? "—"} ms · historical uptime not measured</small></div>
+      <div className="admin-metric-card"><div className="admin-metric-top"><span>AI providers</span><span className="admin-metric-icon"><Sparkles size={15}/></span></div><strong>{overview?.ai?.success_rate == null ? "—" : Math.round(overview.ai.success_rate * 100) + "%"}</strong><small>{overview?.ai?.successful_calls ?? 0} successful · {overview?.ai?.failed_calls ?? 0} failed calls</small></div>
+      <div className="admin-metric-card"><div className="admin-metric-top"><span>Agent runs</span><span className="admin-metric-icon"><BrainCircuit size={15}/></span></div><strong>{overview?.agents?.success_rate == null ? "—" : Math.round(overview.agents.success_rate * 100) + "%"}</strong><small>{overview?.agents?.successful_runs ?? 0} successful · {overview?.agents?.failed_runs ?? 0} failed · {overview?.agents?.status || "unknown"}</small></div>
+      <div className="admin-metric-card"><div className="admin-metric-top"><span>Learning backlog</span><span className="admin-metric-icon"><Clock3 size={15}/></span></div><strong>{overview?.queues?.learning_pending ?? 0}</strong><small>{overview?.queues?.learning_failed ?? 0} failed learning events</small></div>
+      <div className="admin-metric-card"><div className="admin-metric-top"><span>Durable jobs</span><span className="admin-metric-icon"><BarChart3 size={15}/></span></div><strong>{overview?.queues?.durable_queued ?? 0} queued · {overview?.queues?.durable_running ?? 0} running</strong><small>{overview?.queues?.durable_failed ?? 0} failed jobs</small></div>
+      <div className="admin-metric-card"><div className="admin-metric-top"><span>Users</span><span className="admin-metric-icon"><UserRound size={15}/></span></div><strong>{overview?.users?.total ?? 0}</strong><small>{overview?.users?.active ?? 0} active accounts</small></div>
       <div className="admin-metric-card"><div className="admin-metric-top"><span>Open feedback</span><span className="admin-metric-icon"><MessageSquare size={15}/></span></div><strong>{overview?.feedback?.open ?? 0}</strong><small>Feedback awaiting review</small></div>
     </div>
     <Section id="ai-providers" title="AI providers" eyebrow="PROVIDER READINESS"><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{Object.entries(aiProviders?.configured || {}).map(([k,v]: any) => <span className="tag" key={k}>{k} · {v ? 'configured' : 'not configured'}</span>)}</div></Section>
