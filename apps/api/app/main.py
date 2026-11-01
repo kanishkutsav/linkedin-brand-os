@@ -775,6 +775,17 @@ async def observability_controls(request: Request, call_next):
         except Exception: logger.exception("Observability event recording failed")
         finally:
             if response is not None: response.headers["X-Correlation-ID"] = correlation_id
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root() -> dict[str, str]:
+    """Lightweight service landing and liveness response for generic probes."""
+    return {
+        "service": settings.app_name,
+        "status": "ok",
+        "health": "/health",
+        "readiness": "/health/ready",
+    }
+
+
 @app.get("/health")
 async def health() -> dict[str, object]:
     return {
