@@ -66,3 +66,20 @@ def test_job_cache_key_is_location_specific():
     assert _cache_key("product manager", "Product Manager", 5, "Technology", india) != _cache_key(
         "product manager", "Product Manager", 5, "Technology", us
     )
+
+
+def test_job_search_status_distinguishes_empty_results_from_provider_outages():
+    from app.services.jobs import _search_status
+
+    assert _search_status([]) == "not_configured"
+    assert _search_status([
+        {"configured": True, "available": False},
+        {"configured": False, "available": False},
+    ]) == "unavailable"
+    assert _search_status([
+        {"configured": True, "available": True},
+        {"configured": True, "available": False},
+    ]) == "partial"
+    assert _search_status([
+        {"configured": True, "available": True},
+    ]) == "ok"
