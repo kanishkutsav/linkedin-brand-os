@@ -73,6 +73,10 @@ class TestScheduledJobBoundary(unittest.IsolatedAsyncioTestCase):
 
         key = ScheduledJobs.scheduled_run_key("daily_post", 42, date(2026, 11, 1))
         self.assertEqual(key, "daily_post:42:2026-11-01")
+        self.assertNotEqual(
+            ScheduledJobs.advisory_lock_key("daily_post", 42),
+            ScheduledJobs.advisory_lock_key("daily_post", 43),
+        )
         column = AgentRun.__table__.c.scheduled_key
         self.assertTrue(column.unique)
         self.assertTrue(column.nullable)

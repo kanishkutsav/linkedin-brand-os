@@ -9,7 +9,17 @@ class GuardResult:
 
 def normalize_human_style(body: str) -> str:
     """Apply deterministic style cleanup before content reaches review."""
-    text = (body or "").replace("\u2014", ", ").replace("\u2013", ", ")
+    text = (body or "").replace("\r\n", "\n").replace("\r", "\n")
+    # Model responses occasionally contain escaped line breaks as literal
+    # backslash sequences. Normalize one or more backslashes consistently.
+    text = re.sub(r"\\+r", "\r", text)
+    text = re.sub(r"\\+n", "\n", text)
+    text = re.sub(r"\\+t", " ", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Join a list marker stranded on its own line to the following item text.
+    text = re.sub(r"(?m)^([ \t]*\d+)[.)][ \t]*\n[ \t]*(?!\d+[.)][ \t])(?=\S)", r"\1. ", text)
+    text = re.sub(r"(?m)^([ \t]*\d+)[.)][ \t]+", r"\1. ", text)
+    text = text.replace("\u2014", ", ").replace("\u2013", ", ")
     text = text.replace(";", ". ")
     text = re.sub(r" {2,}", " ", text)
     text = re.sub(r" +\n", "\n", text)
@@ -37,6 +47,10 @@ def run_content_guards(body: str) -> GuardResult:
         issues.append("Em/en dashes are not allowed in generated content.")
     if ";" in text:
         issues.append("Semicolons are not allowed in generated content.")
+    if re.search(r"\\+n|\\+r", text):
+        issues.append("Escaped newline sequences must be normalized before review.")
+    if re.search(r"(?m)^\s*\d+[.)]\s*$", text):
+        issues.append("Numbered list markers must include their item text.")
 
     if not text:
         issues.append("Content is empty.")

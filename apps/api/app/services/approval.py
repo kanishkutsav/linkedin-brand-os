@@ -196,7 +196,7 @@ class ApprovalService:
         approval = await self._get_owned_approval(approval_id, profile_id)
         if not approval or approval.status not in {"PENDING", "EDITED", "REGENERATED"}:
             raise ValueError("Approval is not editable in its current state")
-        edited_body = (edited_body or "").strip()
+        edited_body = normalize_human_style(edited_body or "")
         guard = run_content_guards(edited_body)
         if not guard.passed:
             raise ValueError("Edit blocked by guardrails: " + "; ".join(guard.issues))

@@ -27,30 +27,46 @@ class ScheduledJobs:
     def scheduled_run_key(mode: str, profile_id: int, day: object) -> str:
         return f"{mode}:{profile_id}:{day.isoformat()}"
 
+    @staticmethod
+    def advisory_lock_key(mode: str, profile_id: int) -> str:
+        return f"brand-os-scheduled:{mode}:{int(profile_id)}"
+
     async def run(self, mode: str, profile_id: int | None = None) -> dict:
         mode_aliases = {"discovery": "daily_post", "calendar": "research"}
         mode = mode_aliases.get(mode, mode)
         if mode not in {"daily_post", "research"}:
             raise ValueError(f"Unsupported scheduled job: {mode}")
 
-        # Use one lock key per mode so an all-user invocation and a
-        # single-profile invocation cannot race each other.
-        async with self.session_factory() as lock_session:
-            bind = lock_session.bind
-            if bind is not None and bind.dialect.name == "postgresql":
-                lock_key = f"brand-os-scheduled:{mode}"
-                await lock_session.execute(
-                    text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
-                    {"lock_key": lock_key},
+        if profile_id is None:
+            async with self.session_factory() as discovery_session:
+                profile_query = (
+                    select(UserProfile.id)
+                    .join(BrandMemory, BrandMemory.profile_id == UserProfile.id)
+                    .where(BrandMemory.status == "READY")
                 )
-                # Keep this transaction open while work runs in another
-                # session. Closing the lock session releases the xact lock.
-                return await self._run_locked(mode, profile_id)
+                result = await discovery_session.execute(profile_query)
+                profile_ids = [int(row[0]) for row in result.all()]
+        else:
+            profile_ids = [int(profile_id)]
 
-        # SQLite/unit-test fallback. The unique scheduled_key remains the
-        # durable invariant in production; PostgreSQL provides cross-instance
-        # serialization around the read/claim/run sequence.
-        return await self._run_locked(mode, profile_id)
+        summary = {"mode": mode, "profiles": 0, "skipped": 0, "succeeded": 0, "failed": 0}
+        # Lock per profile: separate cron requests can process different users
+        # concurrently, while all-user and single-user invocations still share
+        # the same lock for a given profile. Commits in the work session do not
+        # release this transaction-scoped lock held by the dedicated session.
+        for current_profile_id in profile_ids:
+            async with self.session_factory() as lock_session:
+                bind = lock_session.bind
+                if bind is not None and bind.dialect.name == "postgresql":
+                    lock_key = self.advisory_lock_key(mode, current_profile_id)
+                    await lock_session.execute(
+                        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                        {"lock_key": lock_key},
+                    )
+                result = await self._run_locked(mode, current_profile_id)
+            for key in ("profiles", "skipped", "succeeded", "failed"):
+                summary[key] += int(result.get(key, 0))
+        return summary
 
     async def _run_locked(self, mode: str, profile_id: int | None = None) -> dict:
         tz = ZoneInfo("Asia/Kolkata")
