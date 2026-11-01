@@ -63,6 +63,13 @@ jobs:
           grep -q "X-Brand-OS-Job-Key" supabase/migrations/20260925_phase2_scheduler.sql
           test -s supabase/migrations/20260925_phase2_scheduler_rollback.sql
 
+      - name: Validate backend-only RLS for auxiliary tables
+        run: |
+          test -s supabase/migrations/20261101_security_rls_additional_tables.sql
+          grep -q "observability_events" supabase/migrations/20261101_security_rls_additional_tables.sql
+          grep -q "user_feedback" supabase/migrations/20261101_security_rls_additional_tables.sql
+          grep -q "job_search_cache" supabase/migrations/20261101_security_rls_additional_tables.sql
+
   runtime-3-14:
     runs-on: ubuntu-latest
     steps:

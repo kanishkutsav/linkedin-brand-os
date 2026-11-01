@@ -12,6 +12,7 @@ class PublishResult:
     external_id: str | None
     message: str
     image_urn: str | None = None
+    ambiguous: bool = False
 
 
 class LinkedInAdapter:
@@ -121,6 +122,11 @@ class OfficialLinkedInAdapter(LinkedInAdapter):
                 return PublishResult(True, external_id, f"Published to LinkedIn through the official Posts API{suffix}", uploaded_image_urn)
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            return PublishResult(False, None, f"LinkedIn API rejected the post ({exc.code}): {detail[:500]}")
+            return PublishResult(
+                False, None, f"LinkedIn API rejected the post ({exc.code}): {detail[:500]}",
+                ambiguous=exc.code >= 500,
+            )
         except Exception as exc:
-            return PublishResult(False, None, f"LinkedIn API request failed: {exc}")
+            # A timeout/connection drop can happen after LinkedIn accepted the
+            # post. The caller must not automatically retry this ambiguous result.
+            return PublishResult(False, None, f"LinkedIn API request outcome is unknown: {exc}", ambiguous=True)
