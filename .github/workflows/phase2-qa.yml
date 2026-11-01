@@ -110,17 +110,24 @@ jobs:
           scheduled = Path("supabase/migrations/20261101070000_scheduled_run_idempotency.sql")
           approval = Path("supabase/migrations/20261101070100_approval_published_at.sql")
           content = Path("supabase/migrations/20261101070200_content_daily_idempotency.sql")
+          rls = Path("supabase/migrations/20261101_security_rls_additional_tables.sql")
           assert scheduled.read_text() == Path("apps/api/app/db/migrations/20261101070000_scheduled_run_idempotency.sql").read_text()
           assert approval.read_text() == Path("apps/api/app/db/migrations/20261101070100_approval_published_at.sql").read_text()
           assert content.read_text() == Path("apps/api/app/db/migrations/20261101070200_content_daily_idempotency.sql").read_text()
+          assert rls.read_text() == Path("apps/api/app/db/migrations/20261101_security_rls_additional_tables.sql").read_text()
 
           with psycopg.connect("postgresql://postgres:postgres@localhost:5432/brandos") as conn:
+              conn.execute("DO $ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon; END IF; IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='authenticated') THEN CREATE ROLE authenticated; END IF; END $")
               conn.execute("CREATE TABLE public.agent_runs (id bigint PRIMARY KEY)")
               conn.execute("CREATE TABLE public.approval_requests (id bigint PRIMARY KEY)")
               conn.execute("CREATE TABLE public.content_items (id bigint PRIMARY KEY, profile_id bigint NOT NULL, title varchar(200), topic varchar(300), pillar varchar(100), status varchar(50), created_at timestamptz)")
+              conn.execute("CREATE TABLE public.observability_events (id bigint PRIMARY KEY)")
+              conn.execute("CREATE TABLE public.user_feedback (id bigint PRIMARY KEY)")
+              conn.execute("CREATE TABLE public.job_search_cache (id bigint PRIMARY KEY)")
               conn.execute(scheduled.read_text())
               conn.execute(approval.read_text())
               conn.execute(content.read_text())
+              conn.execute(rls.read_text())
               columns = conn.execute(
                   "SELECT table_name, column_name FROM information_schema.columns "
                   "WHERE table_schema='public' AND "
@@ -141,6 +148,18 @@ jobs:
                   "AND tablename='agent_runs' AND indexname='ix_agent_runs_scheduled_key'"
               ).fetchone()
               assert index and "UNIQUE" in index[0] and "scheduled_key" in index[0]
+              rls_tables = conn.execute(
+                  "SELECT relname FROM pg_class WHERE relnamespace='public'::regnamespace "
+                  "AND relname IN ('observability_events','user_feedback','job_search_cache') "
+                  "AND relrowsecurity ORDER BY relname"
+              ).fetchall()
+              assert [row[0] for row in rls_tables] == ["job_search_cache", "observability_events", "user_feedback"]
+              exposed = conn.execute(
+                  "SELECT count(*) FROM information_schema.role_table_grants "
+                  "WHERE table_schema='public' AND grantee IN ('anon','authenticated') "
+                  "AND table_name IN ('observability_events','user_feedback','job_search_cache')"
+              ).fetchone()[0]
+              assert exposed == 0
           PY
 
   runtime-3-14:
