@@ -11,6 +11,9 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Request, File, UploadFile, Header
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -201,6 +204,38 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+def _request_id(request: Request) -> str:
+    return getattr(request.state, "request_id", None) or secrets.token_hex(16)
+
+
+def _api_error_response(
+    request: Request,
+    *,
+    status_code: int,
+    code: str,
+    message: str,
+    detail=None,
+    details=None,
+    headers: dict | None = None,
+) -> JSONResponse:
+    request_id = _request_id(request)
+    payload = {
+        "detail": message if detail is None else detail,
+        "error": {"code": code, "message": message},
+        "request_id": request_id,
+    }
+    if details is not None:
+        payload["error"]["details"] = jsonable_encoder(details)
+    response_headers = dict(headers or {})
+    response_headers["X-Request-ID"] = request_id
+    origin = request.headers.get("origin")
+    if origin and origin in settings.cors_origin_list:
+        response_headers["Access-Control-Allow-Origin"] = origin
+        response_headers["Access-Control-Allow-Credentials"] = "true"
+        response_headers["Vary"] = "Origin"
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(payload), headers=response_headers)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -210,21 +245,59 @@ app.add_middleware(
 )
 
 
-@app.middleware("http")
-async def restore_vercel_api_prefix(request: Request, call_next):
-    """Vercel Services strips the public /api prefix before invoking this service."""
-    if os.getenv("VERCEL", "").lower() == "1":
-        path = request.scope.get("path", "")
-        if not path.startswith("/api"):
-            restored = "/api" + (path if path.startswith("/") else f"/{path}")
-            request.scope["path"] = restored
-            request.scope["raw_path"] = restored.encode("utf-8")
-    return await call_next(request)
+@app.exception_handler(HTTPException)
+async def api_http_exception_handler(request: Request, exc: HTTPException):
+    message = exc.detail if isinstance(exc.detail, str) else "Request failed."
+    return _api_error_response(
+        request,
+        status_code=exc.status_code,
+        code=f"HTTP_{exc.status_code}",
+        message=message,
+        detail=exc.detail,
+        headers=exc.headers,
+    )
+
+
+app.add_exception_handler(StarletteHTTPException, api_http_exception_handler)
+
+
+@app.exception_handler(RequestValidationError)
+async def api_validation_exception_handler(request: Request, exc: RequestValidationError):
+    details = jsonable_encoder(exc.errors())
+    return _api_error_response(
+        request,
+        status_code=422,
+        code="VALIDATION_ERROR",
+        message="Request validation failed.",
+        detail=details,
+        details=details,
+    )
+
+
+@app.exception_handler(Exception)
+async def api_unhandled_exception_handler(request: Request, exc: Exception):
+    request_id = _request_id(request)
+    logger.exception("Unhandled API exception request_id=%s", request_id)
+    return _api_error_response(
+        request,
+        status_code=500,
+        code="INTERNAL_SERVER_ERROR",
+        message="An unexpected error occurred.",
+        detail="Internal server error",
+    )
 
 
 @app.middleware("http")
 async def security_controls(request: Request, call_next):
-    """Apply API rate limits, cookie-session CSRF protection and security headers."""
+    """Restore Vercel's stripped prefix before applying API security controls."""
+    request_id = secrets.token_hex(16)
+    request.state.request_id = request_id
+    if os.getenv("VERCEL", "").lower() == "1":
+        original_path = request.scope.get("path", "")
+        if not original_path.startswith("/api"):
+            restored_path = "/api" + (original_path if original_path.startswith("/") else f"/{original_path}")
+            request.scope["path"] = restored_path
+            request.scope["raw_path"] = restored_path.encode("utf-8")
     path = request.scope.get("path", "")
     method = request.method.upper()
     response = None
@@ -237,9 +310,11 @@ async def security_controls(request: Request, call_next):
             limiter_key = f"{identity}:{method}:{normalize_rate_limit_path(path)}"
             if not await rate_limiter.allow_shared(limiter_key, limit, window):
                 security_event("rate_limited", request, method=method)
-                response = JSONResponse(
-                    {"detail": "Too many requests. Please try again later."},
+                response = _api_error_response(
+                    request,
                     status_code=429,
+                    code="RATE_LIMITED",
+                    message="Too many requests. Please try again later.",
                     headers={"Retry-After": str(window)},
                 )
 
@@ -252,12 +327,17 @@ async def security_controls(request: Request, call_next):
                 cookie_value = request.cookies.get(CSRF_COOKIE)
                 if not validate_csrf_token(session_token, supplied, cookie_value):
                     security_event("csrf_failed", request, method=method)
-                    response = JSONResponse({"detail": "CSRF validation failed."}, status_code=403)
+                    response = _api_error_response(
+                        request,
+                        status_code=403,
+                        code="CSRF_FAILED",
+                        message="CSRF validation failed.",
+                    )
 
     if response is None:
         response = await call_next(request)
 
-    response.headers["X-Request-ID"] = secrets.token_hex(16)
+    response.headers["X-Request-ID"] = request_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
