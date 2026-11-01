@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import html
+import ipaddress
 import json
 import re
+import socket
 from datetime import datetime, timezone
 from urllib.parse import quote_plus, urlparse
 import xml.etree.ElementTree as ET
@@ -27,6 +29,29 @@ _STOP_WORDS = {
     "into", "is", "it", "of", "on", "or", "that", "the", "their", "this",
     "to", "with", "your", "you", "my", "our", "how", "what", "why", "when",
 }
+
+
+async def _is_public_http_url(value: str) -> bool:
+    """Reject non-HTTP, credentialed, local and private-network source URLs."""
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        return False
+    host = parsed.hostname.rstrip(".").lower()
+    if host in {"localhost", "localhost.localdomain"} or host.endswith((".local", ".internal", ".localhost")):
+        return False
+    try:
+        addresses = [ipaddress.ip_address(host)]
+    except ValueError:
+        try:
+            loop = asyncio.get_running_loop()
+            resolved = await loop.getaddrinfo(
+                host, parsed.port or (443 if parsed.scheme == "https" else 80),
+                type=socket.SOCK_STREAM,
+            )
+            addresses = [ipaddress.ip_address(item[4][0]) for item in resolved]
+        except (OSError, ValueError):
+            return False
+    return bool(addresses) and all(address.is_global for address in addresses)
 
 
 def _tokens(value: str | None) -> set[str]:
@@ -214,12 +239,13 @@ class ResearchService:
         metadata remain usable.
         """
         url = str(source.get("url") or "").strip()
-        if not url:
+        if not url or not await _is_public_http_url(url):
             return source
 
         try:
             response = await client.get(url)
-            response.raise_for_status()
+            if response.is_redirect or response.is_error:
+                return source
             content_type = response.headers.get("content-type", "")
             if "text/html" not in content_type.lower():
                 return source
@@ -259,8 +285,8 @@ class ResearchService:
             return sources
         async with httpx.AsyncClient(
             timeout=1.5,
-            follow_redirects=True,
-            headers={"User-Agent": "BrandOS/1.0"},
+            follow_redirects=False,
+            headers={"User-Agent": "Suvacya/1.0"},
         ) as client:
             enrichable = sources[:2]
             results = await asyncio.gather(

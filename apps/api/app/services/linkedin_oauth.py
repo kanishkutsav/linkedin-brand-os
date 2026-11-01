@@ -428,12 +428,13 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
 
 
 async def exchange_code(session: AsyncSession, code: str, browser_nonce: str) -> dict:
+    # Lock the exchange row through session creation to prevent concurrent reuse.
     result = await session.execute(
         select(LinkedInOAuthExchange).where(
             LinkedInOAuthExchange.code_hash == _hash(code),
             LinkedInOAuthExchange.expires_at > _utc_now(),
             LinkedInOAuthExchange.used.is_(False),
-        )
+        ).with_for_update()
     )
     exchange = result.scalar_one_or_none()
     if exchange is None:
@@ -443,7 +444,6 @@ async def exchange_code(session: AsyncSession, code: str, browser_nonce: str) ->
         raise HTTPException(status_code=400, detail="LinkedIn browser verification failed.")
 
     exchange.used = True
-    await session.commit()
 
     user_result = await session.execute(select(AuthUser).where(AuthUser.id == exchange.user_id))
     user = user_result.scalar_one_or_none()

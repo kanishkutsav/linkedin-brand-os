@@ -583,6 +583,7 @@ async def admin_update_user(
         changes["whitelisted"] = req.whitelisted
     if req.display_name is not None:
         user.display_name = req.display_name.strip() or user.display_name
+        changes["display_name"] = user.display_name
 
     if not changes:
         return {
@@ -998,70 +999,6 @@ async def auth_logout(
     clear_session_cookies(response)
     return response
 
-@app.get("/api/account/export")
-async def export_account(
-    session: AsyncSession = Depends(get_session),
-    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
-):
-    profile_id = int(current_user.id)
-    profile = await session.get(UserProfile, profile_id)
-    brand = (await session.execute(select(BrandMemory).where(BrandMemory.profile_id == profile_id))).scalar_one_or_none()
-    voice = (await session.execute(select(VoiceMemory).where(VoiceMemory.profile_id == profile_id))).scalar_one_or_none()
-    linkedin = (await session.execute(select(LinkedInConnection).where(LinkedInConnection.user_id == profile_id))).scalar_one_or_none()
-    historical = (await session.execute(select(HistoricalPost).where(HistoricalPost.profile_id == profile_id))).scalars().all()
-    content_items = (await session.execute(select(ContentItem).where(ContentItem.profile_id == profile_id))).scalars().all()
-    versions = []
-    for item in content_items:
-        versions.extend((await session.execute(select(ContentVersion).where(ContentVersion.content_id == item.id))).scalars().all())
-    approvals = []
-    if versions:
-        approvals = (await session.execute(select(ApprovalRequest).where(ApprovalRequest.content_version_id.in_([v.id for v in versions])))).scalars().all()
-    feedback = []
-    if versions:
-        feedback = (await session.execute(select(FeedbackEntry).where(FeedbackEntry.content_version_id.in_([v.id for v in versions])))).scalars().all()
-    events = (await session.execute(select(LearningEvent).where(LearningEvent.profile_id == profile_id))).scalars().all()
-    memories = (await session.execute(select(LearningMemory).where(LearningMemory.profile_id == profile_id))).scalars().all()
-    sources = (await session.execute(select(ResearchSource).where(ResearchSource.profile_id == profile_id))).scalars().all()
-    opportunities = (await session.execute(select(ContentOpportunity).where(ContentOpportunity.profile_id == profile_id))).scalars().all()
-
-    def model_dict(row):
-        if row is None:
-            return None
-        return {
-            key: (value.isoformat() if isinstance(value, datetime) else value)
-            for key, value in row.__dict__.items()
-            if key != "_sa_instance_state"
-        }
-
-    return {
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-        "account": {"id": current_user.id, "email": current_user.email, "role": current_user.role, "display_name": current_user.display_name},
-        "profile": model_dict(profile),
-        "brand_memory": model_dict(brand),
-        "voice_memory": model_dict(voice),
-        "linkedin_connection": {
-            "connected": linkedin is not None,
-            "member_sub": linkedin.member_sub if linkedin else None,
-            "email": linkedin.linkedin_email if linkedin else None,
-            "name": linkedin.linkedin_name if linkedin else None,
-            "headline": linkedin.linkedin_headline if linkedin else None,
-            "picture_url": linkedin.linkedin_picture_url if linkedin else None,
-            "locale": linkedin.linkedin_locale if linkedin else None,
-            "vanity_name": linkedin.linkedin_vanity_name if linkedin else None,
-            "token_expires_at": linkedin.token_expires_at if linkedin else None,
-        },
-        "historical_posts": [model_dict(row) for row in historical],
-        "content_items": [model_dict(row) for row in content_items],
-        "content_versions": [model_dict(row) for row in versions],
-        "approvals": [model_dict(row) for row in approvals],
-        "feedback": [model_dict(row) for row in feedback],
-        "learning_events": [model_dict(row) for row in events],
-        "learning_memories": [model_dict(row) for row in memories],
-        "research_sources": [model_dict(row) for row in sources],
-        "content_opportunities": [model_dict(row) for row in opportunities],
-    }
-
-
 @app.delete("/api/account")
 async def delete_account(
     req: AccountDeletionRequest,
@@ -1303,13 +1240,13 @@ Rules:
     if not profile.tone and str(inferred.get("tone") or "").strip():
         profile.tone = str(inferred["tone"]).strip()[:200]
 
-    profile.brand_bootstrap_completed = True
+    ready_for_review = bool(profile.professional_title and profile.industry and profile.tone)
+    profile.brand_bootstrap_completed = ready_for_review
     await session.commit()
 
     # Do not build Brand Intelligence before the user reviews the draft.
     # This keeps onboarding to at most one lightweight inference call and
     # preserves the user's final say over the saved Brand DNA.
-    ready_for_review = bool(profile.professional_title and profile.industry and profile.tone)
 
     return {
         "bootstrapped": True,

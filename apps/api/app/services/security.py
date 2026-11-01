@@ -111,8 +111,9 @@ def set_session_cookies(response: Response, session_token: str) -> None:
 
 
 def clear_session_cookies(response: Response) -> None:
-    response.delete_cookie(SESSION_COOKIE, path="/")
-    response.delete_cookie(CSRF_COOKIE, path="/")
+    secure = settings.is_production
+    response.delete_cookie(SESSION_COOKIE, path="/", secure=secure, httponly=True, samesite="lax")
+    response.delete_cookie(CSRF_COOKIE, path="/", secure=secure, httponly=False, samesite="lax")
 
 
 def request_token(request: Request) -> str | None:

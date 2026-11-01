@@ -153,13 +153,13 @@ class AgentOrchestrator:
                 "title": title,
                 "angle": f"A practical lens on {topic}.",
                 "body": (
-                    f"{title}\\n\\n"
+                    f"{title}\n\n"
                     f"A practical way to think about {topic.lower()} is to focus on the decisions "
-                    f"that matter most, rather than trying to optimize everything at once.\\n\\n"
-                    f"Three questions help:\\n"
-                    f"1. What problem are we actually trying to solve?\\n"
-                    f"2. What evidence should shape the decision?\\n"
-                    f"3. What still needs human judgment?\\n\\n"
+                    f"that matter most, rather than trying to optimize everything at once.\n\n"
+                    f"Three questions help:\n"
+                    f"1. What problem are we actually trying to solve?\n"
+                    f"2. What evidence should shape the decision?\n"
+                    f"3. What still needs human judgment?\n\n"
                     f"The useful outcome is not more activity. It is a clearer way to decide what "
                     f"deserves attention, what can be simplified, and what should stay under review."
                 ),
