@@ -43,12 +43,9 @@ class ScheduledJobs:
                     text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
                     {"lock_key": lock_key},
                 )
-                try:
-                    return await self._run_locked(mode, profile_id)
-                finally:
-                    # The transaction-scoped lock is released when this
-                    # dedicated session closes, including on connection loss.
-                    pass
+                # Keep this transaction open while work runs in another
+                # session. Closing the lock session releases the xact lock.
+                return await self._run_locked(mode, profile_id)
 
         # SQLite/unit-test fallback. The unique scheduled_key remains the
         # durable invariant in production; PostgreSQL provides cross-instance
