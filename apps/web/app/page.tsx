@@ -1742,13 +1742,12 @@ function ResearchView({ loading, opportunities, researchFocus, setResearchFocus,
         <div className="research-focus-row">
           <div className="research-focus-input">
             <Search size={15}/>
-            <input aria-label="Research focus"
+            <input aria-label="Optional research focus"
               className="input"
               value={researchFocus}
               onChange={(e) => setResearchFocus(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !isResearching) onResearch(); }}
               placeholder="e.g. AI adoption in consulting, stakeholder management, project governance"
-              aria-label="Optional research focus"
             />
           </div>
           <button className="button primary" onClick={onResearch} disabled={isResearching}>
@@ -2362,7 +2361,7 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
     </section>;
   };
   return <div className="admin-page">
-    <div className="page-header admin-page-header"><div><div className="page-kicker"><ShieldAlert size={13}/> Admin operations</div><h1 className="page-title">Operations & reliability</h1><p className="page-description">Operational health and historical request/agent metrics. Database uptime is not inferred from a single probe.</p></div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><select className="input" value={window} onChange={(e) => onWindowChange(e.target.value)} aria-label="Metrics time window"><option value="1h">Last hour</option><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option></select><button className="button admin-refresh-button" onClick={() => void onRefresh()}><RefreshCw size={13}/> Refresh</button></div></div>
+    <div className="page-header admin-page-header"><div><div className="page-kicker"><ShieldAlert size={13}/> Admin operations</div><h1 className="page-title">Operations & reliability</h1><p className="page-description">Operational health and historical request/agent metrics. Database uptime is not inferred from a single probe.</p></div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><select aria-label="Metrics time window" className="input" value={window} onChange={(e) => onWindowChange(e.target.value)}><option value="1h">Last hour</option><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option></select><button className="button admin-refresh-button" onClick={() => void onRefresh()}><RefreshCw size={13}/> Refresh</button></div></div>
     <div className="admin-metric-grid">
       <div className="admin-metric-card"><div className="admin-metric-top"><span>API success rate</span><span className="admin-metric-icon"><Activity size={15}/></span></div><strong>{overview?.reliability?.success_rate == null ? "—" : Math.round(overview.reliability.success_rate * 100) + "%"}</strong><small>{overview?.reliability?.successful_requests ?? 0} successful · {overview?.reliability?.failed_requests ?? 0} server failures · {overview?.reliability?.rejected_requests ?? 0} client rejections</small></div>
       <div className="admin-metric-card"><div className="admin-metric-top"><span>Database</span><span className="admin-metric-icon"><Gauge size={15}/></span></div><strong>{overview?.database?.status || "unknown"}</strong><small>Live SELECT 1 · {overview?.database?.probe_latency_ms ?? "—"} ms · historical uptime not measured</small></div>
