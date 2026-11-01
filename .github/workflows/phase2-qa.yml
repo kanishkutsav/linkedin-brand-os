@@ -150,9 +150,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
+      - name: Install dependencies under production Python
+        working-directory: apps/api
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
       - name: Compile application under production Python
         working-directory: apps/api
         run: python -m compileall -q app tests
+      - name: Run backend tests under production Python
+        working-directory: apps/api
+        env:
+          PYTHONPATH: ${{ github.workspace }}/apps/api
+          DATABASE_URL: sqlite+aiosqlite:///./qa-314.db
+          SCHEDULED_JOB_KEY: qa-test-key
+        run: pytest -q tests
 
   durable-schema:
     runs-on: ubuntu-latest
