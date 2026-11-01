@@ -20,6 +20,8 @@ jobs:
           node-version: "24"
       - name: Install pinned frontend dependencies
         run: npm ci
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high
       - name: Build frontend
         run: npm run build
 
