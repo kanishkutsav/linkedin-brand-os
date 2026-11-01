@@ -1468,7 +1468,7 @@ function ApprovalWorkspace(props: any) {
     <div className="queue-layout">
       <div className="queue-list">
         <div className="queue-tools">
-          <div className="searchbox"><Search size={13}/><input className="input" placeholder="Search drafts…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
+          <div className="searchbox"><Search size={13}/><input aria-label="Search drafts" className="input" placeholder="Search drafts…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
           <div className="filter-row">
             {([
               ['PENDING', 'Pending'],
@@ -1502,9 +1502,9 @@ function ApprovalWorkspace(props: any) {
             {['PENDING','EDITED','REGENERATED'].includes(selected.status) ? (
               <div className="review-editor">
                 <div className="editor-toolbar"><span>Exact content bound to approval</span><span>{editedBody.length} chars</span></div>
-                <textarea className="textarea" value={editedBody} onChange={(e) => setEditedBody(e.target.value)} />
+                <textarea aria-label="Edit post content" className="textarea" value={editedBody} onChange={(e) => setEditedBody(e.target.value)} />
                 <div className="review-label" style={{ marginTop: 10, marginBottom: 7 }}>Feedback for regeneration <span className="form-help">(optional)</span></div>
-                <textarea
+                <textarea aria-label="Feedback for regeneration"
                   className="textarea"
                   style={{ minHeight: 82, marginTop: 0 }}
                   value={reviewNote}
@@ -1552,9 +1552,9 @@ function ApprovalWorkspace(props: any) {
                 <div className="editor-toolbar" style={{ marginTop: 12 }}><span>Locked approved content</span><span>{selected.content.length} chars</span></div>
                 <div className="readonly-field" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65, minHeight: 150 }}>{selected.content}</div>
                 <div style={{ marginTop: 14, padding: 12, border: '1px dashed #c8d4e2', borderRadius: 12, background: '#fbfdff' }}>
-                  <div className="review-label" style={{ marginBottom: 7 }}>Optional photograph</div>
+                  <label className="review-label" htmlFor="approval-image-upload" style={{ marginBottom: 7 }}>Optional photograph</label>
                   <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG, PNG or GIF image (up to 4 MB). The image is sent directly to LinkedIn during execution and is not stored by Suvacya.</div>
-                  <input type="file" accept="image/jpeg,image/png,image/gif" onChange={(e) => chooseImage(e.target.files?.[0] || null)} disabled={isBusy} />
+                  <input id="approval-image-upload" aria-label="Optional LinkedIn post image" type="file" accept="image/jpeg,image/png,image/gif" onChange={(e) => chooseImage(e.target.files?.[0] || null)} disabled={isBusy} />
                   {imagePreview && (
                     <div style={{ marginTop: 10 }}>
                       <img src={imagePreview} alt="Selected LinkedIn post image preview" style={{ display: 'block', width: '100%', maxHeight: 280, objectFit: 'contain', borderRadius: 10, background: '#f1f5f9' }} />
@@ -1742,7 +1742,7 @@ function ResearchView({ loading, opportunities, researchFocus, setResearchFocus,
         <div className="research-focus-row">
           <div className="research-focus-input">
             <Search size={15}/>
-            <input
+            <input aria-label="Research focus"
               className="input"
               value={researchFocus}
               onChange={(e) => setResearchFocus(e.target.value)}
@@ -1829,12 +1829,12 @@ function ContentStudio({ learningLoading, profile, title, setTitle, topic, setTo
       </div>
       <section className="panel studio-grid">
         <div className="studio-form">
-          <div className="form-group"><label className="form-label">Post heading / working title</label><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Write the idea or heading you have in mind" /></div>
-          <div className="form-group"><label className="form-label">Topic / theme <span className="form-help">(optional)</span></label><input className="input" value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="What is this post about?" /></div>
-          <div className="form-group"><label className="form-label">Your language</label><input className="input" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="e.g. English, Hindi, Hinglish" /></div>
+          <div className="form-group"><label className="form-label">Post heading / working title</label><input aria-label="Post heading or working title" className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Write the idea or heading you have in mind" /></div>
+          <div className="form-group"><label className="form-label">Topic / theme <span className="form-help">(optional)</span></label><input aria-label="Topic or theme" className="input" value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="What is this post about?" /></div>
+          <div className="form-group"><label className="form-label">Your language</label><input aria-label="Post language" className="input" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="e.g. English, Hindi, Hinglish" /></div>
           <div className="form-group">
             <label className="form-label">Your draft</label>
-            <textarea className="textarea" style={{ minHeight: 270 }} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write naturally. Do not worry about formatting — Suvacya will preserve your meaning and improve the presentation." />
+            <textarea aria-label="Your draft" className="textarea" style={{ minHeight: 270 }} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write naturally. Do not worry about formatting — Suvacya will preserve your meaning and improve the presentation." />
           </div>
           <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' }}>
             <button className="button primary progress-button" disabled={improving || !body.trim()} onClick={onImprove}>
@@ -2051,19 +2051,19 @@ function SettingsView(props: any) {
             <div className="profile-grid" style={{ marginTop: 16 }}>
               <div className="form-group">
                 <label className="form-label">Professional title</label>
-                <input className="input" value={brandTitle} onChange={(e) => setBrandTitle(e.target.value)} placeholder="e.g. Product Leader, Founder, Engineering Manager" />
+                <input aria-label="Professional title" className="input" value={brandTitle} onChange={(e) => setBrandTitle(e.target.value)} placeholder="e.g. Product Leader, Founder, Engineering Manager" />
               </div>
               <div className="form-group">
                 <label className="form-label">Industry</label>
-                <input className="input" value={brandIndustry} onChange={(e) => setBrandIndustry(e.target.value)} placeholder="e.g. SaaS, FinTech, Healthcare, Consulting" />
+                <input aria-label="Industry" className="input" value={brandIndustry} onChange={(e) => setBrandIndustry(e.target.value)} placeholder="e.g. SaaS, FinTech, Healthcare, Consulting" />
               </div>
               <div className="form-group">
                 <label className="form-label">Desired tone</label>
-                <input className="input" value={brandTone} onChange={(e) => setBrandTone(e.target.value)} placeholder="e.g. Direct, practical and credible" />
+                <input aria-label="Desired tone" className="input" value={brandTone} onChange={(e) => setBrandTone(e.target.value)} placeholder="e.g. Direct, practical and credible" />
               </div>
               <div className="form-group">
                 <label className="form-label">Years of work experience <span style={{ fontWeight: 500, color: '#8a98ab' }}>(optional)</span></label>
-                <input
+                <input aria-label="Years of work experience"
                   className="input"
                   type="number"
                   min="0"
@@ -2080,7 +2080,7 @@ function SettingsView(props: any) {
               </div>
               <div className="form-group">
                 <label className="form-label">Job search location <span style={{ fontWeight: 500, color: '#8a98ab' }}>(optional)</span></label>
-                <input
+                <input aria-label="Job search location"
                   className="input"
                   value={brandLocation}
                   onChange={(e) => setBrandLocation(e.target.value)}
@@ -2112,7 +2112,7 @@ function SettingsView(props: any) {
                       <span className="post-index">SOURCE POST {String(index + 1).padStart(2,'0')}</span>
                       {posts.length > 1 && <button className="link-button" onClick={() => removePost(index)}>Remove</button>}
                     </div>
-                    <textarea className="textarea" style={{ minHeight: 125 }} value={post} onChange={(e) => updatePost(index, e.target.value)} placeholder={'Paste the complete text of LinkedIn post ' + (index + 1) + '…'} />
+                    <textarea aria-label="Previous LinkedIn post" className="textarea" style={{ minHeight: 125 }} value={post} onChange={(e) => updatePost(index, e.target.value)} placeholder={'Paste the complete text of LinkedIn post ' + (index + 1) + '…'} />
                   </div>
                 ))}
               </div>
@@ -2165,7 +2165,7 @@ function SettingsView(props: any) {
                 {posts.filter((x: string) => x.trim()).map((post: string, index: number) => (
                   <div className="post-entry" key={index}>
                     <div className="post-entry-head"><span className="post-index">SOURCE POST {String(index + 1).padStart(2,'0')}</span></div>
-                    <textarea className="textarea readonly-textarea" readOnly value={post} />
+                    <textarea aria-label="Source LinkedIn post" className="textarea readonly-textarea" readOnly value={post} />
                   </div>
                 ))}
               </div>
@@ -2331,7 +2331,7 @@ function JobsView({ jobs, location, query, setQuery, loading, expandedId, setExp
 
   return <>
     <div className="page-header"><div><div className="page-kicker"><Briefcase size={13}/> Career opportunities</div><h1 className="page-title">Job opportunities</h1><p className="page-description">Search openings using your professional title, experience and domain. Suvacya does not apply for jobs on your behalf.</p></div></div>
-    <section className="panel" style={{ padding: 18 }}><div style={{ display: 'flex', gap: 10, alignItems: 'center' }}><input className="input" style={{ flex: 1 }} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void onSearch(query); }} placeholder="Search a position, e.g. Product Manager" /><button className="button primary" onClick={() => void onSearch(query)} disabled={loading}><Search size={14}/>{loading ? 'Searching…' : 'Search jobs'}</button></div><div className="jobs-search-context">Profile context is used when the search box is empty. Matching is deterministic and does not use AI.</div></section>
+    <section className="panel" style={{ padding: 18 }}><div style={{ display: 'flex', gap: 10, alignItems: 'center' }}><input aria-label="Job search keywords" className="input" style={{ flex: 1 }} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void onSearch(query); }} placeholder="Search a position, e.g. Product Manager" /><button className="button primary" onClick={() => void onSearch(query)} disabled={loading}><Search size={14}/>{loading ? 'Searching…' : 'Search jobs'}</button></div><div className="jobs-search-context">Profile context is used when the search box is empty. Matching is deterministic and does not use AI.</div></section>
     <section className="panel" style={{ marginTop: 16, padding: 18 }}><div className="panel-head"><div><h2 className="settings-title">Openings</h2><p className="settings-copy">{jobs.length ? jobs.length + ' openings found' : 'No openings returned yet.'}</p></div></div>
       {jobs.length ? jobs.map((job: any) => { const id = job.provider + ':' + job.provider_job_id; const open = expandedId === id; return <article key={id} className="post-entry" style={{ marginTop: 10 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}><div><div style={{ fontWeight: 800, color: '#10233f' }}>{job.title}</div><div style={{ marginTop: 4, fontSize: 12, color: '#5f6f86' }}>{job.company} · {job.location}{job.experience_level ? ' · ' + job.experience_level : ''}</div></div></div><div style={{ marginTop: 9, display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="button" onClick={() => setExpandedId(open ? null : id)}>{open ? 'Hide description' : 'View description'}</button>{job.application_url ? <a className="button primary" href={job.application_url} target="_blank" rel="noopener noreferrer">Apply externally <ExternalLink size={13}/></a> : null}</div>{open ? <div style={{ marginTop: 12, color: '#334b66', fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{job.description || 'No description supplied by the source.'}</div> : null}</article>; }) : <EmptyState icon={Briefcase} title="No jobs to show yet" text="Try a broader search or check again later." />}
     </section>
@@ -2340,7 +2340,7 @@ function JobsView({ jobs, location, query, setQuery, loading, expandedId, setExp
 function FeedbackView({ type, setType, subject, setSubject, description, setDescription, context, setContext, sending, onSubmit }: any) {
   return <>
     <div className="page-header"><div><div className="page-kicker"><MessageSquare size={13}/> Product feedback</div><h1 className="page-title">Help shape Suvacya</h1><p className="page-description">Suggest a feature, report a bug, or tell us what would make the product more useful.</p></div></div>
-    <section className="panel settings-card"><div className="profile-grid"><div className="form-group"><label className="form-label">Type</label><select className="input" value={type} onChange={(e) => setType(e.target.value)}><option value="FEATURE">Feature / improvement</option><option value="BUG">Bug report</option><option value="GENERAL">General feedback</option><option value="OTHER">Other</option></select></div><div className="form-group"><label className="form-label">Subject</label><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Short summary" /></div></div><div className="form-group" style={{ marginTop: 14 }}><label className="form-label">Description</label><textarea className="textarea" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What happened or what would you like to see?" rows={7} /></div><div className="form-group" style={{ marginTop: 14 }}><label className="form-label">Context (optional)</label><input className="input" value={context} onChange={(e) => setContext(e.target.value)} placeholder="What were you trying to do?" /></div><button className="button primary" style={{ marginTop: 14 }} onClick={onSubmit} disabled={sending || !subject.trim() || !description.trim()}>{sending ? 'Sending…' : 'Submit feedback'} <ArrowUpRight size={13}/></button></section>
+    <section className="panel settings-card"><div className="profile-grid"><div className="form-group"><label className="form-label">Type</label><select aria-label="Feedback type" className="input" value={type} onChange={(e) => setType(e.target.value)}><option value="FEATURE">Feature / improvement</option><option value="BUG">Bug report</option><option value="GENERAL">General feedback</option><option value="OTHER">Other</option></select></div><div className="form-group"><label className="form-label">Subject</label><input aria-label="Feedback subject" className="input" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Short summary" /></div></div><div className="form-group" style={{ marginTop: 14 }}><label className="form-label">Description</label><textarea aria-label="Feedback description" className="textarea" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What happened or what would you like to see?" rows={7} /></div><div className="form-group" style={{ marginTop: 14 }}><label className="form-label">Context (optional)</label><input aria-label="Feedback context" className="input" value={context} onChange={(e) => setContext(e.target.value)} placeholder="What were you trying to do?" /></div><button className="button primary" style={{ marginTop: 14 }} onClick={onSubmit} disabled={sending || !subject.trim() || !description.trim()}>{sending ? 'Sending…' : 'Submit feedback'} <ArrowUpRight size={13}/></button></section>
   </>;
 }
 
@@ -2362,7 +2362,7 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
     </section>;
   };
   return <div className="admin-page">
-    <div className="page-header admin-page-header"><div><div className="page-kicker"><ShieldAlert size={13}/> Admin operations</div><h1 className="page-title">Operations & reliability</h1><p className="page-description">Operational health and historical request/agent metrics. Database uptime is not inferred from a single probe.</p></div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><select className="input" value={window} onChange={(e) => onWindowChange(e.target.value)} aria-label="Metrics time window"><option value="1h">Last hour</option><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option></select><button className="button admin-refresh-button" onClick={() => void onRefresh()}><RefreshCw size={13}/> Refresh</button></div></div>
+    <div className="page-header admin-page-header"><div><div className="page-kicker"><ShieldAlert size={13}/> Admin operations</div><h1 className="page-title">Operations & reliability</h1><p className="page-description">Operational health and historical request/agent metrics. Database uptime is not inferred from a single probe.</p></div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><select aria-label="Analytics time window" className="input" value={window} onChange={(e) => onWindowChange(e.target.value)} aria-label="Metrics time window"><option value="1h">Last hour</option><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option></select><button className="button admin-refresh-button" onClick={() => void onRefresh()}><RefreshCw size={13}/> Refresh</button></div></div>
     <div className="admin-metric-grid">
       <div className="admin-metric-card"><div className="admin-metric-top"><span>API success rate</span><span className="admin-metric-icon"><Activity size={15}/></span></div><strong>{overview?.reliability?.success_rate == null ? "—" : Math.round(overview.reliability.success_rate * 100) + "%"}</strong><small>{overview?.reliability?.successful_requests ?? 0} successful · {overview?.reliability?.failed_requests ?? 0} server failures · {overview?.reliability?.rejected_requests ?? 0} client rejections</small></div>
       <div className="admin-metric-card"><div className="admin-metric-top"><span>Database</span><span className="admin-metric-icon"><Gauge size={15}/></span></div><strong>{overview?.database?.status || "unknown"}</strong><small>Live SELECT 1 · {overview?.database?.probe_latency_ms ?? "—"} ms · historical uptime not measured</small></div>
