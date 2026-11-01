@@ -130,6 +130,8 @@ class AgentRun(Base):
     status: Mapped[str] = mapped_column(String(30), default="RUNNING")
     created_count: Mapped[int] = mapped_column(Integer, default=0)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Stable per-profile/per-day key enforced by PostgreSQL to prevent duplicate scheduled runs.
+    scheduled_key: Mapped[str | None] = mapped_column(String(160), unique=True, index=True, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

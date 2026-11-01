@@ -1489,7 +1489,7 @@ function ApprovalWorkspace(props: any) {
                 <div className="readonly-field" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65, minHeight: 150 }}>{selected.content}</div>
                 <div style={{ marginTop: 14, padding: 12, border: '1px dashed #c8d4e2', borderRadius: 12, background: '#fbfdff' }}>
                   <div className="review-label" style={{ marginBottom: 7 }}>Optional photograph</div>
-                  <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG or PNG image (up to 4 MB). The image is sent directly to LinkedIn during execution and is not stored by Suvacya.</div>
+                  <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG, PNG or GIF image (up to 4 MB). The image is sent directly to LinkedIn during execution and is not stored by Suvacya.</div>
                   <input type="file" accept="image/jpeg,image/png,image/gif" onChange={(e) => chooseImage(e.target.files?.[0] || null)} disabled={isBusy} />
                   {imagePreview && (
                     <div style={{ marginTop: 10 }}>
