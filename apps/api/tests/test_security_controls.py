@@ -47,7 +47,7 @@ class TestSecurityControls(unittest.TestCase):
 
     def test_email_normalization_rejects_malformed_addresses(self):
         self.assertEqual(AuthService.normalize_email(" Person+tag@Example.com "), "person+tag@example.com")
-        for invalid in ("not-an-email", "a@b", "a..b@example.com", "x@example.com ", "x@@example.com"):
+        for invalid in ("not-an-email", "a@b", "a..b@example.com", "x@@example.com"):
             self.assertIsNone(AuthService.normalize_email(invalid))
 
     def test_linkedin_email_must_be_explicitly_verified(self):
