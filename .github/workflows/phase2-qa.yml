@@ -198,6 +198,38 @@ jobs:
           test -s apps/api/app/db/migrations/20260926_phase7_linkedin_publish.sql
           test -s apps/api/app/db/migrations/20260926_phase7_linkedin_publish_rollback.sql
 
+
+  audit-dependency-refresh:
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 105 && github.actor == 'kanishkutsav'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Apply patched frontend dependencies
+        working-directory: apps/web
+        run: |
+          npm install --save-exact next@16.4.3 react@19.3.1 react-dom@19.3.1
+          npm audit fix
+          npm audit --audit-level=high
+      - name: Commit dependency lock updates
+        run: |
+          if git diff --quiet -- apps/web/package.json apps/web/package-lock.json; then
+            echo "Frontend dependencies are already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/package.json apps/web/package-lock.json
+          git commit -m "security: patch vulnerable frontend dependencies"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+
   phase8-cutover-artifact:
     runs-on: ubuntu-latest
     steps:
