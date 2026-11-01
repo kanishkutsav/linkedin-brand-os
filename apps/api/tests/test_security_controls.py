@@ -2,7 +2,8 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
-from app.services.linkedin_oauth import _hash, build_authorization_url, exchange_code
+from app.services.linkedin_oauth import _hash, _is_verified_email, build_authorization_url, exchange_code
+from app.services.auth_service import AuthService
 from app.services.security import (
     client_key,
     csrf_token_for_session,
@@ -43,6 +44,17 @@ class TestSecurityControls(unittest.TestCase):
 
     def test_client_key_is_not_raw_ip(self):
         self.assertNotEqual(client_key.__name__, "return_raw_ip")
+
+    def test_email_normalization_rejects_malformed_addresses(self):
+        self.assertEqual(AuthService.normalize_email(" Person+tag@Example.com "), "person+tag@example.com")
+        for invalid in ("not-an-email", "a@b", "a..b@example.com", "x@@example.com"):
+            self.assertIsNone(AuthService.normalize_email(invalid))
+
+    def test_linkedin_email_verification_claim_is_interpreted_strictly(self):
+        self.assertTrue(_is_verified_email(True))
+        self.assertTrue(_is_verified_email("true"))
+        self.assertFalse(_is_verified_email(False))
+        self.assertFalse(_is_verified_email(None))
 
     def test_oauth_authorization_state_binds_browser_nonce(self):
         async def run():

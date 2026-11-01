@@ -176,6 +176,7 @@ class AgentOrchestrator:
         objective: str,
         trigger: str,
         evidence: list[dict] | None = None,
+        scheduled_key: str | None = None,
     ) -> int | None:
         if await self._is_duplicate_topic(topic):
             return None
@@ -233,6 +234,7 @@ class AgentOrchestrator:
             topic=topic,
             pillar=pillar,
             status="AWAITING_APPROVAL" if guard.passed else "EDIT_REQUIRED",
+            scheduled_key=scheduled_key,
         )
         self.session.add(item)
         await self.session.flush()
@@ -293,7 +295,11 @@ class AgentOrchestrator:
         await self.session.commit()
         return item.id
 
-    async def run_daily_post(self, trigger: str = "scheduled_daily_post") -> dict:
+    async def run_daily_post(
+        self,
+        trigger: str = "scheduled_daily_post",
+        scheduled_key: str | None = None,
+    ) -> dict:
         """Generate at most one approval-first post candidate for the profile.
 
         Research is the input signal, but this path has a hard one-candidate
@@ -301,6 +307,27 @@ class AgentOrchestrator:
         opportunity is found, so a successful run never creates more than one.
         """
         profile = await self._profile()
+        if scheduled_key:
+            existing_result = await self.session.execute(
+                select(ContentItem)
+                .where(
+                    ContentItem.profile_id == profile.id,
+                    ContentItem.scheduled_key == scheduled_key,
+                )
+                .limit(1)
+            )
+            existing_candidate = existing_result.scalar_one_or_none()
+            if existing_candidate is not None:
+                return {
+                    "mode": "daily_post",
+                    "trigger": trigger,
+                    "opportunities_found": 0,
+                    "selected_opportunity": None,
+                    "created_content_ids": [existing_candidate.id],
+                    "created_count": 1,
+                    "existing_candidate": True,
+                }
+
         opportunities = await ResearchService(self.session).research_and_rank(
             profile_id=profile.id,
             candidate_limit=10,
@@ -321,6 +348,7 @@ class AgentOrchestrator:
                 objective=opportunity["objective"],
                 trigger=trigger,
                 evidence=evidence,
+                scheduled_key=scheduled_key,
             )
             if item_id is not None:
                 selected = opportunity

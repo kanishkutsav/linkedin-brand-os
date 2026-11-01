@@ -3,6 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import select
 from typing import Any
 
 import httpx
@@ -40,6 +44,34 @@ class ModelRouterService:
             )
 
 
+    async def _provider_is_cooling_down(self, provider: str) -> bool:
+        if self._provider_cooldowns.get(provider, 0.0) > time.monotonic():
+            return True
+        if not settings.is_production:
+            return False
+        try:
+            async with SessionLocal() as session:
+                result = await session.execute(
+                    select(ObservabilityEvent)
+                    .where(
+                        ObservabilityEvent.provider == provider,
+                        ObservabilityEvent.event_type.in_(("ProviderSucceeded", "ProviderFailed")),
+                    )
+                    .order_by(ObservabilityEvent.created_at.desc(), ObservabilityEvent.id.desc())
+                    .limit(1)
+                )
+                latest = result.scalar_one_or_none()
+                return bool(
+                    latest
+                    and latest.event_type == "ProviderFailed"
+                    and latest.failure_category == "RATE_LIMIT"
+                    and latest.created_at >= datetime.now(timezone.utc) - timedelta(seconds=self._rate_limit_cooldown_seconds)
+                )
+        except Exception:
+            # Keep generation available if telemetry is unavailable; this
+            # instance still observes its own in-memory cooldown.
+            return False
+
     @staticmethod
     async def _record_provider_event(provider: str, model: str, status: str, latency_ms: int, attempts: int, fallback_used: bool, error: str | None = None) -> None:
         try:
@@ -53,7 +85,7 @@ class ModelRouterService:
                     elif "http 5" in low: category = "PROVIDER_UNAVAILABLE"
                     else: category = "MODEL_ERROR"
                 session.add(ObservabilityEvent(
-                    correlation_id="ai-" + str(int(time.time() * 1000)),
+                    correlation_id="ai-" + uuid.uuid4().hex,
                     event_type="ProviderSucceeded" if status == "SUCCESS" else "ProviderFailed",
                     activity_type="GENERATE", status=status, user_visible_failure=False,
                     provider=provider, model=model, failure_category=category,
@@ -85,7 +117,7 @@ class ModelRouterService:
         for provider, api_key, model, fn in providers:
             if not api_key or provider not in self.allowed_providers:
                 continue
-            if self._provider_cooldowns.get(provider, 0.0) > time.monotonic():
+            if await self._provider_is_cooling_down(provider):
                 errors.append(provider + ": temporarily skipped after a recent rate limit")
                 continue
             attempts += 1

@@ -30,6 +30,10 @@ def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _is_verified_email(value: object) -> bool:
+    return str(value).strip().lower() in {"true", "1"}
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -266,7 +270,7 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
 
         profile_data = dict(userinfo or {})
         email_verified = profile_data.get("email_verified")
-        if email_verified is not None and str(email_verified).lower() not in {"true", "1"}:
+        if email_verified is not None and not _is_verified_email(email_verified):
             raise HTTPException(status_code=403, detail="LinkedIn did not confirm the email address.")
         email = AuthService.normalize_email(profile_data.get("email"))
         member_sub = str(profile_data.get("sub") or "").strip()
@@ -315,6 +319,15 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
             raise HTTPException(
                 status_code=409,
                 detail="This LinkedIn account is already connected to another Suvacya account.",
+            )
+
+        # LinkedIn documents email_verified as optional. A first-time binding
+        # requires an affirmative claim; an existing member_sub binding may
+        # continue when the provider omits the optional claim.
+        if email_verified is None and connection_by_member is None:
+            raise HTTPException(
+                status_code=403,
+                detail="LinkedIn did not provide email verification for this first-time connection. Please contact the administrator.",
             )
 
         user.display_name = display_name

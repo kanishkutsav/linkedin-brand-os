@@ -158,7 +158,7 @@ class ScheduledJobs:
                 try:
                     orchestrator = AgentOrchestrator(session, current_profile_id)
                     if mode == "daily_post":
-                        run_result = await orchestrator.run_daily_post()
+                        run_result = await orchestrator.run_daily_post(scheduled_key=scheduled_key)
                     else:
                         run_result = await orchestrator.run_research_refresh()
                     run.status = "SUCCEEDED"

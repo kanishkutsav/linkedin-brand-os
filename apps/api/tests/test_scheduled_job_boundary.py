@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from app.agents.orchestrator import AgentOrchestrator
 from app.jobs.scheduled_jobs import ScheduledJobs
+from app.models.models import ContentItem
 from app.services.agent_scheduler import AgentScheduler
 
 
@@ -75,6 +76,28 @@ class TestScheduledJobBoundary(unittest.IsolatedAsyncioTestCase):
         column = AgentRun.__table__.c.scheduled_key
         self.assertTrue(column.unique)
         self.assertTrue(column.nullable)
+        content_key = ContentItem.__table__.c.scheduled_key
+        self.assertTrue(content_key.unique)
+        self.assertTrue(content_key.nullable)
+
+    async def test_daily_post_reuses_candidate_committed_before_worker_crash(self):
+        session = Mock()
+        existing = Mock(id=501)
+        result = Mock()
+        result.scalar_one_or_none.return_value = existing
+        session.execute = AsyncMock(return_value=result)
+        orchestrator = AgentOrchestrator(session, 1)
+        orchestrator._profile = AsyncMock(return_value=Mock(id=1))
+        orchestrator._create_candidate = AsyncMock()
+
+        result = await orchestrator.run_daily_post(
+            scheduled_key="daily_post:1:2026-11-01"
+        )
+
+        self.assertEqual(result["created_content_ids"], [501])
+        self.assertEqual(result["created_count"], 1)
+        self.assertTrue(result["existing_candidate"])
+        orchestrator._create_candidate.assert_not_awaited()
 
 
 if __name__ == "__main__":

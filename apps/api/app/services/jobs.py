@@ -360,7 +360,7 @@ async def search_jobs(
             "provider": name,
             "configured": configured[name],
             "location_supported": location_supported,
-            "available": error is None and location_supported,
+            "available": configured[name] and error is None and location_supported,
             "returned_jobs": len(items),
             "error": error or (
                 f"Provider key is configured for {settings.jooble_country.upper()}, "
