@@ -424,11 +424,10 @@ class ApprovalService:
             raise ValueError("Only a publication with an uncertain outcome can be reconciled.")
 
         now = datetime.now(timezone.utc)
-        version = await self.session.get(ContentVersion, approval.content_version_id)
-        if version is None:
-            raise ValueError("The approved content version could not be found.")
-
         if outcome == "published":
+            version = await self.session.get(ContentVersion, approval.content_version_id)
+            if version is None:
+                raise ValueError("The approved content version could not be found.")
             approval.status = "EXECUTED"
             approval.reason = None
             approval.publish_started_at = None

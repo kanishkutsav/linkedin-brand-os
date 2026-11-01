@@ -2166,7 +2166,11 @@ async def publication_confirmation(
         "message": (
             "Published to LinkedIn."
             if approval.status == "EXECUTED"
-            else "This post has not been published to LinkedIn."
+            else (
+                "The LinkedIn publication outcome is uncertain. Check your profile before retrying."
+                if approval.status == "PUBLISHING"
+                else "This post has not been published to LinkedIn."
+            )
         ),
     }
 
