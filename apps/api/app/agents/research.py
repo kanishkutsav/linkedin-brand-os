@@ -31,6 +31,17 @@ _STOP_WORDS = {
 }
 
 
+def _is_public_remote_address(server_address: object) -> bool:
+    """Validate the actual connected peer, not only the earlier DNS lookup."""
+    if not isinstance(server_address, (tuple, list)) or not server_address:
+        return False
+    try:
+        address = str(server_address[0]).split("%", 1)[0]
+        return ipaddress.ip_address(address).is_global
+    except (TypeError, ValueError):
+        return False
+
+
 async def _is_public_http_url(value: str) -> bool:
     """Reject non-HTTP, credentialed, local and private-network source URLs."""
     parsed = urlparse(value)
@@ -243,14 +254,31 @@ class ResearchService:
             return source
 
         try:
-            response = await client.get(url)
-            if response.is_redirect or response.is_error:
-                return source
-            content_type = response.headers.get("content-type", "")
-            if "text/html" not in content_type.lower():
-                return source
+            async with client.stream("GET", url) as response:
+                if response.is_redirect or response.is_error:
+                    return source
+                network_stream = response.extensions.get("network_stream")
+                if network_stream is None or not _is_public_remote_address(
+                    network_stream.get_extra_info("server_addr")
+                ):
+                    # DNS can change between the validation lookup and connect.
+                    # Do not read the response body unless the actual peer is public.
+                    return source
+                content_type = response.headers.get("content-type", "")
+                if "text/html" not in content_type.lower():
+                    return source
+                content_length = response.headers.get("content-length")
+                if content_length and content_length.isdigit() and int(content_length) > 500_000:
+                    return source
+                chunks = []
+                total_bytes = 0
+                async for chunk in response.aiter_bytes():
+                    total_bytes += len(chunk)
+                    if total_bytes > 500_000:
+                        return source
+                    chunks.append(chunk)
+                raw = b"".join(chunks).decode(response.encoding or "utf-8", errors="replace")
 
-            raw = response.text[:500_000]
             raw = re.sub(r"(?is)<(script|style|noscript|svg|nav|footer|header)[^>]*>.*?</\1>", " ", raw)
             paragraphs = re.findall(r"(?is)<p[^>]*>(.*?)</p>", raw)
             text_parts = []
@@ -286,6 +314,7 @@ class ResearchService:
         async with httpx.AsyncClient(
             timeout=1.5,
             follow_redirects=False,
+            trust_env=False,
             headers={"User-Agent": "Suvacya/1.0"},
         ) as client:
             enrichable = sources[:2]
