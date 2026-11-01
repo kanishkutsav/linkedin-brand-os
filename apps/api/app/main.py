@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sqlite3
 import secrets
 from contextlib import asynccontextmanager
@@ -43,11 +44,10 @@ from app.services.auth_service import AppUser, AuthService
 from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback, sync_missing_profile_data
 from app.services.linkedin_analytics import LinkedInAnalyticsService
 from app.services.gemini_service import ModelRouterService
-from app.services.jobs import resolve_job_location
-from app.services.apify_jobs import search_jobs_apify
+from app.services.jobs import resolve_job_location, search_jobs
 from app.services.security import (
     CSRF_COOKIE, SESSION_COOKIE, clear_session_cookies, client_key, decrypt_linkedin_token, encrypt_linkedin_token,
-    endpoint_limit, migrate_plaintext_linkedin_tokens, rate_limiter, request_token,
+    endpoint_limit, migrate_plaintext_linkedin_tokens, normalize_rate_limit_path, rate_limiter, request_token,
     security_event, set_session_cookies, validate_csrf_token,
 )
 
@@ -234,8 +234,8 @@ async def security_controls(request: Request, call_next):
             limit, window = endpoint_limit(path, method)
             token = request.cookies.get(SESSION_COOKIE) or request.headers.get("authorization", "")
             identity = hashlib.sha256(token.encode("utf-8")).hexdigest()[:24] if token else client_key(request)
-            limiter_key = f"{identity}:{method}:{path}"
-            if not rate_limiter.allow(limiter_key, limit, window):
+            limiter_key = f"{identity}:{method}:{normalize_rate_limit_path(path)}"
+            if not await rate_limiter.allow_shared(limiter_key, limit, window):
                 security_event("rate_limited", request, method=method)
                 response = JSONResponse(
                     {"detail": "Too many requests. Please try again later."},
@@ -434,14 +434,22 @@ async def _job_search_inputs(request: Request, req: JobSearchRequest, session: A
 @app.post("/api/jobs/search")
 async def jobs_search(request: Request, req: JobSearchRequest, session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
     title, experience, location = await _job_search_inputs(request, req, session, current_user)
-    return await search_jobs_apify(title=title, experience=experience, location=location, page=req.page, limit=req.limit)
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    result = await search_jobs(session, title, experience, profile.industry or "", query=title, location=location)
+    all_jobs = result.get("jobs") or []
+    start = (req.page - 1) * req.limit
+    page_jobs = all_jobs[start:start + req.limit]
+    return {**result, "jobs": page_jobs, "page": req.page, "limit": req.limit, "has_more": len(all_jobs) > start + len(page_jobs)}
 
 
 @app.get("/api/jobs/search")
 async def jobs_search_legacy(request: Request, query: str | None = None, session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
     req = JobSearchRequest(mode="recommended" if not (query or "").strip() else "manual", job_title=query, page=1, limit=20)
     title, experience, location = await _job_search_inputs(request, req, session, current_user)
-    return await search_jobs_apify(title=title, experience=experience, location=location, page=1, limit=20)
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    result = await search_jobs(session, title, experience, profile.industry or "", query=title, location=location)
+    all_jobs = result.get("jobs") or []
+    return {**result, "jobs": all_jobs[:20], "page": 1, "limit": 20, "has_more": len(all_jobs) > 20}
 
 
 @app.get("/api/admin/overview")
@@ -583,6 +591,7 @@ async def admin_update_user(
         changes["whitelisted"] = req.whitelisted
     if req.display_name is not None:
         user.display_name = req.display_name.strip() or user.display_name
+        changes["display_name"] = user.display_name
 
     if not changes:
         return {
@@ -998,70 +1007,6 @@ async def auth_logout(
     clear_session_cookies(response)
     return response
 
-@app.get("/api/account/export")
-async def export_account(
-    session: AsyncSession = Depends(get_session),
-    current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user")),
-):
-    profile_id = int(current_user.id)
-    profile = await session.get(UserProfile, profile_id)
-    brand = (await session.execute(select(BrandMemory).where(BrandMemory.profile_id == profile_id))).scalar_one_or_none()
-    voice = (await session.execute(select(VoiceMemory).where(VoiceMemory.profile_id == profile_id))).scalar_one_or_none()
-    linkedin = (await session.execute(select(LinkedInConnection).where(LinkedInConnection.user_id == profile_id))).scalar_one_or_none()
-    historical = (await session.execute(select(HistoricalPost).where(HistoricalPost.profile_id == profile_id))).scalars().all()
-    content_items = (await session.execute(select(ContentItem).where(ContentItem.profile_id == profile_id))).scalars().all()
-    versions = []
-    for item in content_items:
-        versions.extend((await session.execute(select(ContentVersion).where(ContentVersion.content_id == item.id))).scalars().all())
-    approvals = []
-    if versions:
-        approvals = (await session.execute(select(ApprovalRequest).where(ApprovalRequest.content_version_id.in_([v.id for v in versions])))).scalars().all()
-    feedback = []
-    if versions:
-        feedback = (await session.execute(select(FeedbackEntry).where(FeedbackEntry.content_version_id.in_([v.id for v in versions])))).scalars().all()
-    events = (await session.execute(select(LearningEvent).where(LearningEvent.profile_id == profile_id))).scalars().all()
-    memories = (await session.execute(select(LearningMemory).where(LearningMemory.profile_id == profile_id))).scalars().all()
-    sources = (await session.execute(select(ResearchSource).where(ResearchSource.profile_id == profile_id))).scalars().all()
-    opportunities = (await session.execute(select(ContentOpportunity).where(ContentOpportunity.profile_id == profile_id))).scalars().all()
-
-    def model_dict(row):
-        if row is None:
-            return None
-        return {
-            key: (value.isoformat() if isinstance(value, datetime) else value)
-            for key, value in row.__dict__.items()
-            if key != "_sa_instance_state"
-        }
-
-    return {
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-        "account": {"id": current_user.id, "email": current_user.email, "role": current_user.role, "display_name": current_user.display_name},
-        "profile": model_dict(profile),
-        "brand_memory": model_dict(brand),
-        "voice_memory": model_dict(voice),
-        "linkedin_connection": {
-            "connected": linkedin is not None,
-            "member_sub": linkedin.member_sub if linkedin else None,
-            "email": linkedin.linkedin_email if linkedin else None,
-            "name": linkedin.linkedin_name if linkedin else None,
-            "headline": linkedin.linkedin_headline if linkedin else None,
-            "picture_url": linkedin.linkedin_picture_url if linkedin else None,
-            "locale": linkedin.linkedin_locale if linkedin else None,
-            "vanity_name": linkedin.linkedin_vanity_name if linkedin else None,
-            "token_expires_at": linkedin.token_expires_at if linkedin else None,
-        },
-        "historical_posts": [model_dict(row) for row in historical],
-        "content_items": [model_dict(row) for row in content_items],
-        "content_versions": [model_dict(row) for row in versions],
-        "approvals": [model_dict(row) for row in approvals],
-        "feedback": [model_dict(row) for row in feedback],
-        "learning_events": [model_dict(row) for row in events],
-        "learning_memories": [model_dict(row) for row in memories],
-        "research_sources": [model_dict(row) for row in sources],
-        "content_opportunities": [model_dict(row) for row in opportunities],
-    }
-
-
 @app.delete("/api/account")
 async def delete_account(
     req: AccountDeletionRequest,
@@ -1107,12 +1052,14 @@ async def delete_account(
     ]:
         await session.execute(delete(model).where(column == profile_id))
 
-    # Security/audit records are not part of the user's content export and may
-    # be retained only when needed for incident/compliance purposes. Remove
+    # Security/audit records may be retained only when needed for
+    # incident/compliance purposes. Remove
     # records whose actor is directly identifiable as this account.
     await session.execute(
         delete(AuditLog).where(
-            (AuditLog.actor == str(user_id)) | (AuditLog.actor == current_user.email)
+            (AuditLog.actor == str(user_id))
+            | (AuditLog.actor == current_user.email)
+            | AuditLog.payload.ilike(f"%{current_user.email}%")
         )
     )
     await session.execute(delete(AuthUser).where(AuthUser.id == user_id))
@@ -1303,13 +1250,13 @@ Rules:
     if not profile.tone and str(inferred.get("tone") or "").strip():
         profile.tone = str(inferred["tone"]).strip()[:200]
 
-    profile.brand_bootstrap_completed = True
+    ready_for_review = bool(profile.professional_title and profile.industry and profile.tone)
+    profile.brand_bootstrap_completed = ready_for_review
     await session.commit()
 
     # Do not build Brand Intelligence before the user reviews the draft.
     # This keeps onboarding to at most one lightweight inference call and
     # preserves the user's final say over the saved Brand DNA.
-    ready_for_review = bool(profile.professional_title and profile.industry and profile.tone)
 
     return {
         "bootstrapped": True,

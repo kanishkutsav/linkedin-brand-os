@@ -14,6 +14,7 @@ class LinkedInAnalyticsService:
 
     DAILY_METRICS = ("IMPRESSION", "REACTION", "COMMENT", "RESHARE")
     TOTAL_METRICS = ("MEMBERS_REACHED",)
+    METRICS = (*DAILY_METRICS, *TOTAL_METRICS)
 
     def __init__(self, access_token: str):
         self.access_token = access_token

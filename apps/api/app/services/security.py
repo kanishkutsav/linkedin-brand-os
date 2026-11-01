@@ -7,15 +7,16 @@ import re
 import secrets
 import time
 import logging
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict, deque
 from typing import Deque
 
 from fastapi import Request, Response
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError
 
 from app.core.config import settings
-from app.models.models import LinkedInConnection
+from app.models.models import LinkedInConnection, ObservabilityEvent
 
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -111,8 +112,9 @@ def set_session_cookies(response: Response, session_token: str) -> None:
 
 
 def clear_session_cookies(response: Response) -> None:
-    response.delete_cookie(SESSION_COOKIE, path="/")
-    response.delete_cookie(CSRF_COOKIE, path="/")
+    secure = settings.is_production
+    response.delete_cookie(SESSION_COOKIE, path="/", secure=secure, httponly=True, samesite="lax")
+    response.delete_cookie(CSRF_COOKIE, path="/", secure=secure, httponly=False, samesite="lax")
 
 
 def request_token(request: Request) -> str | None:
@@ -138,6 +140,56 @@ class RateLimiter:
             return False
         events.append(now)
         return True
+
+
+    async def allow_shared(self, key: str, limit: int, window_seconds: int) -> bool:
+        """Use PostgreSQL-backed sliding-window limits across serverless instances."""
+        if not settings.is_production:
+            return self.allow(key, limit, window_seconds)
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        try:
+            # Import lazily to avoid coupling the security module to DB startup.
+            from app.db.database import SessionLocal
+            async with SessionLocal() as session:
+                if session.bind is not None and session.bind.dialect.name == "postgresql":
+                    await session.execute(
+                        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                        {"lock_key": f"suvacya-rate-limit:{digest}"},
+                    )
+                cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
+                count = await session.scalar(
+                    select(func.count()).select_from(ObservabilityEvent).where(
+                        ObservabilityEvent.event_type == "RATE_LIMIT",
+                        ObservabilityEvent.details_json == digest,
+                        ObservabilityEvent.created_at >= cutoff,
+                    )
+                )
+                if int(count or 0) >= limit:
+                    return False
+                session.add(ObservabilityEvent(
+                    correlation_id=digest[:24],
+                    event_type="RATE_LIMIT",
+                    status="SUCCESS",
+                    details_json=digest,
+                ))
+                await session.commit()
+                return True
+        except Exception:
+            logger.exception("Shared rate limiter unavailable")
+            # Fail closed in production; a DB outage must not silently disable
+            # authentication and mutation endpoint limits.
+            return False
+
+
+def normalize_rate_limit_path(path: str) -> str:
+    """Collapse variable resource IDs so callers cannot evade per-route quotas."""
+    path = re.sub(
+        r"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?=/|$)",
+        "/:id",
+        path,
+    )
+    return re.sub(r"/[0-9]+(?=/|$)", "/:id", path)
+
 
 
 rate_limiter = RateLimiter()

@@ -423,11 +423,12 @@ class ApprovalService:
         # LinkedIn calls are bounded to the adapter timeout, so stale PUBLISHING
         # state can safely be retried after a short recovery window.
         if approval.status == "PUBLISHING":
-            started = approval.publish_started_at
-            if started and started > datetime.now(timezone.utc) - timedelta(minutes=2):
-                raise ValueError("Publication is already in progress. Please wait for the current attempt to finish.")
-            approval.status = "APPROVED"
-            approval.reason = "Recovered a stale publication attempt. Please retry publishing."
+            # The remote API may have accepted a post even if the response was
+            # lost. Never turn an uncertain publish into an automatic retry.
+            raise ValueError(
+                "A previous LinkedIn publish attempt has an uncertain outcome. "
+                "Check the LinkedIn profile before retrying; automatic retry is disabled to prevent duplicates."
+            )
 
         if approval.status != "APPROVED":
             raise ValueError("Valid approved content is required")
@@ -461,6 +462,11 @@ class ApprovalService:
         # Approval is the human decision and must remain durable even if the
         # external LinkedIn publish attempt fails. A failed attempt is retryable.
         approval = await self._get_owned_approval(approval_id, profile_id)
+        if getattr(result, "ambiguous", False):
+            approval.status = "PUBLISHING"
+            approval.reason = "PUBLISH_OUTCOME_UNKNOWN: " + result.message[:450]
+            await self.session.commit()
+            return result
         approval.status = "EXECUTED" if result.success else "APPROVED"
         approval.reason = None if result.success else f"LinkedIn publication failed: {result.message}"
         approval.publish_started_at = None

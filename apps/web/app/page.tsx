@@ -1393,17 +1393,22 @@ function ApprovalWorkspace(props: any) {
     setImagePreview(null);
   }, [selectedId]);
 
+  useEffect(() => {
+    return () => {
+      if (imagePreview) URL.revokeObjectURL(imagePreview);
+    };
+  }, [imagePreview]);
+
   const chooseImage = (file: File | null) => {
     if (!file) return;
     if (!['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
-      window.alert('Only JPEG or PNG images are supported.');
+      window.alert('Only JPEG, PNG or GIF images are supported.');
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
+    if (file.size > 4 * 1024 * 1024) {
       window.alert('Image must be 4 MB or smaller.');
       return;
     }
-    if (imagePreview) URL.revokeObjectURL(imagePreview);
     setSelectedImage(file);
     setImagePreview(URL.createObjectURL(file));
   };
@@ -1485,7 +1490,7 @@ function ApprovalWorkspace(props: any) {
                 <div style={{ marginTop: 14, padding: 12, border: '1px dashed #c8d4e2', borderRadius: 12, background: '#fbfdff' }}>
                   <div className="review-label" style={{ marginBottom: 7 }}>Optional photograph</div>
                   <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG or PNG image (up to 4 MB). The image is sent directly to LinkedIn during execution and is not stored by Suvacya.</div>
-                  <input type="file" accept="image/jpeg,image/png" onChange={(e) => chooseImage(e.target.files?.[0] || null)} disabled={isBusy} />
+                  <input type="file" accept="image/jpeg,image/png,image/gif" onChange={(e) => chooseImage(e.target.files?.[0] || null)} disabled={isBusy} />
                   {imagePreview && (
                     <div style={{ marginTop: 10 }}>
                       <img src={imagePreview} alt="Selected LinkedIn post image preview" style={{ display: 'block', width: '100%', maxHeight: 280, objectFit: 'contain', borderRadius: 10, background: '#f1f5f9' }} />

@@ -7,7 +7,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.models import ApprovalRequest, ContentItem, ContentVersion, FeedbackEntry, HistoricalPost, LearningEvent
+from app.models.models import (ApprovalRequest, AuthSession, ContentItem, ContentOpportunity, ContentVersion, DurableJob, FeedbackEntry, HistoricalPost, LearningEvent, LinkedInOAuthExchange, LinkedInOAuthState, ObservabilityEvent, ResearchSource, AgentRun)
 
 
 class RetentionService:
@@ -24,12 +24,18 @@ class RetentionService:
         workflow_trimmed = await self._trim_old_content_versions(session)
         learning_events_deleted = await self._delete_processed_learning_events(session)
         feedback_payloads_trimmed = await self._trim_old_feedback_payloads(session)
+        rate_limit_events_deleted = await self._delete_old_rate_limit_events(session)
+        expired_auth_rows_deleted = await self._delete_expired_auth_rows(session)
+        old_operational_rows_deleted = await self._delete_old_operational_rows(session)
         await session.commit()
         return {
             "published_history_bodies_trimmed": published_trimmed,
             "workflow_bodies_trimmed": workflow_trimmed,
             "processed_learning_events_deleted": learning_events_deleted,
             "old_feedback_payloads_trimmed": feedback_payloads_trimmed,
+            "rate_limit_events_deleted": rate_limit_events_deleted,
+            "expired_auth_rows_deleted": expired_auth_rows_deleted,
+            "old_operational_rows_deleted": old_operational_rows_deleted,
         }
 
     async def _trim_published_history(self, session: AsyncSession) -> int:
@@ -150,3 +156,45 @@ class RetentionService:
             .values(payload=None)
         )
         return int(result.rowcount or 0)
+
+
+    async def _delete_old_rate_limit_events(self, session: AsyncSession) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+        result = await session.execute(
+            delete(ObservabilityEvent).where(
+                ObservabilityEvent.event_type == "RATE_LIMIT",
+                ObservabilityEvent.created_at < cutoff,
+            )
+        )
+        return int(result.rowcount or 0)
+
+
+    async def _delete_expired_auth_rows(self, session: AsyncSession) -> int:
+        now = datetime.now(timezone.utc)
+        deleted = 0
+        for model in (AuthSession, LinkedInOAuthState, LinkedInOAuthExchange):
+            result = await session.execute(delete(model).where(model.expires_at < now))
+            deleted += int(result.rowcount or 0)
+        return deleted
+
+    async def _delete_old_operational_rows(self, session: AsyncSession) -> int:
+        now = datetime.now(timezone.utc)
+        deleted = 0
+        policies = (
+            (ObservabilityEvent, now - timedelta(days=30), None),
+            (DurableJob, now - timedelta(days=30), ("SUCCEEDED", "FAILED", "DEAD")),
+            (ResearchSource, now - timedelta(days=90), None),
+            (ContentOpportunity, now - timedelta(days=90), None),
+        )
+        for model, cutoff, terminal_statuses in policies:
+            statement = delete(model).where(model.created_at < cutoff)
+            if terminal_statuses is not None:
+                statement = statement.where(model.status.in_(terminal_statuses))
+            result = await session.execute(statement)
+            deleted += int(result.rowcount or 0)
+
+        old_runs = await session.execute(
+            delete(AgentRun).where(AgentRun.started_at < now - timedelta(days=90))
+        )
+        deleted += int(old_runs.rowcount or 0)
+        return deleted

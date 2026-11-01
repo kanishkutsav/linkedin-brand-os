@@ -102,7 +102,6 @@ async def search_jobs_apify(*,title:str,experience:float|None,location:dict[str,
         call_naukri(),
     )
     indeed=_filter_and_dedupe([_normalize_indeed(x) for x in indeed_result],title,experience);naukri=_filter_and_dedupe([_normalize_naukri(x) for x in naukri_result],title,experience)
-    if requested_page>1:naukri=naukri[(requested_page-1)*requested_limit:requested_page*requested_limit]
     combined=_filter_and_dedupe(indeed+naukri,title,experience);start=(requested_page-1)*requested_limit;jobs=combined[start:start+requested_limit]
     # Provider outages or overly strict deterministic matching must never turn
     # a Jobs navigation/search into a 500. An empty result set is a valid

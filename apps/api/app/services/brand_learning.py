@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.models import LearningEvent, LearningMemory
 from app.services.gemini_service import ModelRouterService
+from app.services.security import minimize_ai_text
 from app.models.models import UserProfile
 from app.jobs.durable_queue import enqueue_learning_event
 
@@ -108,7 +109,7 @@ class BrandLearningService:
         client = genai.Client(api_key=settings.gemini_api_key)
         result = await client.aio.models.embed_content(
             model=self.EMBEDDING_MODEL,
-            contents=texts,
+            contents=[minimize_ai_text(text) for text in texts],
             config=types.EmbedContentConfig(
                 task_type="RETRIEVAL_DOCUMENT",
                 output_dimensionality=self.EMBEDDING_DIMENSIONS,
@@ -122,7 +123,7 @@ class BrandLearningService:
         client = genai.Client(api_key=settings.gemini_api_key)
         result = await client.aio.models.embed_content(
             model=self.EMBEDDING_MODEL,
-            contents=query[:4000],
+            contents=minimize_ai_text(query[:4000]),
             config=types.EmbedContentConfig(
                 task_type="RETRIEVAL_QUERY",
                 output_dimensionality=self.EMBEDDING_DIMENSIONS,
