@@ -388,6 +388,7 @@ async def search_jobs(
         "query": search_query,
         "location": target,
         "jobs": _dedupe(jobs)[:settings.job_search_max_results],
+        "provider_status": provider_status,
         "cached": False,
     }
     if cached:

@@ -5,7 +5,6 @@ import json
 import logging
 import secrets
 import urllib.parse
-import base64
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -60,18 +59,6 @@ def _request_json(url: str, *, data: dict | None = None, headers: dict | None = 
             return json.loads(response.read().decode("utf-8"))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"LinkedIn API request failed: {exc}") from exc
-
-
-def _decode_jwt_payload(token: str | None) -> dict:
-    if not token or token.count(".") != 2:
-        return {}
-    try:
-        payload = token.split(".", 2)[1]
-        payload += "=" * (-len(payload) % 4)
-        return json.loads(base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8"))
-    except Exception:
-        return {}
-
 
 async def build_authorization_url(session: AsyncSession, browser_nonce: str | None = None) -> tuple[str, str]:
     if not settings.linkedin_client_id or not settings.linkedin_client_secret:
@@ -258,10 +245,9 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
             logger.warning("LinkedIn OAuth token response contained an invalid expires_in value")
             token_expires_at = None
 
-        # Keep LinkedIn userinfo as the authoritative member identity source.
-        # The ID token is only used as an enrichment source after userinfo succeeds,
-        # preserving the existing trust model without treating an unverified JWT
-        # payload as an authorization credential.
+        # Use the authenticated UserInfo response as the sole identity source.
+        # Never trust decoded ID-token claims unless the token signature, issuer,
+        # audience and nonce have been independently verified.
         try:
             userinfo = await asyncio.to_thread(
                 _request_json,
@@ -279,11 +265,9 @@ async def handle_callback(session: AsyncSession, code: str, state: str) -> str:
             ) from exc
 
         profile_data = dict(userinfo or {})
-        oidc_claims = _decode_jwt_payload(token_payload.get("id_token"))
-        for key, value in oidc_claims.items():
-            if key not in profile_data or not profile_data.get(key):
-                profile_data[key] = value
-
+        email_verified = profile_data.get("email_verified")
+        if email_verified is not None and str(email_verified).lower() not in {"true", "1"}:
+            raise HTTPException(status_code=403, detail="LinkedIn did not confirm the email address.")
         email = AuthService.normalize_email(profile_data.get("email"))
         member_sub = str(profile_data.get("sub") or "").strip()
         display_name = str(profile_data.get("name") or "LinkedIn Member").strip()[:150] or "LinkedIn Member"

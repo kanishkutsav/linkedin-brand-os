@@ -1057,7 +1057,9 @@ async def delete_account(
     # records whose actor is directly identifiable as this account.
     await session.execute(
         delete(AuditLog).where(
-            (AuditLog.actor == str(user_id)) | (AuditLog.actor == current_user.email)
+            (AuditLog.actor == str(user_id))
+            | (AuditLog.actor == current_user.email)
+            | AuditLog.payload.ilike(f"%{current_user.email}%")
         )
     )
     await session.execute(delete(AuthUser).where(AuthUser.id == user_id))
