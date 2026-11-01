@@ -283,6 +283,19 @@ def _dedupe(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return output
 
 
+def _search_status(provider_status: list[dict[str, Any]]) -> str:
+    """Distinguish an empty result set from unavailable job providers."""
+    configured = [provider for provider in provider_status if provider.get("configured")]
+    if not configured:
+        return "not_configured"
+    available = [provider for provider in configured if provider.get("available")]
+    if not available:
+        return "unavailable"
+    if len(available) < len(configured):
+        return "partial"
+    return "ok"
+
+
 def _cache_key(
     search_query: str,
     title: str,
@@ -319,6 +332,7 @@ async def search_jobs(
     if cached and cached.expires_at > now:
         payload = json.loads(cached.payload_json)
         payload["cached"] = True
+        payload.setdefault("search_status", _search_status(payload.get("provider_status") or []))
         return payload
 
     providers = [
@@ -389,6 +403,7 @@ async def search_jobs(
         "location": target,
         "jobs": _dedupe(jobs)[:settings.job_search_max_results],
         "provider_status": provider_status,
+        "search_status": _search_status(provider_status),
         "cached": False,
     }
     if cached:
