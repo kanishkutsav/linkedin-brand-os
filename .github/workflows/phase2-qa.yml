@@ -162,7 +162,7 @@ jobs:
       - name: Run backend tests under production Python
         working-directory: apps/api
         env:
-          PYTHONPATH: ${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}/apps/api
           DATABASE_URL: sqlite+aiosqlite:///./qa-314.db
           SCHEDULED_JOB_KEY: qa-test-key
         run: pytest -q tests
