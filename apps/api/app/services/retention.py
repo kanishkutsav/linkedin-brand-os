@@ -7,7 +7,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.models import ApprovalRequest, ContentItem, ContentVersion, FeedbackEntry, HistoricalPost, LearningEvent
+from app.models.models import ApprovalRequest, ContentItem, ContentVersion, FeedbackEntry, HistoricalPost, LearningEvent, ObservabilityEvent
 
 
 class RetentionService:
@@ -24,12 +24,14 @@ class RetentionService:
         workflow_trimmed = await self._trim_old_content_versions(session)
         learning_events_deleted = await self._delete_processed_learning_events(session)
         feedback_payloads_trimmed = await self._trim_old_feedback_payloads(session)
+        rate_limit_events_deleted = await self._delete_old_rate_limit_events(session)
         await session.commit()
         return {
             "published_history_bodies_trimmed": published_trimmed,
             "workflow_bodies_trimmed": workflow_trimmed,
             "processed_learning_events_deleted": learning_events_deleted,
             "old_feedback_payloads_trimmed": feedback_payloads_trimmed,
+            "rate_limit_events_deleted": rate_limit_events_deleted,
         }
 
     async def _trim_published_history(self, session: AsyncSession) -> int:
@@ -148,5 +150,16 @@ class RetentionService:
                 FeedbackEntry.payload.is_not(None),
             )
             .values(payload=None)
+        )
+        return int(result.rowcount or 0)
+
+
+    async def _delete_old_rate_limit_events(self, session: AsyncSession) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+        result = await session.execute(
+            delete(ObservabilityEvent).where(
+                ObservabilityEvent.event_type == "RATE_LIMIT",
+                ObservabilityEvent.created_at < cutoff,
+            )
         )
         return int(result.rowcount or 0)

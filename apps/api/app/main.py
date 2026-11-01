@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sqlite3
 import secrets
 from contextlib import asynccontextmanager
@@ -43,11 +44,10 @@ from app.services.auth_service import AppUser, AuthService
 from app.services.linkedin_oauth import build_authorization_url, exchange_code, handle_callback, sync_missing_profile_data
 from app.services.linkedin_analytics import LinkedInAnalyticsService
 from app.services.gemini_service import ModelRouterService
-from app.services.jobs import resolve_job_location
-from app.services.apify_jobs import search_jobs_apify
+from app.services.jobs import resolve_job_location, search_jobs
 from app.services.security import (
     CSRF_COOKIE, SESSION_COOKIE, clear_session_cookies, client_key, decrypt_linkedin_token, encrypt_linkedin_token,
-    endpoint_limit, migrate_plaintext_linkedin_tokens, rate_limiter, request_token,
+    endpoint_limit, migrate_plaintext_linkedin_tokens, normalize_rate_limit_path, rate_limiter, request_token,
     security_event, set_session_cookies, validate_csrf_token,
 )
 
@@ -234,8 +234,8 @@ async def security_controls(request: Request, call_next):
             limit, window = endpoint_limit(path, method)
             token = request.cookies.get(SESSION_COOKIE) or request.headers.get("authorization", "")
             identity = hashlib.sha256(token.encode("utf-8")).hexdigest()[:24] if token else client_key(request)
-            limiter_key = f"{identity}:{method}:{path}"
-            if not rate_limiter.allow(limiter_key, limit, window):
+            limiter_key = f"{identity}:{method}:{normalize_rate_limit_path(path)}"
+            if not await rate_limiter.allow_shared(limiter_key, limit, window):
                 security_event("rate_limited", request, method=method)
                 response = JSONResponse(
                     {"detail": "Too many requests. Please try again later."},
@@ -434,14 +434,22 @@ async def _job_search_inputs(request: Request, req: JobSearchRequest, session: A
 @app.post("/api/jobs/search")
 async def jobs_search(request: Request, req: JobSearchRequest, session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
     title, experience, location = await _job_search_inputs(request, req, session, current_user)
-    return await search_jobs_apify(title=title, experience=experience, location=location, page=req.page, limit=req.limit)
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    result = await search_jobs(session, title, experience, profile.industry or "", query=title, location=location)
+    all_jobs = result.get("jobs") or []
+    start = (req.page - 1) * req.limit
+    page_jobs = all_jobs[start:start + req.limit]
+    return {**result, "jobs": page_jobs, "page": req.page, "limit": req.limit, "has_more": len(all_jobs) > start + len(page_jobs)}
 
 
 @app.get("/api/jobs/search")
 async def jobs_search_legacy(request: Request, query: str | None = None, session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin", "owner", "reviewer", "user"))):
     req = JobSearchRequest(mode="recommended" if not (query or "").strip() else "manual", job_title=query, page=1, limit=20)
     title, experience, location = await _job_search_inputs(request, req, session, current_user)
-    return await search_jobs_apify(title=title, experience=experience, location=location, page=1, limit=20)
+    profile = await AuthService.get_or_create_profile(session, current_user)
+    result = await search_jobs(session, title, experience, profile.industry or "", query=title, location=location)
+    all_jobs = result.get("jobs") or []
+    return {**result, "jobs": all_jobs[:20], "page": 1, "limit": 20, "has_more": len(all_jobs) > 20}
 
 
 @app.get("/api/admin/overview")
