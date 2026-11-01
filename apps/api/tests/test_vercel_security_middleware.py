@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.security import SESSION_COOKIE
 
 
 class TestVercelSecurityMiddleware(unittest.TestCase):
@@ -15,7 +16,7 @@ class TestVercelSecurityMiddleware(unittest.TestCase):
             client = TestClient(app)
             response = client.post(
                 "/auth/linkedin/login",
-                cookies={"suvacya_session": "test-session"},
+                cookies={SESSION_COOKIE: "test-session"},
             )
 
         self.assertEqual(response.status_code, 403)
