@@ -138,6 +138,24 @@ def _clean_text(value: Any, limit: int = 4000) -> str:
     return text[:limit]
 
 
+def _normalize_apify_job(item: dict[str, Any]) -> dict[str, Any]:
+    """Map the retained Indeed/Naukri Apify contract to the shared Jobs API shape."""
+    return _normalize(
+        provider=item.get("source") or "Apify",
+        job_id=item.get("id"),
+        title=item.get("title"),
+        company=item.get("company"),
+        description=item.get("description"),
+        location=item.get("location"),
+        remote_type="Remote" if "remote" in str(item.get("location") or "").lower() else None,
+        experience_level=item.get("experience"),
+        salary=item.get("salary"),
+        posted_at=item.get("postedAt"),
+        url=item.get("applyUrl"),
+        source_url=item.get("sourceUrl"),
+    )
+
+
 def _years_terms(years: float | None) -> list[str]:
     if years is None:
         return []
@@ -411,21 +429,10 @@ async def search_jobs(
                 page=1,
                 limit=min(settings.job_search_max_results, 20),
             )
-            for item in apify_result.get("jobs") or []:
-                apify_items.append(_normalize(
-                    provider=item.get("source") or "Apify",
-                    job_id=item.get("id"),
-                    title=item.get("title"),
-                    company=item.get("company"),
-                    description=item.get("description"),
-                    location=item.get("location"),
-                    remote_type="Remote" if "remote" in str(item.get("location") or "").lower() else None,
-                    experience_level=item.get("experience"),
-                    salary=item.get("salary"),
-                    posted_at=item.get("postedAt"),
-                    url=item.get("applyUrl"),
-                    source_url=item.get("sourceUrl"),
-                ))
+            apify_items = [
+                _normalize_apify_job(item)
+                for item in (apify_result.get("jobs") or [])
+            ]
         except Exception as exc:
             # Do not expose provider diagnostics to the client; retain only
             # server-side observability and let the other sources succeed.
