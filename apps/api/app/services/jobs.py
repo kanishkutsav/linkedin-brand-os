@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.models import JobSearchCache, ObservabilityEvent
+from app.services.apify_jobs import search_jobs_apify
 
 
 # Job-market location aliases used for deterministic provider filtering. The primary
@@ -135,6 +136,24 @@ def _clean_text(value: Any, limit: int = 4000) -> str:
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:limit]
+
+
+def _normalize_apify_job(item: dict[str, Any]) -> dict[str, Any]:
+    """Map the retained Indeed/Naukri Apify contract to the shared Jobs API shape."""
+    return _normalize(
+        provider=item.get("source") or "Apify",
+        job_id=item.get("id"),
+        title=item.get("title"),
+        company=item.get("company"),
+        description=item.get("description"),
+        location=item.get("location"),
+        remote_type="Remote" if "remote" in str(item.get("location") or "").lower() else None,
+        experience_level=item.get("experience"),
+        salary=item.get("salary"),
+        posted_at=item.get("postedAt"),
+        url=item.get("applyUrl"),
+        source_url=item.get("sourceUrl"),
+    )
 
 
 def _years_terms(years: float | None) -> list[str]:
@@ -394,6 +413,51 @@ async def search_jobs(
             details_json=json.dumps({"returned_jobs": len(items), "configured": configured[name]}, ensure_ascii=False),
         ))
         jobs.extend(items)
+
+    # Keep the existing Indeed/Naukri Apify actors as an independent fallback
+    # alongside Jooble and the other configured job providers.
+    apify_configured = bool(settings.apify_api_token)
+    apify_started = time.perf_counter()
+    apify_error = None
+    apify_items: list[dict[str, Any]] = []
+    if apify_configured:
+        try:
+            apify_result = await search_jobs_apify(
+                title=title,
+                experience=years,
+                location=target,
+                page=1,
+                limit=min(settings.job_search_max_results, 20),
+            )
+            apify_items = [
+                _normalize_apify_job(item)
+                for item in (apify_result.get("jobs") or [])
+            ]
+        except Exception as exc:
+            # Do not expose provider diagnostics to the client; retain only
+            # server-side observability and let the other sources succeed.
+            apify_error = str(exc)[:300]
+        apify_latency = int((time.perf_counter() - apify_started) * 1000)
+        provider_status.append({
+            "provider": "Apify (Indeed/Naukri)",
+            "configured": True,
+            "location_supported": True,
+            "available": apify_error is None,
+            "returned_jobs": len(apify_items),
+            "error": apify_error,
+        })
+        session.add(ObservabilityEvent(
+            correlation_id=key[:24],
+            event_type="ProviderSucceeded" if apify_error is None else "ProviderFailed",
+            activity_type="JOB_SEARCH",
+            status="SUCCESS" if apify_error is None else "FAILED",
+            user_visible_failure=False,
+            provider="Apify (Indeed/Naukri)",
+            latency_ms=apify_latency,
+            failure_category=("PROVIDER_UNAVAILABLE" if apify_error else None),
+            details_json=json.dumps({"returned_jobs": len(apify_items), "configured": True}, ensure_ascii=False),
+        ))
+        jobs.extend(apify_items)
 
     jobs = _filter_jobs_to_location(jobs, target)
     jobs = _filter_jobs_to_query(jobs, query)
