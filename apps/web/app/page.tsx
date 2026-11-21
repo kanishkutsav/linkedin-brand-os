@@ -2448,7 +2448,7 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
           const busy = adminUserActionId === x.id;
           const label = x.display_name || x.email;
           const initials = String(x.display_name || x.email || 'U').split(/[^a-zA-Z0-9]+/).filter(Boolean).slice(0,2).map((part:string) => part[0]).join('').toUpperCase();
-          return <article className="admin-user-card" key={x.id}>
+          return (<article className="admin-user-card" key={x.id}>
             <div className="admin-user-main">
               <div className="admin-user-avatar">{initials || 'U'}</div>
               <div className="admin-user-identity">
@@ -2478,7 +2478,7 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
                 : <button className="button admin-action-button" disabled={busy} onClick={() => void onUpdateUser(x.id, { whitelisted: true }, `Add ${label} back to the whitelist?`)}><ShieldCheck size={14}/>Whitelist</button>}
               <button className="button danger admin-action-button" disabled={busy} onClick={() => void onRemoveUser(x.id, label)}><X size={14}/>Remove user</button>
             </div>
-          </article>;
+          </article>);
         })}
         {!filteredUsers.length && <div className="post-entry" style={{ color: '#6f7f93' }}>No users match this filter.</div>}
       </div>
