@@ -183,9 +183,13 @@ export default function Home() {
     let disposed = false;
     const heartbeat = () => {
       if (disposed || document.visibilityState !== 'visible') return;
-      void apiFetch(API_BASE + '/api/auth/activity', {
+      const csrf = document.cookie.split('; ').find((part) => part.startsWith('__Host-suvacya-csrf=') || part.startsWith('suvacya-csrf='));
+      const requestHeaders: Record<string, string> = {};
+      if (csrf) requestHeaders['X-CSRF-Token'] = decodeURIComponent(csrf.slice(csrf.indexOf('=') + 1));
+      void fetch(API_BASE + '/api/auth/activity', {
         method: 'POST',
-        headers: headers(),
+        headers: requestHeaders,
+        credentials: 'include',
       }).catch(() => undefined);
     };
     heartbeat();
