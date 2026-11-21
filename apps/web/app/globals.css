@@ -1509,3 +1509,32 @@ a { color: inherit; }
 @media (max-width:380px) {
   .admin-user-directory .admin-metric-grid { grid-template-columns:minmax(0,1fr); }
 }
+
+
+/* Approval queue accordion: each review expands directly beneath its post. */
+.approval-panel .queue-layout { display: block; min-height: 0; }
+.approval-panel .queue-list { min-width: 0; border: 0; }
+.approval-panel .queue-items { display: grid; grid-template-columns: minmax(0,1fr); gap: 10px; max-height: none; overflow: visible; padding: 0 12px 14px; }
+.approval-panel .queue-entry { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+.approval-panel .queue-entry.expanded { border-color: #bfd8f5; box-shadow: 0 5px 18px rgba(20,75,135,.07); }
+.approval-panel .queue-entry .queue-item { width: 100%; min-width: 0; min-height: 96px; border: 0; border-radius: 0; text-align: left; }
+.approval-panel .queue-entry .queue-item.selected { background: #edf5ff; }
+.approval-panel .queue-item-trailing { display: inline-flex; align-items: center; gap: 9px; flex-shrink: 0; }
+.approval-panel .accordion-chevron { color: #64748b; transition: transform .18s ease; }
+.approval-panel .accordion-chevron.open { transform: rotate(180deg); }
+.approval-panel .queue-expanded-content { border-top: 1px solid #e3ebf4; padding: 14px; background: #f8fbff; }
+.approval-panel .queue-expanded-content .review-head { align-items: center; flex-wrap: wrap; }
+.approval-panel .queue-expanded-content .review-editor { margin-top: 12px; }
+.approval-panel .queue-expanded-content .textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.approval-panel .queue-expanded-content .review-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.approval-panel .queue-expanded-content .review-actions .button { width: 100%; min-width: 0; min-height: 44px; white-space: normal; }
+.approval-panel .queue-expanded-content .notice { overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .approval-panel .queue-items { padding: 0 10px 12px; gap: 9px; }
+  .approval-panel .queue-entry .queue-item { min-height: 92px; padding: 13px; }
+  .approval-panel .queue-expanded-content { padding: 11px; }
+  .approval-panel .queue-expanded-content .review-editor { padding: 10px; }
+  .approval-panel .queue-expanded-content .review-actions { grid-template-columns: minmax(0,1fr); }
+  .approval-panel .queue-expanded-content .review-actions .button { min-height: 46px; }
+  .approval-panel .queue-expanded-content .textarea { font-size: 16px; line-height: 1.5; }
+}
