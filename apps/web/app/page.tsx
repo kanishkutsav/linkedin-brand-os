@@ -2427,52 +2427,59 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
           <div className="admin-metric-card"><div className="admin-metric-top"><span>Active in 7 days</span><span className="admin-metric-icon"><UserRound size={15}/></span></div><strong>{activeRecently}</strong><small>Users with recent app activity</small></div>
           <div className="admin-metric-card"><div className="admin-metric-top"><span>Never logged in</span><span className="admin-metric-icon"><Clock3 size={15}/></span></div><strong>{neverLoggedIn}</strong><small>No recorded login session</small></div>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <span className="tag">Total · {users.length}</span>
-          <span className="tag">Active · {users.filter((x:any) => x.active).length}</span>
-          <span className="tag">Inactive · {users.filter((x:any) => !x.active).length}</span>
-          <span className="tag">Whitelisted · {users.filter((x:any) => x.whitelisted).length}</span>
-          <span className="tag">Not whitelisted · {users.filter((x:any) => !x.whitelisted).length}</span>
+        <div className="admin-directory-counts">
+          <span className="admin-directory-count">Total <b>{users.length}</b></span>
+          <span className="admin-directory-count">Active <b>{users.filter((x:any) => x.active).length}</b></span>
+          <span className="admin-directory-count">Inactive <b>{users.filter((x:any) => !x.active).length}</b></span>
+          <span className="admin-directory-count">Whitelisted <b>{users.filter((x:any) => x.whitelisted).length}</b></span>
+          <span className="admin-directory-count">Not whitelisted <b>{users.filter((x:any) => !x.whitelisted).length}</b></span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(150px, 220px)', gap: 8 }}>
-          <input className="input" aria-label="Search users" placeholder="Search name, email or role" value={userSearch} onChange={(e) => setUserSearch(e.target.value)} />
-          <select className="input" aria-label="Filter user activity" value={userActivityFilter} onChange={(e) => setUserActivityFilter(e.target.value)}>
+        <div className="admin-directory-toolbar">
+          <label className="admin-directory-search">
+            <Search size={15}/>
+            <input aria-label="Search users" placeholder="Search name, email or role" value={userSearch} onChange={(e) => setUserSearch(e.target.value)} />
+          </label>
+          <select className="input admin-directory-filter" aria-label="Filter user activity" value={userActivityFilter} onChange={(e) => setUserActivityFilter(e.target.value)}>
             <option value="all">All activity</option><option value="never">Never logged in</option><option value="active7">Active in last 7 days</option><option value="inactive30">Inactive 30+ days</option>
           </select>
         </div>
+        <div className="admin-user-list">
         {filteredUsers.length ? filteredUsers.map((x:any) => {
           const busy = adminUserActionId === x.id;
           const label = x.display_name || x.email;
-          return <div className="post-entry" key={x.id} style={{ marginTop: 8 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center' }}>
-              <div>
-                <div style={{ fontWeight: 650 }}>{x.display_name || 'User'}</div>
-                <div style={{ marginTop: 4, color: '#5f6f86' }}>{x.email} · {x.role}</div>
-                <div style={{ marginTop: 7, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <span className="tag">Active · {x.active ? 'Yes' : 'No'}</span>
-                  <span className="tag">Whitelisted · {x.whitelisted ? 'Yes' : 'No'}</span>
-                  <span className="tag">{x.active_now ? 'Active now' : x.last_active_at ? 'Not active now' : 'No activity yet'}</span>
-                </div>
-                <div style={{ marginTop: 9, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 8, color: '#5f6f86', fontSize: 11 }}>
-                  <div><b>First login</b><br/>{formatActivityDate(x.first_login_at)}</div>
-                  <div><b>Last login</b><br/>{formatActivityDate(x.last_login_at)}</div>
-                  <div><b>Last active</b><br/>{formatActivityDate(x.last_active_at)}</div>
-                  <div><b>Sessions</b><br/>{x.total_sessions || 0}</div>
-                  <div><b>Active days (7d / 30d)</b><br/>{x.active_days_7 || 0} / {x.active_days_30 || 0}</div>
-                </div>
+          const initials = String(x.display_name || x.email || 'U').split(/[\\s@._-]+/).filter(Boolean).slice(0,2).map((part:string) => part[0]).join('').toUpperCase();
+          return <article className="admin-user-card" key={x.id}>
+            <div className="admin-user-main">
+              <div className="admin-user-avatar">{initials || 'U'}</div>
+              <div className="admin-user-identity">
+                <div className="admin-user-name">{x.display_name || 'User'}</div>
+                <div className="admin-user-email">{x.email}</div>
+                <div className="admin-user-role">{x.role}</div>
               </div>
-              <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                {x.active
-                  ? <button className="button" disabled={busy} onClick={() => void onUpdateUser(x.id, { active: false }, `Deactivate ${label}? They will no longer be able to sign in.`)}><ShieldAlert size={13}/>Deactivate</button>
-                  : <button className="button" disabled={busy} onClick={() => void onUpdateUser(x.id, { active: true }, `Reactivate ${label}?`)}><CircleCheck size={13}/>Activate</button>}
-                {x.whitelisted
-                  ? <button className="button" disabled={busy} onClick={() => void onUpdateUser(x.id, { whitelisted: false }, `Remove ${label} from the whitelist?`)}><X size={13}/>Remove whitelist</button>
-                  : <button className="button" disabled={busy} onClick={() => void onUpdateUser(x.id, { whitelisted: true }, `Add ${label} back to the whitelist?`)}><ShieldCheck size={13}/>Whitelist</button>}
-                <button className="button danger" disabled={busy} onClick={() => void onRemoveUser(x.id, label)}><X size={13}/>Remove user</button>
+              <div className="admin-user-statuses">
+                <span className={`admin-status-pill ${x.active ? 'is-positive' : 'is-muted'}`}><i/> {x.active ? 'Account active' : 'Deactivated'}</span>
+                <span className={`admin-status-pill ${x.whitelisted ? 'is-info' : 'is-muted'}`}><i/> {x.whitelisted ? 'Whitelisted' : 'Not whitelisted'}</span>
+                <span className={`admin-status-pill ${x.active_now ? 'is-positive' : 'is-muted'}`}><i/> {x.active_now ? 'Active now' : x.last_active_at ? 'Not active now' : 'No activity yet'}</span>
               </div>
             </div>
-          </div>;
-        })  : <div className="post-entry" style={{ color: '#6f7f93' }}>No users match this filter.</div>}
+            <div className="admin-user-stats">
+              <div className="admin-user-stat"><span>First login</span><b>{formatActivityDate(x.first_login_at)}</b></div>
+              <div className="admin-user-stat"><span>Last login</span><b>{formatActivityDate(x.last_login_at)}</b></div>
+              <div className="admin-user-stat"><span>Last active</span><b>{formatActivityDate(x.last_active_at)}</b></div>
+              <div className="admin-user-stat"><span>Sessions</span><b>{x.total_sessions || 0}</b></div>
+              <div className="admin-user-stat"><span>Active days · 7d / 30d</span><b>{x.active_days_7 || 0} / {x.active_days_30 || 0}</b></div>
+            </div>
+            <div className="admin-user-actions">
+              {x.active
+                ? <button className="button admin-action-button" disabled={busy} onClick={() => void onUpdateUser(x.id, { active: false }, `Deactivate ${label}? They will no longer be able to sign in.`)}><ShieldAlert size={14}/>Deactivate</button>
+                : <button className="button admin-action-button" disabled={busy} onClick={() => void onUpdateUser(x.id, { active: true }, `Reactivate ${label}?`)}><CircleCheck size={14}/>Activate</button>}
+              {x.whitelisted
+                ? <button className="button admin-action-button" disabled={busy} onClick={() => void onUpdateUser(x.id, { whitelisted: false }, `Remove ${label} from the whitelist?`)}><X size={14}/>Remove whitelist</button>
+                : <button className="button admin-action-button" disabled={busy} onClick={() => void onUpdateUser(x.id, { whitelisted: true }, `Add ${label} back to the whitelist?`)}><ShieldCheck size={14}/>Whitelist</button>}
+              <button className="button danger admin-action-button" disabled={busy} onClick={() => void onRemoveUser(x.id, label)}><X size={14}/>Remove user</button>
+            </div>
+          </article>;
+        })        })  : <div className="post-entry" style={{ color: '#6f7f93' }}>No users match this filter.</div>}
       </div>
     </Section>
   </div>;
