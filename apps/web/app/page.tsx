@@ -1512,16 +1512,15 @@ function ApprovalWorkspace(props: any) {
             <div className={`queue-entry ${mobileReviewOpen && selectedId === item.id ? 'expanded' : ''}`} key={item.id}>
               <button type="button" className={`queue-item ${selectedId === item.id ? 'selected' : ''}`} aria-expanded={mobileReviewOpen && selectedId === item.id} onClick={() => { if (selectedId === item.id) setMobileReviewOpen((open) => !open); else { setSelectedId(item.id); setMobileReviewOpen(true); } }}>
                 <div className="queue-item-top"><span className="queue-id">POST #{item.id}</span><span className="queue-item-trailing"><StatusPill status={item.status}/><ChevronDown size={17} className={`accordion-chevron ${mobileReviewOpen && selectedId === item.id ? 'open' : ''}`}/></span></div>
-                <div clas )) : <div className="empty-state"><div className="empty-icon"><FileText size={18}/></div><strong>Queue is clear</strong><span>Create a draft or generate content to start the review flow.</span></div>}
-        </div>
-      </div>
-      <div className={`review-pane ${mobileReviewOpen ? 'mobile-review-open' : ''}`}>
-        {selected ? (
+                <div className="queue-action">{item.action_type}</div>
+                <div className="queue-preview">{item.content.slice(0, 88)}{item.content.length > 88 ? '…' : ''}</div>
+              </button>
+              {mobileReviewOpen && selectedId === item.id ? (      <div className="queue-expanded-content">
+        {item ? (
           <>
-            <button className="mobile-review-back" onClick={() => setMobileReviewOpen(false)}><ChevronRight size={16} style={{ transform: 'rotate(180deg)' }} /> Back to queue</button>
-            <div className="review-head"><div><div className="review-label">Editorial review · post #{selected.id}</div><div className="review-title">{selected.action_type}</div></div><StatusPill status={selected.status}/></div>
+            <div className="review-head"><div><div className="review-label">Editorial review · post #{item.id}</div><div className="review-title">{item.action_type}</div></div><StatusPill status={item.status}/></div>
 
-            {['PENDING','EDITED','REGENERATED'].includes(selected.status) ? (
+            {['PENDING','EDITED','REGENERATED'].includes(item.status) ? (
               <div className="review-editor">
                 <div className="editor-toolbar"><span>Exact content bound to approval</span><span>{editedBody.length} chars</span></div>
                 <textarea aria-label="Edit post content" className="textarea" value={editedBody} onChange={(e) => setEditedBody(e.target.value)} />
@@ -1533,8 +1532,8 @@ function ApprovalWorkspace(props: any) {
                   onChange={(e) => {
                     const value = e.target.value;
                     setReviewNote(value);
-                    if (selected?.id) {
-                      const key = `brand-os-regeneration-feedback:${selected.id}`;
+                    if (item?.id) {
+                      const key = `brand-os-regeneration-feedback:${item.id}`;
                       if (value.trim()) window.localStorage.setItem(key, value);
                       else window.localStorage.removeItem(key);
                     }
@@ -1546,7 +1545,7 @@ function ApprovalWorkspace(props: any) {
                     <span className="button-content"><Check size={14}/> {busyAction === 'approve' ? operationStage || 'Approving…' : 'Approve'}</span>
                     {busyAction === 'approve' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
                   </button>
-                  <button className="button" disabled={isBusy || editedBody === selected.content} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>
+                  <button className="button" disabled={isBusy || editedBody === item.content} onClick={() => onAction('edit', { edited_body: editedBody, reason: reviewNote || 'Edited during review.' })}><Pencil size={14}/> Save edit</button>
                   <button className="button progress-button" disabled={isBusy || !reviewNote.trim()} title={!reviewNote.trim() ? 'Add feedback before regenerating.' : 'Regenerate using your feedback'} onClick={() => onAction('regenerate', { reason: reviewNote.trim() })}>
                     <span className="button-content"><RotateCcw size={14}/> {busyAction === 'regenerate' ? operationStage || 'Regenerating…' : 'Regenerate'}</span>
                     {busyAction === 'regenerate' && <span className="button-progress-track"><span style={{ width: operationProgress + '%' }} /></span>}
@@ -1555,24 +1554,24 @@ function ApprovalWorkspace(props: any) {
                 </div>
                 <div className="form-help" style={{ marginTop: 8 }}>{reviewNote.trim() ? 'Regenerate will use this feedback and keep the new version behind the approval gate.' : 'Add feedback above to enable Regenerate.'}</div>
               </div>
-            ) : selected.status === 'PUBLISHING' ? (
+            ) : item.status === 'PUBLISHING' ? (
               <div className="review-editor">
                 <div className="notice error" style={{ marginTop: 0 }}>
                   <ShieldCheck size={15}/><span>LinkedIn's response was inconclusive. Check your LinkedIn profile before taking another action. Suvacya will not automatically retry because that could create a duplicate post.</span>
                 </div>
-                <div className="editor-toolbar" style={{ marginTop: 12 }}><span>Content from the uncertain publish attempt</span><span>{selected.content.length} chars</span></div>
-                <div className="readonly-field" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65, minHeight: 150 }}>{selected.content}</div>
+                <div className="editor-toolbar" style={{ marginTop: 12 }}><span>Content from the uncertain publish attempt</span><span>{item.content.length} chars</span></div>
+                <div className="readonly-field" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65, minHeight: 150 }}>{item.content}</div>
                 <div className="review-actions" style={{ marginTop: 14 }}>
                   <button className="button success" disabled={isBusy} onClick={() => onResolvePublication('published')}>I found this post on LinkedIn</button>
                   <button className="button danger" disabled={isBusy} onClick={() => onResolvePublication('not_published')}>I verified it was not published</button>
                 </div>
                 <div className="form-help" style={{ marginTop: 8 }}>Only choose one of these after checking LinkedIn. Your confirmation is recorded in the audit log.</div>
               </div>
-            ) : selected.status === 'APPROVED' ? (
+            ) : item.status === 'APPROVED' ? (
               <div className="review-editor">
                 <div className="notice success" style={{ marginTop: 0 }}><CircleCheck size={15}/><span>Approved and locked. The content can no longer be edited or regenerated.</span></div>
-                <div className="editor-toolbar" style={{ marginTop: 12 }}><span>Locked approved content</span><span>{selected.content.length} chars</span></div>
-                <div className="readonly-field" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65, minHeight: 150 }}>{selected.content}</div>
+                <div className="editor-toolbar" style={{ marginTop: 12 }}><span>Locked approved content</span><span>{item.content.length} chars</span></div>
+                <div className="readonly-field" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65, minHeight: 150 }}>{item.content}</div>
                 <div style={{ marginTop: 14, padding: 12, border: '1px dashed #c8d4e2', borderRadius: 12, background: '#fbfdff' }}>
                   <label className="review-label" htmlFor="approval-image-upload" style={{ marginBottom: 7 }}>Optional photograph</label>
                   <div className="form-help" style={{ marginBottom: 9 }}>Add one JPEG, PNG or GIF image (up to 4 MB). The image is sent directly to LinkedIn during execution and is not stored by Suvacya.</div>
@@ -1592,8 +1591,8 @@ function ApprovalWorkspace(props: any) {
                 </div>
               </div>
             ) : (
-              <div className={selected.status === 'EXECUTED' ? 'notice success' : 'notice error'} style={{ marginTop: 0 }}>
-                <CircleCheck size={15}/><span>{selected.status === 'EXECUTED' ? 'Approved and published to LinkedIn. This post is permanently locked.' : 'This post is no longer awaiting a decision.'}</span>
+              <div className={item.status === 'EXECUTED' ? 'notice success' : 'notice error'} style={{ marginTop: 0 }}>
+                <CircleCheck size={15}/><span>{item.status === 'EXECUTED' ? 'Approved and published to LinkedIn. This post is permanently locked.' : 'This post is no longer awaiting a decision.'}</span>
               </div>
             )}
 
@@ -1603,7 +1602,12 @@ function ApprovalWorkspace(props: any) {
             </div>
           </>
         ) : <EmptyState icon={FileText} title="Select a draft" text="Your editorial workspace will appear here." />}
+      </div>) : null}
+            </div>
+          )) : <div className="empty-state"><div className="empty-icon"><FileText size={18}/></div><strong>Queue is clear</strong><span>Create a draft or generate content to start the review flow.</span></div>}
+        </div>
       </div>
+
     </div>
   );
 }
