@@ -5,7 +5,10 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui"],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
   "orientation": "portrait-primary",
   "background_color": "#062b55",
   "theme_color": "#062b55",
@@ -22,6 +25,12 @@
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ],
   "shortcuts": [
@@ -29,13 +38,27 @@
       "name": "Generate content",
       "short_name": "Generate",
       "url": "/?action=generate",
-      "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+      "icons": [
+        {
+          "src": "/icons/icon-192.svg",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
     },
     {
       "name": "Research",
       "short_name": "Research",
       "url": "/?tab=research",
-      "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+      "icons": [
+        {
+          "src": "/icons/icon-192.svg",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
     }
-  ]
+  ],
+  "id": "/",
+  "lang": "en"
 }
