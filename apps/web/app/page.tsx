@@ -2447,7 +2447,7 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
         {filteredUsers.length ? filteredUsers.map((x:any) => {
           const busy = adminUserActionId === x.id;
           const label = x.display_name || x.email;
-          const initials = String(x.display_name || x.email || 'U').split(/[\\s@._-]+/).filter(Boolean).slice(0,2).map((part:string) => part[0]).join('').toUpperCase();
+          const initials = String(x.display_name || x.email || 'U').split(/[^a-zA-Z0-9]+/).filter(Boolean).slice(0,2).map((part:string) => part[0]).join('').toUpperCase();
           return <article className="admin-user-card" key={x.id}>
             <div className="admin-user-main">
               <div className="admin-user-avatar">{initials || 'U'}</div>
