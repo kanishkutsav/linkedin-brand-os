@@ -20,6 +20,22 @@ jobs:
           node-version: "24"
       - name: Install pinned frontend dependencies
         run: npm ci
+      - name: Validate PWA assets and service worker
+        run: |
+          node --check public/sw.js
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const manifest = JSON.parse(fs.readFileSync('public/manifest.webmanifest', 'utf8'));
+          const required = ['name', 'short_name', 'id', 'start_url', 'scope', 'display'];
+          for (const key of required) if (!manifest[key]) throw new Error(`PWA manifest is missing ${key}`);
+          for (const size of ['192x192', '512x512']) {
+            if (!manifest.icons.some((icon) => icon.sizes === size)) throw new Error(`PWA manifest is missing ${size} icon`);
+          }
+          for (const icon of manifest.icons) {
+            if (!fs.existsSync(`public${icon.src}`)) throw new Error(`PWA icon not found: ${icon.src}`);
+          }
+          if (!fs.existsSync('public/offline.html')) throw new Error('Offline fallback is missing');
+          NODE
       - name: Audit frontend dependencies
         run: npm audit --audit-level=high
       - name: Build frontend
