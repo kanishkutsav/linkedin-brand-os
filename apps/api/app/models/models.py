@@ -38,6 +38,9 @@ class UserActivityDay(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), index=True, nullable=False)
     activity_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     last_active_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    first_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class UserProfile(Base):

@@ -294,6 +294,14 @@ CREATE INDEX IF NOT EXISTS idx_user_activity_days_user_date
 CREATE INDEX IF NOT EXISTS idx_user_activity_days_last_active
     ON public.user_activity_days (last_active_at DESC);
 
+-- Preserve login counts after auth_sessions are deleted on logout.
+ALTER TABLE public.user_activity_days
+    ADD COLUMN IF NOT EXISTS login_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.user_activity_days
+    ADD COLUMN IF NOT EXISTS first_login_at TIMESTAMPTZ;
+ALTER TABLE public.user_activity_days
+    ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+
 ALTER TABLE public.user_activity_days ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.user_activity_days FROM anon, authenticated;
 GRANT ALL ON TABLE public.user_activity_days TO service_role;

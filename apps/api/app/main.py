@@ -601,27 +601,20 @@ async def admin_users(session: AsyncSession = Depends(get_session), current_user
     seven_days_ago = now.date() - timedelta(days=6)
     thirty_days_ago = now.date() - timedelta(days=29)
     users = (await session.execute(select(AuthUser).order_by(AuthUser.created_at.desc()))).scalars().all()
-    session_rows = (await session.execute(
-        select(
-            AuthSession.user_id,
-            func.count(AuthSession.id).label("total_sessions"),
-            func.min(AuthSession.created_at).label("first_login_at"),
-            func.max(AuthSession.created_at).label("last_login_at"),
-        ).group_by(AuthSession.user_id)
-    )).all()
-    session_stats = {row.user_id: row for row in session_rows}
     activity_rows = (await session.execute(
         select(
             UserActivityDay.user_id,
             func.max(UserActivityDay.last_active_at).label("last_active_at"),
             func.count(case((UserActivityDay.activity_date >= seven_days_ago, 1))).label("active_days_7"),
             func.count(case((UserActivityDay.activity_date >= thirty_days_ago, 1))).label("active_days_30"),
+            func.coalesce(func.sum(UserActivityDay.login_count), 0).label("total_sessions"),
+            func.min(UserActivityDay.first_login_at).label("first_login_at"),
+            func.max(UserActivityDay.last_login_at).label("last_login_at"),
         ).group_by(UserActivityDay.user_id)
     )).all()
     activity_stats = {row.user_id: row for row in activity_rows}
     items = []
     for user in users:
-        sessions = session_stats.get(user.id)
         activity = activity_stats.get(user.id)
         last_active = activity.last_active_at if activity else None
         items.append({
@@ -632,9 +625,9 @@ async def admin_users(session: AsyncSession = Depends(get_session), current_user
             "active": user.is_active,
             "whitelisted": user.is_whitelisted,
             "created_at": user.created_at,
-            "first_login_at": sessions.first_login_at if sessions else None,
-            "last_login_at": sessions.last_login_at if sessions else None,
-            "total_sessions": int(sessions.total_sessions) if sessions else 0,
+            "first_login_at": activity.first_login_at if activity else None,
+            "last_login_at": activity.last_login_at if activity else None,
+            "total_sessions": int(activity.total_sessions) if activity else 0,
             "last_active_at": last_active,
             "active_now": bool(last_active and last_active >= now - timedelta(minutes=5)),
             "active_days_7": int(activity.active_days_7) if activity else 0,
