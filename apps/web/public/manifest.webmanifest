@@ -9,7 +9,7 @@
     "standalone",
     "minimal-ui"
   ],
-  "orientation": "portrait-primary",
+  "orientation": "any",
   "background_color": "#062b55",
   "theme_color": "#062b55",
   "prefer_related_applications": false,
@@ -35,9 +35,9 @@
   ],
   "shortcuts": [
     {
-      "name": "Generate content",
-      "short_name": "Generate",
-      "url": "/?action=generate",
+      "name": "Open Content Studio",
+      "short_name": "Content",
+      "url": "/?tab=Content%20Studio",
       "icons": [
         {
           "src": "/icons/icon-192.svg",
@@ -49,7 +49,7 @@
     {
       "name": "Research",
       "short_name": "Research",
-      "url": "/?tab=research",
+      "url": "/?tab=Research",
       "icons": [
         {
           "src": "/icons/icon-192.svg",
