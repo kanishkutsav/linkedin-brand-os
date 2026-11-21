@@ -2370,6 +2370,7 @@ function FeedbackView({ type, setType, subject, setSubject, description, setDesc
 function AdminView({ overview, window, onWindowChange, activity, feedback, users, aiProviders, jobProviders, sections, sectionLoading, onToggle, onRefresh, onCreateUser, onUpdateUser, onRemoveUser, adminUserEmail, setAdminUserEmail, adminUserName, setAdminUserName, adminUserSaving, adminUserActionId }: any) {
   const [userActivityFilter, setUserActivityFilter] = useState('all');
   const [userSearch, setUserSearch] = useState('');
+  const [expandedUserIds, setExpandedUserIds] = useState<Set<string | number>>(() => new Set());
   const neverLoggedIn = users.filter((x: any) => !x.last_login_at).length;
   const activeRecently = users.filter((x: any) => x.last_active_at && new Date(x.last_active_at).getTime() >= Date.now() - 7 * 86400000).length;
   const activeNow = users.filter((x: any) => x.active_now).length;
@@ -2443,25 +2444,40 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
         {filteredUsers.length ? filteredUsers.map((x:any) => {
           const busy = adminUserActionId === x.id;
           const label = x.display_name || x.email;
-          return <div className="post-entry" key={x.id} style={{ marginTop: 8 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center' }}>
-              <div>
-                <div style={{ fontWeight: 650 }}>{x.display_name || 'User'}</div>
-                <div style={{ marginTop: 4, color: '#5f6f86' }}>{x.email} · {x.role}</div>
-                <div style={{ marginTop: 7, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <span className="tag">Active · {x.active ? 'Yes' : 'No'}</span>
-                  <span className="tag">Whitelisted · {x.whitelisted ? 'Yes' : 'No'}</span>
-                  <span className="tag">{x.active_now ? 'Active now' : x.last_active_at ? 'Not active now' : 'No activity yet'}</span>
-                </div>
-                <div style={{ marginTop: 9, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 8, color: '#5f6f86', fontSize: 11 }}>
-                  <div><b>First login</b><br/>{formatActivityDate(x.first_login_at)}</div>
-                  <div><b>Last login</b><br/>{formatActivityDate(x.last_login_at)}</div>
-                  <div><b>Last active</b><br/>{formatActivityDate(x.last_active_at)}</div>
-                  <div><b>Sessions</b><br/>{x.total_sessions || 0}</div>
-                  <div><b>Active days (7d / 30d)</b><br/>{x.active_days_7 || 0} / {x.active_days_30 || 0}</div>
-                </div>
+          const expanded = expandedUserIds.has(x.id);
+          return <div className="post-entry" key={x.id} style={{ marginTop: 8, padding: 0, overflow: 'hidden' }}>
+            <button
+              type="button"
+              aria-expanded={expanded}
+              aria-controls={`admin-user-details-${x.id}`}
+              onClick={() => setExpandedUserIds((current) => {
+                const next = new Set(current);
+                if (next.has(x.id)) next.delete(x.id); else next.add(x.id);
+                return next;
+              })}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '14px 16px', border: 0, background: 'transparent', color: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+            >
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', fontWeight: 650 }}>{x.display_name || 'User'}</span>
+                <span style={{ display: 'block', marginTop: 4, color: '#5f6f86', overflowWrap: 'anywhere', fontSize: 13 }}>{x.email}</span>
+              </span>
+              <ChevronDown size={18} aria-hidden="true" style={{ flexShrink: 0, color: '#64748b', transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 160ms ease' }} />
+            </button>
+            {expanded && <div id={`admin-user-details-${x.id}`} style={{ padding: '0 16px 16px', borderTop: '1px solid rgba(100,116,139,0.16)' }}>
+              <div style={{ paddingTop: 12, color: '#5f6f86', fontSize: 13 }}>{x.role}</div>
+              <div style={{ marginTop: 7, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <span className="tag">Active · {x.active ? 'Yes' : 'No'}</span>
+                <span className="tag">Whitelisted · {x.whitelisted ? 'Yes' : 'No'}</span>
+                <span className="tag">{x.active_now ? 'Active now' : x.last_active_at ? 'Not active now' : 'No activity yet'}</span>
               </div>
-              <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px 16px', color: '#5f6f86', fontSize: 12 }}>
+                <div><b>First login</b><br/>{formatActivityDate(x.first_login_at)}</div>
+                <div><b>Last login</b><br/>{formatActivityDate(x.last_login_at)}</div>
+                <div><b>Last active</b><br/>{formatActivityDate(x.last_active_at)}</div>
+                <div><b>Sessions</b><br/>{x.total_sessions || 0}</div>
+                <div><b>Active days (7d / 30d)</b><br/>{x.active_days_7 || 0} / {x.active_days_30 || 0}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(100,116,139,0.16)' }}>
                 {x.active
                   ? <button className="button" disabled={busy} onClick={() => void onUpdateUser(x.id, { active: false }, `Deactivate ${label}? They will no longer be able to sign in.`)}><ShieldAlert size={13}/>Deactivate</button>
                   : <button className="button" disabled={busy} onClick={() => void onUpdateUser(x.id, { active: true }, `Reactivate ${label}?`)}><CircleCheck size={13}/>Activate</button>}
@@ -2470,7 +2486,7 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
                   : <button className="button" disabled={busy} onClick={() => void onUpdateUser(x.id, { whitelisted: true }, `Add ${label} back to the whitelist?`)}><ShieldCheck size={13}/>Whitelist</button>}
                 <button className="button danger" disabled={busy} onClick={() => void onRemoveUser(x.id, label)}><X size={13}/>Remove user</button>
               </div>
-            </div>
+            </div>}
           </div>;
         })  : <div className="post-entry" style={{ color: '#6f7f93' }}>No users match this filter.</div>}
       </div>
