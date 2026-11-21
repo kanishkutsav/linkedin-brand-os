@@ -69,6 +69,10 @@ jobs:
 
       - name: Validate backend-only RLS for auxiliary tables
         run: |
+          test -s supabase/migrations/20261121090000_user_activity_tracking.sql
+          cmp -s supabase/migrations/20261121090000_user_activity_tracking.sql apps/api/app/db/migrations/20261121090000_user_activity_tracking.sql
+          grep -q "user_activity_days" supabase/migrations/20261121090000_user_activity_tracking.sql
+          grep -q "ENABLE ROW LEVEL SECURITY" supabase/migrations/20261121090000_user_activity_tracking.sql
           test -s supabase/migrations/20261101_security_rls_additional_tables.sql
           grep -q "observability_events" supabase/migrations/20261101_security_rls_additional_tables.sql
           grep -q "user_feedback" supabase/migrations/20261101_security_rls_additional_tables.sql
@@ -114,17 +118,35 @@ jobs:
           scheduled = Path("supabase/migrations/20261101070000_scheduled_run_idempotency.sql")
           approval = Path("supabase/migrations/20261101070100_approval_published_at.sql")
           content = Path("supabase/migrations/20261101070200_content_daily_idempotency.sql")
+          activity = Path("supabase/migrations/20261121090000_user_activity_tracking.sql")
           assert scheduled.read_text() == Path("apps/api/app/db/migrations/20261101070000_scheduled_run_idempotency.sql").read_text()
           assert approval.read_text() == Path("apps/api/app/db/migrations/20261101070100_approval_published_at.sql").read_text()
           assert content.read_text() == Path("apps/api/app/db/migrations/20261101070200_content_daily_idempotency.sql").read_text()
+          assert activity.read_text() == Path("apps/api/app/db/migrations/20261121090000_user_activity_tracking.sql").read_text()
 
           with psycopg.connect("postgresql://postgres:postgres@localhost:5432/brandos") as conn:
+              conn.execute("CREATE ROLE anon")
+              conn.execute("CREATE ROLE authenticated")
+              conn.execute("CREATE ROLE service_role")
+              conn.execute("CREATE TABLE public.auth_users (id integer PRIMARY KEY)")
+              conn.execute("CREATE TABLE public.auth_sessions (id integer PRIMARY KEY, user_id integer REFERENCES public.auth_users(id), created_at timestamptz NOT NULL)")
+              conn.execute("INSERT INTO public.auth_users (id) VALUES (1)")
+              conn.execute("INSERT INTO public.auth_sessions (id, user_id, created_at) VALUES (1, 1, NOW())")
               conn.execute("CREATE TABLE public.agent_runs (id bigint PRIMARY KEY)")
               conn.execute("CREATE TABLE public.approval_requests (id bigint PRIMARY KEY)")
               conn.execute("CREATE TABLE public.content_items (id bigint PRIMARY KEY, profile_id bigint NOT NULL, title varchar(200), topic varchar(300), pillar varchar(100), status varchar(50), created_at timestamptz)")
               conn.execute(scheduled.read_text())
               conn.execute(approval.read_text())
               conn.execute(content.read_text())
+              conn.execute(activity.read_text())
+              activity_columns = conn.execute(
+                  "SELECT column_name FROM information_schema.columns "
+                  "WHERE table_schema='public' AND table_name='user_activity_days'"
+              ).fetchall()
+              assert ("login_count",) in activity_columns
+              assert ("first_login_at",) in activity_columns
+              assert ("last_login_at",) in activity_columns
+              assert conn.execute("SELECT login_count FROM public.user_activity_days WHERE user_id=1").fetchone()[0] == 1
               columns = conn.execute(
                   "SELECT table_name, column_name FROM information_schema.columns "
                   "WHERE table_schema='public' AND "

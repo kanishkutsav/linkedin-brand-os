@@ -18,7 +18,9 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import delete, select, inspect, text, func
+from sqlalchemy import delete, select, inspect, text, func, case
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.research import ResearchService
@@ -40,7 +42,7 @@ from app.models.models import (
     ApprovalRequest, AuditLog, AuthSession, AuthUser, AgentRun, BrandMemory, ContentItem,
     ContentOpportunity, ContentVersion, DurableJob, FeedbackEntry, HistoricalPost,
     LearningEvent, LearningMemory, LinkedInConnection, LinkedInOAuthExchange, LinkedInOAuthState,
-    ResearchSource, UserProfile, VoiceMemory, ObservabilityEvent, UserFeedback, JobSearchCache,
+    ResearchSource, UserProfile, UserActivityDay, VoiceMemory, ObservabilityEvent, UserFeedback, JobSearchCache,
 )
 from app.services.approval import ApprovalService
 from app.services.auth_service import AppUser, AuthService
@@ -594,16 +596,44 @@ async def admin_overview(window: str = "24h", session: AsyncSession = Depends(ge
 
 @app.get("/api/admin/users")
 async def admin_users(session: AsyncSession = Depends(get_session), current_user: AppUser = Depends(require_roles("admin"))):
+    """Admin-only account directory with verified login and recent activity aggregates."""
+    now = datetime.now(timezone.utc)
+    seven_days_ago = now.date() - timedelta(days=6)
+    thirty_days_ago = now.date() - timedelta(days=29)
     users = (await session.execute(select(AuthUser).order_by(AuthUser.created_at.desc()))).scalars().all()
-    return {"items": [{
-        "id": u.id,
-        "email": u.email,
-        "display_name": u.display_name,
-        "role": u.role,
-        "active": u.is_active,
-        "whitelisted": u.is_whitelisted,
-        "created_at": u.created_at,
-    } for u in users]}
+    activity_rows = (await session.execute(
+        select(
+            UserActivityDay.user_id,
+            func.max(UserActivityDay.last_active_at).label("last_active_at"),
+            func.count(case((UserActivityDay.activity_date >= seven_days_ago, 1))).label("active_days_7"),
+            func.count(case((UserActivityDay.activity_date >= thirty_days_ago, 1))).label("active_days_30"),
+            func.coalesce(func.sum(UserActivityDay.login_count), 0).label("total_sessions"),
+            func.min(UserActivityDay.first_login_at).label("first_login_at"),
+            func.max(UserActivityDay.last_login_at).label("last_login_at"),
+        ).group_by(UserActivityDay.user_id)
+    )).all()
+    activity_stats = {row.user_id: row for row in activity_rows}
+    items = []
+    for user in users:
+        activity = activity_stats.get(user.id)
+        last_active = activity.last_active_at if activity else None
+        items.append({
+            "id": user.id,
+            "email": user.email,
+            "display_name": user.display_name,
+            "role": user.role,
+            "active": user.is_active,
+            "whitelisted": user.is_whitelisted,
+            "created_at": user.created_at,
+            "first_login_at": activity.first_login_at if activity else None,
+            "last_login_at": activity.last_login_at if activity else None,
+            "total_sessions": int(activity.total_sessions) if activity else 0,
+            "last_active_at": last_active,
+            "active_now": bool(last_active and last_active >= now - timedelta(minutes=5)),
+            "active_days_7": int(activity.active_days_7) if activity else 0,
+            "active_days_30": int(activity.active_days_30) if activity else 0,
+        })
+    return {"items": items, "activity_tracking_since": "deployment"}
 
 
 @app.post("/api/admin/users")
@@ -1081,6 +1111,36 @@ async def auth_me(
         "display_name": user.display_name,
         "linkedin_url": user.linkedin_url,
     }
+
+
+@app.post("/api/auth/activity")
+async def record_user_activity(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Record a minimal authenticated activity heartbeat; never stores page or content data."""
+    token = request_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    user = await AuthService.get_user_from_token(session, token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    now = datetime.now(timezone.utc)
+    activity_date = now.date()
+    dialect = session.get_bind().dialect.name
+    insert_stmt = pg_insert(UserActivityDay) if dialect == "postgresql" else sqlite_insert(UserActivityDay)
+    statement = insert_stmt.values(
+        user_id=int(user.id),
+        activity_date=activity_date,
+        last_active_at=now,
+    ).on_conflict_do_update(
+        index_elements=["user_id", "activity_date"],
+        set_={"last_active_at": now},
+    )
+    await session.execute(statement)
+    await session.commit()
+    return {"success": True}
 
 
 @app.post("/api/auth/logout")

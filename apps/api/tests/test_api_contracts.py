@@ -19,6 +19,7 @@ class TestAPIContracts(unittest.TestCase):
         }
         manually_authenticated = {
             ("GET", "/api/auth/me"),
+            ("POST", "/api/auth/activity"),
             ("GET", "/api/linkedin/status"),
             ("POST", "/api/linkedin/profile/sync-missing"),
             ("POST", "/api/internal/scheduled-jobs/{job_name}"),

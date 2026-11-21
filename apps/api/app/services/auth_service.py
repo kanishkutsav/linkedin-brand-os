@@ -4,10 +4,12 @@ import secrets
 import re
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import AuthSession, AuthUser, UserProfile
+from app.models.models import AuthSession, AuthUser, UserActivityDay, UserProfile
 
 
 @dataclass
@@ -201,6 +203,29 @@ class AuthService:
             expires_at=expires_at,
         )
         session.add(session_row)
+
+        # Preserve login history independently of auth_sessions, whose rows are
+        # intentionally deleted on logout. The daily rollup stores counts only.
+        login_at = datetime.now(timezone.utc)
+        dialect = session.get_bind().dialect.name
+        insert_stmt = pg_insert(UserActivityDay) if dialect == "postgresql" else sqlite_insert(UserActivityDay)
+        login_statement = insert_stmt.values(
+            user_id=user_row.id,
+            activity_date=login_at.date(),
+            last_active_at=login_at,
+            login_count=1,
+            first_login_at=login_at,
+            last_login_at=login_at,
+        ).on_conflict_do_update(
+            index_elements=["user_id", "activity_date"],
+            set_={
+                "last_active_at": login_at,
+                "login_count": UserActivityDay.login_count + 1,
+                "first_login_at": func.coalesce(UserActivityDay.first_login_at, login_at),
+                "last_login_at": login_at,
+            },
+        )
+        await session.execute(login_statement)
         await session.commit()
         return token
 

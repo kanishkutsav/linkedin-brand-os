@@ -179,6 +179,30 @@ export default function Home() {
   };
 
   useEffect(() => {
+    if (!token) return;
+    let disposed = false;
+    const heartbeat = () => {
+      if (disposed || document.visibilityState !== 'visible') return;
+      const csrf = document.cookie.split('; ').find((part) => part.startsWith('__Host-suvacya-csrf=') || part.startsWith('suvacya-csrf='));
+      const requestHeaders: Record<string, string> = {};
+      if (csrf) requestHeaders['X-CSRF-Token'] = decodeURIComponent(csrf.slice(csrf.indexOf('=') + 1));
+      void fetch(API_BASE + '/api/auth/activity', {
+        method: 'POST',
+        headers: requestHeaders,
+        credentials: 'include',
+      }).catch(() => undefined);
+    };
+    heartbeat();
+    const interval = window.setInterval(heartbeat, 60_000);
+    document.addEventListener('visibilitychange', heartbeat);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', heartbeat);
+    };
+  }, [token]);
+
+  useEffect(() => {
     if (!profileMenuOpen) return;
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
@@ -2344,6 +2368,20 @@ function FeedbackView({ type, setType, subject, setSubject, description, setDesc
 }
 
 function AdminView({ overview, window, onWindowChange, activity, feedback, users, aiProviders, jobProviders, sections, sectionLoading, onToggle, onRefresh, onCreateUser, onUpdateUser, onRemoveUser, adminUserEmail, setAdminUserEmail, adminUserName, setAdminUserName, adminUserSaving, adminUserActionId }: any) {
+  const [userActivityFilter, setUserActivityFilter] = useState('all');
+  const [userSearch, setUserSearch] = useState('');
+  const neverLoggedIn = users.filter((x: any) => !x.last_login_at).length;
+  const activeRecently = users.filter((x: any) => x.last_active_at && new Date(x.last_active_at).getTime() >= Date.now() - 7 * 86400000).length;
+  const activeNow = users.filter((x: any) => x.active_now).length;
+  const filteredUsers = users.filter((x: any) => {
+    const q = userSearch.trim().toLowerCase();
+    if (q && ![x.email, x.display_name, x.role].some((v: any) => String(v || '').toLowerCase().includes(q))) return false;
+    if (userActivityFilter === 'never' && x.last_login_at) return false;
+    if (userActivityFilter === 'active7' && !(x.last_active_at && new Date(x.last_active_at).getTime() >= Date.now() - 7 * 86400000)) return false;
+    if (userActivityFilter === 'inactive30' && !(x.last_active_at && new Date(x.last_active_at).getTime() < Date.now() - 30 * 86400000)) return false;
+    return true;
+  });
+  const formatActivityDate = (value: any) => value ? new Date(value).toLocaleString() : 'Never';
   if (!overview) return <div className="admin-page">
     <div className="page-header"><div><SkeletonBlock width={130} height={10}/><div style={{ marginTop: 10 }}><SkeletonBlock width={310} height={28}/></div><div style={{ marginTop: 9 }}><SkeletonBlock width={520} height={10}/></div></div><SkeletonBlock width={82} height={34} radius={9}/></div>
     <div className="admin-metric-grid">{[1,2,3,4].map((item) => <div className="admin-metric-card" key={item}><SkeletonBlock width="48%" height={10}/><div style={{ marginTop: 15 }}><SkeletonBlock width="35%" height={25}/></div></div>)}</div>
@@ -2384,6 +2422,11 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
           <button className="button primary" onClick={() => void onCreateUser()} disabled={adminUserSaving}><Plus size={14}/>{adminUserSaving ? 'Adding…' : 'Add user'}</button>
         </div>
         <div style={{ color: '#6f7f93', fontSize: 12 }}>Adding a user makes the account active and whitelisted. Existing emails are reactivated and re-whitelisted.</div>
+        <div className="admin-metric-grid" style={{ marginBottom: 8 }}>
+          <div className="admin-metric-card"><div className="admin-metric-top"><span>Active now</span><span className="admin-metric-icon"><Activity size={15}/></span></div><strong>{activeNow}</strong><small>Seen within 5 minutes</small></div>
+          <div className="admin-metric-card"><div className="admin-metric-top"><span>Active in 7 days</span><span className="admin-metric-icon"><UserRound size={15}/></span></div><strong>{activeRecently}</strong><small>Users with recent app activity</small></div>
+          <div className="admin-metric-card"><div className="admin-metric-top"><span>Never logged in</span><span className="admin-metric-icon"><Clock3 size={15}/></span></div><strong>{neverLoggedIn}</strong><small>No recorded login session</small></div>
+        </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <span className="tag">Total · {users.length}</span>
           <span className="tag">Active · {users.filter((x:any) => x.active).length}</span>
@@ -2391,7 +2434,13 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
           <span className="tag">Whitelisted · {users.filter((x:any) => x.whitelisted).length}</span>
           <span className="tag">Not whitelisted · {users.filter((x:any) => !x.whitelisted).length}</span>
         </div>
-        {users.length ? users.map((x:any) => {
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(150px, 220px)', gap: 8 }}>
+          <input className="input" aria-label="Search users" placeholder="Search name, email or role" value={userSearch} onChange={(e) => setUserSearch(e.target.value)} />
+          <select className="input" aria-label="Filter user activity" value={userActivityFilter} onChange={(e) => setUserActivityFilter(e.target.value)}>
+            <option value="all">All activity</option><option value="never">Never logged in</option><option value="active7">Active in last 7 days</option><option value="inactive30">Inactive 30+ days</option>
+          </select>
+        </div>
+        {filteredUsers.length ? filteredUsers.map((x:any) => {
           const busy = adminUserActionId === x.id;
           const label = x.display_name || x.email;
           return <div className="post-entry" key={x.id} style={{ marginTop: 8 }}>
@@ -2402,6 +2451,14 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
                 <div style={{ marginTop: 7, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <span className="tag">Active · {x.active ? 'Yes' : 'No'}</span>
                   <span className="tag">Whitelisted · {x.whitelisted ? 'Yes' : 'No'}</span>
+                  <span className="tag">{x.active_now ? 'Active now' : x.last_active_at ? 'Not active now' : 'No activity yet'}</span>
+                </div>
+                <div style={{ marginTop: 9, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 8, color: '#5f6f86', fontSize: 11 }}>
+                  <div><b>First login</b><br/>{formatActivityDate(x.first_login_at)}</div>
+                  <div><b>Last login</b><br/>{formatActivityDate(x.last_login_at)}</div>
+                  <div><b>Last active</b><br/>{formatActivityDate(x.last_active_at)}</div>
+                  <div><b>Sessions</b><br/>{x.total_sessions || 0}</div>
+                  <div><b>Active days (7d / 30d)</b><br/>{x.active_days_7 || 0} / {x.active_days_30 || 0}</div>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -2415,7 +2472,7 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
               </div>
             </div>
           </div>;
-        }) : <div className="post-entry" style={{ color: '#6f7f93' }}>No users found.</div>}
+        })  : <div className="post-entry" style={{ color: '#6f7f93' }}>No users match this filter.</div>}
       </div>
     </Section>
   </div>;
