@@ -2479,7 +2479,7 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
               <button className="button danger admin-action-button" disabled={busy} onClick={() => void onRemoveUser(x.id, label)}><X size={14}/>Remove user</button>
             </div>
           </article>;
-        })        })  : <div className="post-entry" style={{ color: '#6f7f93' }}>No users match this filter.</div>}
+        })  : <div className="post-entry" style={{ color: '#6f7f93' }}>No users match this filter.</div>}
       </div>
     </Section>
   </div>;
