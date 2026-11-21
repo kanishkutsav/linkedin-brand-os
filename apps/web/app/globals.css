@@ -1471,3 +1471,41 @@ a { color: inherit; }
   body { min-height: 100dvh; }
   .app-shell { min-height: 100dvh; }
 }
+
+
+/* Account Directory mobile overflow fix: use named grids rather than inline column sizing. */
+.admin-user-directory,
+.admin-user-directory > *,
+.admin-user-create-grid,
+.admin-user-filter-grid,
+.admin-user-directory .field { min-width:0; max-width:100%; box-sizing:border-box; }
+.admin-user-directory { display:grid; grid-template-columns:minmax(0,1fr); gap:12px; width:100%; }
+.admin-user-create-grid {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;
+  align-items:end;
+  gap:8px;
+  width:100%;
+}
+.admin-user-create-grid .field { width:100%; }
+.admin-user-create-grid input { width:100%; min-width:0; max-width:100%; box-sizing:border-box; }
+.admin-user-create-grid > button { min-width:0; white-space:nowrap; }
+.admin-user-filter-grid {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,220px);
+  gap:8px;
+  width:100%;
+}
+.admin-user-filter-grid > * { min-width:0; width:100%; max-width:100%; box-sizing:border-box; }
+.admin-users-section .admin-section-body { min-width:0; max-width:100%; }
+.admin-users-section .admin-section-body > .admin-user-directory { width:100%; }
+.admin-users-section .admin-metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); width:100%; }
+@media (max-width:760px) {
+  .admin-user-create-grid { grid-template-columns:minmax(0,1fr); }
+  .admin-user-create-grid > button { width:100%; justify-content:center; }
+  .admin-user-filter-grid { grid-template-columns:minmax(0,1fr); }
+  .admin-user-directory .admin-metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width:380px) {
+  .admin-user-directory .admin-metric-grid { grid-template-columns:minmax(0,1fr); }
+}

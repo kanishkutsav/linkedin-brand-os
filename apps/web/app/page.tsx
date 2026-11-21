@@ -2416,8 +2416,8 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
     <Section id="failures" title="Failed requests" eyebrow="OBSERVABILITY">{activity.length ? activity.slice(0, 30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}><b>{x.activity_type}</b> · {x.failure_category || 'UNKNOWN'} · {x.http_status || '—'} · {x.latency_ms ?? 0}ms<div style={{ marginTop: 4, color: '#6f7f93' }}>Correlation #{x.correlation_id}</div>{x.details && Object.keys(x.details).length > 0 && <div style={{ marginTop: 5, color: '#5f6f86' }}>{JSON.stringify(x.details)}</div>}</div>) : <div className="post-entry" style={{ color: '#6f7f93' }}>No failed requests recorded.</div>}</Section>
     <Section id="feedback" title="Feedback inbox" eyebrow="PRODUCT FEEDBACK">{feedback.length ? feedback.slice(0, 30).map((x:any) => <div className="post-entry" key={x.id} style={{ marginTop: 8 }}><b>{x.type}</b> · {x.subject} · {x.status} · {x.priority}<div style={{ marginTop: 5, color:'#5f6f86' }}>{x.description}</div></div>) : <div className="post-entry" style={{ color: '#6f7f93' }}>No feedback submitted.</div>}</Section>
     <Section id="users" title="Users" eyebrow="ACCOUNT DIRECTORY">
-      <div style={{ display: 'grid', gap: 12 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(180px, 1fr) auto', gap: 8, alignItems: 'end' }}>
+      <div className="admin-user-directory">
+        <div className="admin-user-create-grid">
           <label className="field"><span>Name</span><input aria-label="New user display name" value={adminUserName} onChange={(e) => setAdminUserName(e.target.value)} placeholder="Optional display name" /></label>
           <label className="field"><span>Email</span><input aria-label="New user email address" type="email" value={adminUserEmail} onChange={(e) => setAdminUserEmail(e.target.value)} placeholder="user@example.com" /></label>
           <button className="button primary" onClick={() => void onCreateUser()} disabled={adminUserSaving}><Plus size={14}/>{adminUserSaving ? 'Adding…' : 'Add user'}</button>
@@ -2435,7 +2435,7 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
           <span className="tag">Whitelisted · {users.filter((x:any) => x.whitelisted).length}</span>
           <span className="tag">Not whitelisted · {users.filter((x:any) => !x.whitelisted).length}</span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(150px, 220px)', gap: 8 }}>
+        <div className="admin-user-filter-grid">
           <input className="input" aria-label="Search users" placeholder="Search name, email or role" value={userSearch} onChange={(e) => setUserSearch(e.target.value)} />
           <select className="input" aria-label="Filter user activity" value={userActivityFilter} onChange={(e) => setUserActivityFilter(e.target.value)}>
             <option value="all">All activity</option><option value="never">Never logged in</option><option value="active7">Active in last 7 days</option><option value="inactive30">Inactive 30+ days</option>
