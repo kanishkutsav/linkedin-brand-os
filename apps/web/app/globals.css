@@ -1372,3 +1372,102 @@ a { color: inherit; }
  .admin-users-section .admin-section-body > div > .post-entry > div:first-child > div:last-child .button { width:100%; justify-content:center; min-width:0; padding-inline:6px; font-size:10px; }
  .admin-users-section .admin-section-body > div > .post-entry > div:first-child > div:last-child .button:last-child { grid-column:1 / -1; }
 }
+
+
+/* Mobile-first usability and PWA safe-area refinements (additive overrides). */
+@media (max-width: 1100px) {
+  .page { min-width: 0; }
+  .panel, .settings-card, .research-card, .admin-section-card { min-width: 0; }
+  .studio-grid, .section-grid { min-width: 0; }
+}
+
+@media (max-width: 760px) {
+  html, body { width: 100%; max-width: 100%; overflow-x: clip; }
+  .app-shell, .main-shell, main, .page { min-width: 0; max-width: 100%; }
+  .page > *, .panel > *, .settings-card > *, .admin-page > * { min-width: 0; }
+  .page-header { flex-wrap: wrap; align-items: flex-start; }
+  .page-header > div:first-child { min-width: 0; flex: 1 1 100%; }
+  .page-header > .button, .page-header > button { min-height: 44px; }
+  .panel, .settings-card, .research-card { overflow-wrap: anywhere; }
+  .panel-head { flex-wrap: wrap; align-items: flex-start; gap: 10px; }
+  .panel-head > * { min-width: 0; }
+  .button, button.button, a.button { min-height: 44px; }
+  .icon-button, .profile-trigger { min-width: 44px; min-height: 44px; }
+  .input, input.input, select.input, textarea.input, .textarea, input, select, textarea {
+    max-width: 100%;
+    font-size: 16px;
+  }
+  .form-group, .field { min-width: 0; }
+  .form-group input, .form-group select, .form-group textarea, .field input, .field select {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+  }
+  .hero, .hero-grid, .metrics, .queue-layout, .research-grid, .studio-grid,
+  .settings-stack, .admin-metric-grid, .admin-section-card { min-width: 0; }
+  .hero-actions { width: 100%; }
+  .metric-card, .admin-metric-card { min-width: 0; overflow-wrap: anywhere; }
+  .metric-value, .admin-metric-card strong { overflow-wrap: anywhere; }
+  .research-top { min-width: 0; }
+  .research-title, .research-angle, .research-rationale, .evidence-box,
+  .post-entry, .queue-preview { overflow-wrap: anywhere; }
+  .queue-tools, .filter-row { min-width: 0; max-width: 100%; }
+  .filter-row { overflow-x: auto; overscroll-behavior-x: contain; }
+  .review-actions .button { white-space: normal; }
+  .studio-form, .live-preview { min-width: 0; }
+  .live-preview { overflow-wrap: anywhere; }
+  .admin-directory-counts { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
+  .admin-directory-count { flex: 0 0 auto; }
+  .admin-directory-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .admin-directory-search, .admin-directory-filter { width: 100%; min-width: 0; min-height: 44px; }
+  .admin-section-body { min-width: 0; overflow-wrap: anywhere; }
+  .admin-section-body > div:first-child { min-width: 0; }
+  .admin-users-section .admin-section-body > div > div:first-child {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .admin-users-section .admin-section-body input,
+  .admin-users-section .admin-section-body select { width: 100%; min-width: 0; }
+  .admin-users-section .admin-section-body > div > div:first-child > button { width: 100%; }
+  .mobile-bottom-nav {
+    min-height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
+    padding-bottom: calc(7px + env(safe-area-inset-bottom));
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+  }
+  .mobile-nav-item { min-height: 48px; min-width: 0; }
+  .mobile-nav-item span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: clamp(8px, 2.5vw, 10px);
+  }
+  .mobile-more-sheet {
+    max-height: min(72dvh, 560px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: calc(13px + env(safe-area-inset-bottom));
+  }
+  .install-guide-backdrop { padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); }
+  .install-guide { max-height: 85dvh; overflow-y: auto; overscroll-behavior: contain; }
+  .legal-page { padding: 18px 12px calc(24px + env(safe-area-inset-bottom)); }
+  .legal-shell { padding: 20px 16px; border-radius: 16px; overflow-wrap: anywhere; }
+  .legal-shell h1 { font-size: clamp(26px, 7vw, 34px); }
+  .legal-shell h2 { font-size: 18px; }
+  .legal-shell p, .legal-shell li { font-size: 13px; }
+}
+
+@media (max-width: 380px) {
+  .page { padding-left: 10px; padding-right: 10px; }
+  .topbar { padding-left: 10px; padding-right: 10px; }
+  .mobile-bottom-nav { padding-left: 4px; padding-right: 4px; }
+  .mobile-nav-item { border-radius: 9px; }
+  .admin-metric-grid { gap: 7px; }
+  .admin-metric-card { padding: 10px; }
+  .admin-metric-card small { overflow-wrap: anywhere; }
+}
+
+@media (display-mode: standalone) {
+  body { min-height: 100dvh; }
+  .app-shell { min-height: 100dvh; }
+}
