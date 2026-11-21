@@ -1509,12 +1509,10 @@ function ApprovalWorkspace(props: any) {
         </div>
         <div className="queue-items">
           {queue.length ? queue.map((item: ApprovalItem) => (
-            <button key={item.id} className={`queue-item ${selectedId === item.id ? 'selected' : ''}`} onClick={() => { setSelectedId(item.id); setMobileReviewOpen(true); }}>
-              <div className="queue-item-top"><span className="queue-id">POST #{item.id}</span><StatusPill status={item.status}/></div>
-              <div className="queue-action">{item.action_type}</div>
-              <div className="queue-preview">{item.content.slice(0, 88)}{item.content.length > 88 ? '…' : ''}</div>
-            </button>
-          )) : <div className="empty-state"><div className="empty-icon"><FileText size={18}/></div><strong>Queue is clear</strong><span>Create a draft or generate content to start the review flow.</span></div>}
+            <div className={`queue-entry ${mobileReviewOpen && selectedId === item.id ? 'expanded' : ''}`} key={item.id}>
+              <button type="button" className={`queue-item ${selectedId === item.id ? 'selected' : ''}`} aria-expanded={mobileReviewOpen && selectedId === item.id} onClick={() => { if (selectedId === item.id) setMobileReviewOpen((open) => !open); else { setSelectedId(item.id); setMobileReviewOpen(true); } }}>
+                <div className="queue-item-top"><span className="queue-id">POST #{item.id}</span><span className="queue-item-trailing"><StatusPill status={item.status}/><ChevronDown size={17} className={`accordion-chevron ${mobileReviewOpen && selectedId === item.id ? 'open' : ''}`}/></span></div>
+                <div clas )) : <div className="empty-state"><div className="empty-icon"><FileText size={18}/></div><strong>Queue is clear</strong><span>Create a draft or generate content to start the review flow.</span></div>}
         </div>
       </div>
       <div className={`review-pane ${mobileReviewOpen ? 'mobile-review-open' : ''}`}>
