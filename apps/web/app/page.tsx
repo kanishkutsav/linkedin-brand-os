@@ -2444,7 +2444,7 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
           </select>
         </div>
         <div className="admin-user-list">
-        {filteredUsers.length ? filteredUsers.map((x:any) => {
+        {filteredUsers.map((x:any) => {
           const busy = adminUserActionId === x.id;
           const label = x.display_name || x.email;
           const initials = String(x.display_name || x.email || 'U').split(/[^a-zA-Z0-9]+/).filter(Boolean).slice(0,2).map((part:string) => part[0]).join('').toUpperCase();
@@ -2479,7 +2479,8 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
               <button className="button danger admin-action-button" disabled={busy} onClick={() => void onRemoveUser(x.id, label)}><X size={14}/>Remove user</button>
             </div>
           </article>;
-        })  : <div className="post-entry" style={{ color: '#6f7f93' }}>No users match this filter.</div>}
+        })}
+        {!filteredUsers.length && <div className="post-entry" style={{ color: '#6f7f93' }}>No users match this filter.</div>}
       </div>
     </Section>
   </div>;
