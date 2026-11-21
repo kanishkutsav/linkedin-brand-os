@@ -2390,7 +2390,7 @@ function AdminView({ overview, window, onWindowChange, activity, feedback, users
 
   const Section = ({ id, title, eyebrow, children }: any) => {
     const open = !!sections[id];
-    return <section className="panel admin-section-card">
+    return <section className={`panel admin-section-card ${id === 'users' ? 'admin-users-section' : ''}`}>
       <button type="button" onClick={() => onToggle(id)} aria-expanded={open} className="admin-section-toggle">
         <span>{eyebrow && <span className="admin-section-kicker">{eyebrow}</span>}<span className="admin-section-title">{title}</span></span>
         <ChevronDown size={17} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 160ms ease', flexShrink: 0 }} />
